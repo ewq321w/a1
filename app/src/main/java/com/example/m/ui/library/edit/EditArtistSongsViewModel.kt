@@ -1,0 +1,85 @@
+package com.example.m.ui.library.edit
+
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.m.data.database.ArtistDao
+import com.example.m.data.database.ArtistWithSongs
+import com.example.m.data.database.Song
+import com.example.m.data.repository.LibraryRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class EditArtistSongsViewModel @Inject constructor(
+    savedStateHandle: SavedStateHandle,
+    private val artistDao: ArtistDao,
+    private val libraryRepository: LibraryRepository // +++ Add repository
+) : ViewModel() {
+
+    private val artistId: Long = checkNotNull(savedStateHandle["artistId"])
+
+    private val _artistWithSongs = MutableStateFlow<ArtistWithSongs?>(null)
+    val artistWithSongs: StateFlow<ArtistWithSongs?> = _artistWithSongs
+
+    var itemPendingDeletion by mutableStateOf<Song?>(null)
+        private set
+
+    init {
+        viewModelScope.launch {
+            artistDao.getArtistWithSongs(artistId).collect {
+                _artistWithSongs.value = it
+            }
+        }
+    }
+
+    fun onSongMoved(from: Int, to: Int) {
+        _artistWithSongs.update { currentArtistWithSongs ->
+            currentArtistWithSongs?.let { artistWithSongs ->
+                val mutableSongs = artistWithSongs.songs.toMutableList()
+                if (from >= 0 && from < mutableSongs.size && to >= 0 && to < mutableSongs.size) {
+                    val movedSong = mutableSongs.removeAt(from)
+                    mutableSongs.add(to, movedSong)
+                    artistWithSongs.copy(songs = mutableSongs)
+                } else {
+                    artistWithSongs
+                }
+            }
+        }
+    }
+
+    fun saveChanges() {
+        val currentSongs = _artistWithSongs.value?.songs ?: return
+
+        viewModelScope.launch {
+            currentSongs.forEachIndexed { index, song ->
+                artistDao.updateArtistSongPosition(artistId, song.songId, index)
+            }
+        }
+    }
+
+    fun onSongRemoveClicked(song: Song) {
+        itemPendingDeletion = song
+    }
+
+    fun confirmSongDeletion() {
+        itemPendingDeletion?.let { songToDelete ->
+            viewModelScope.launch {
+                libraryRepository.deleteSongFromDeviceAndDb(songToDelete)
+                // The flow will automatically update the list
+                itemPendingDeletion = null
+            }
+        }
+    }
+
+    fun cancelSongDeletion() {
+        itemPendingDeletion = null
+    }
+}
