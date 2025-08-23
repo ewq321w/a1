@@ -7,17 +7,19 @@ import org.schabi.newpipe.extractor.downloader.Downloader
 import org.schabi.newpipe.extractor.localization.Localization
 import java.util.Locale
 import javax.inject.Inject
+import javax.inject.Named
 
 @HiltAndroidApp
 class MainApplication : Application() {
 
     @Inject
-    lateinit var downloader: Downloader // Inject the downloader from our NetworkModule
+    @Named("NewPipe")
+    lateinit var downloader: Downloader
 
     override fun onCreate() {
         super.onCreate()
         val defaultLocale = Locale.getDefault()
         val localization = Localization(defaultLocale.country, defaultLocale.language)
-        NewPipe.init(downloader, localization) // Use the injected downloader
+        NewPipe.init(downloader, localization)
     }
 }

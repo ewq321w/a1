@@ -63,14 +63,15 @@ fun PlaylistTabContent(
 
                 PlaylistItem(
                     playlistWithSongs = p,
-                    finalThumbnailUrls = playlistSummary.finalThumbnailUrls,
+                    allThumbnailUrls = playlistSummary.allThumbnailUrls,
                     onClick = rememberedOnClick,
                     onPlay = rememberedOnPlay,
                     onShuffle = rememberedOnShuffle,
                     onToggleAutoDownload = rememberedOnToggleAutoDownload,
                     onRemoveDownloads = rememberedOnRemoveDownloads,
                     onEdit = rememberedOnEdit,
-                    onDelete = rememberedOnDelete
+                    onDelete = rememberedOnDelete,
+                    viewModel = viewModel
                 )
             }
         }
@@ -80,14 +81,15 @@ fun PlaylistTabContent(
 @Composable
 fun PlaylistItem(
     playlistWithSongs: PlaylistWithSongs,
-    finalThumbnailUrls: List<String>,
+    allThumbnailUrls: List<String>,
     onClick: () -> Unit,
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
     onToggleAutoDownload: () -> Unit,
     onRemoveDownloads: () -> Unit,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    viewModel: LibraryViewModel
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
@@ -110,8 +112,9 @@ fun PlaylistItem(
         },
         leadingContent = {
             CompositeThumbnailImage(
-                urls = finalThumbnailUrls,
+                urls = allThumbnailUrls,
                 contentDescription = "Playlist thumbnail for ${playlistWithSongs.playlist.name}",
+                processUrls = viewModel::processThumbnails,
                 modifier = Modifier.size(50.dp)
             )
         },

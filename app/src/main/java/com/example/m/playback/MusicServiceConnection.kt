@@ -66,13 +66,14 @@ class MusicServiceConnection @Inject constructor(
     private var currentSongId: Long? = null
     private var isCurrentSongLogged = false
     private var isRestored = false
+    private var restoreJob: Job? = null
 
     init {
         mediaBrowserFuture.addListener({
             val browser = this.mediaBrowser ?: return@addListener
 
             if (!isRestored) {
-                coroutineScope.launch {
+                restoreJob = coroutineScope.launch {
                     restoreQueue()
                     isRestored = true
                 }
@@ -96,6 +97,12 @@ class MusicServiceConnection @Inject constructor(
                         val song = if (mediaId.startsWith("http")) songDao.getSongByUrl(mediaId) else songDao.getSongByFilePath(mediaId)
                         currentSongId = song?.songId
                     }
+
+                    if (mediaItem != null && mediaItem.mediaMetadata.artworkData == null) {
+                        coroutineScope.launch {
+                            updateArtworkData(mediaItem)
+                        }
+                    }
                 }
 
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -112,7 +119,33 @@ class MusicServiceConnection @Inject constructor(
         }, MoreExecutors.directExecutor())
     }
 
+    private suspend fun updateArtworkData(mediaItem: MediaItem) {
+        val browser = this.mediaBrowser ?: return
+        val itemIndex = browser.currentMediaItemIndex
+        if (itemIndex == C.INDEX_UNSET) return
+
+        if (browser.getMediaItemAt(itemIndex).mediaId != mediaItem.mediaId) return
+
+        val artworkUri = mediaItem.mediaMetadata.artworkUri?.toString()
+        val artworkData = getCroppedSquareBitmap(artworkUri)
+
+        if (artworkData != null) {
+            val newMetadata = mediaItem.mediaMetadata.buildUpon()
+                .setArtworkData(artworkData, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+                .build()
+            val newItem = mediaItem.buildUpon().setMediaMetadata(newMetadata).build()
+
+            withContext(Dispatchers.Main) {
+                if (browser.currentMediaItemIndex == itemIndex) {
+                    browser.replaceMediaItem(itemIndex, newItem)
+                    Log.d(TAG, "Artwork data updated for notification.")
+                }
+            }
+        }
+    }
+
     private suspend fun restoreQueue() {
+        yield()
         val browser = this.mediaBrowser ?: return
         if (browser.mediaItemCount > 0) return
 
@@ -121,26 +154,46 @@ class MusicServiceConnection @Inject constructor(
             playbackStateDao.clearState()
             return
         }
-        Log.d(TAG, "Restoring queue with ${savedState.queue.size} items.")
+        Log.d(TAG, "Restoring queue...")
 
-        val mediaItems = withContext(Dispatchers.IO) {
-            savedState.queue.mapNotNull { url ->
+        val startIndex = savedState.currentItemIndex.coerceIn(0, savedState.queue.size - 1)
+        val currentItemUrl = savedState.queue[startIndex]
+        val currentItemObject = songDao.getSongByUrl(currentItemUrl) ?: songDao.getSongByFilePath(currentItemUrl)
+        ?: StreamInfoItem(0, currentItemUrl, currentItemUrl, StreamType.AUDIO_STREAM)
+
+        val currentMediaItem = withContext(Dispatchers.IO) { createMediaItemForItem(currentItemObject) }
+        if (currentMediaItem != null) {
+            browser.setMediaItem(currentMediaItem, savedState.currentPosition)
+            browser.prepare()
+            Log.d(TAG, "Restored current song. Loading rest of queue in background.")
+        } else {
+            Log.e(TAG, "Failed to restore current song, clearing state.")
+            playbackStateDao.clearState()
+            return
+        }
+
+        coroutineScope.launch(Dispatchers.IO) {
+            val itemsBefore = savedState.queue.subList(0, startIndex)
+            val itemsAfter = savedState.queue.subList(startIndex + 1, savedState.queue.size)
+
+            val mediaItemsBefore = itemsBefore.mapNotNull { url ->
                 val item = songDao.getSongByUrl(url) ?: songDao.getSongByFilePath(url)
                 ?: StreamInfoItem(0, url, url, StreamType.AUDIO_STREAM)
                 createMediaItemForItem(item)
             }
-        }
 
-        if (mediaItems.isNotEmpty()) {
-            val startIndex = savedState.currentItemIndex.coerceIn(0, mediaItems.size - 1)
-            browser.setMediaItems(mediaItems, startIndex, savedState.currentPosition)
-            browser.prepare()
-            if (savedState.isPlaying) {
-                browser.play()
+            val mediaItemsAfter = itemsAfter.mapNotNull { url ->
+                val item = songDao.getSongByUrl(url) ?: songDao.getSongByFilePath(url)
+                ?: StreamInfoItem(0, url, url, StreamType.AUDIO_STREAM)
+                createMediaItemForItem(item)
             }
-            Log.d(TAG, "Finished restoring queue.")
-        } else {
-            playbackStateDao.clearState()
+
+            withContext(Dispatchers.Main) {
+                browser.addMediaItems(0, mediaItemsBefore)
+                browser.addMediaItems(mediaItemsAfter)
+                Log.d(TAG, "Finished restoring rest of queue.")
+            }
+            savePlaybackState()
         }
     }
 
@@ -194,6 +247,10 @@ class MusicServiceConnection @Inject constructor(
     }
 
     suspend fun playSingleSong(item: Any) {
+        if (restoreJob?.isActive == true) {
+            restoreJob?.cancel()
+            Log.d(TAG, "Cancelling restore job due to new playback request.")
+        }
         val browser = this.mediaBrowser ?: return
         val mediaItem = withContext(Dispatchers.IO) { createMediaItemForItem(item) } ?: return
 
@@ -204,6 +261,10 @@ class MusicServiceConnection @Inject constructor(
     }
 
     suspend fun playSongList(items: List<Any>, startIndex: Int) {
+        if (restoreJob?.isActive == true) {
+            restoreJob?.cancel()
+            Log.d(TAG, "Cancelling restore job due to new playback request.")
+        }
         val browser = this.mediaBrowser ?: return
         if (items.isEmpty()) return
 
@@ -286,12 +347,10 @@ class MusicServiceConnection @Inject constructor(
     }
 
     private suspend fun createMediaMetadata(song: Song): MediaMetadata {
-        val artworkData = getCroppedSquareBitmap(song.thumbnailUrl)
         return MediaMetadata.Builder()
             .setTitle(song.title)
             .setArtist(song.artist)
             .setArtworkUri(song.thumbnailUrl.toUri())
-            .setArtworkData(artworkData, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
             .build()
     }
 
@@ -386,7 +445,7 @@ class MusicServiceConnection @Inject constructor(
                 }
 
                 saveCounter++
-                if (saveCounter >= 10) { // Save state every 10 seconds
+                if (saveCounter >= 5) {
                     savePlaybackState()
                     saveCounter = 0
                 }

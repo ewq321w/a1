@@ -2,14 +2,13 @@ package com.example.m.ui.library.tabs
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,6 +24,7 @@ import com.example.m.ui.library.LibraryArtistItem
 import com.example.m.ui.library.LibraryViewModel
 import com.example.m.ui.library.components.CompositeThumbnailImage
 import com.example.m.ui.library.components.EmptyStateMessage
+import com.example.m.ui.library.components.FolderWithThumbnails
 
 @Composable
 fun ArtistsTabContent(
@@ -61,15 +61,20 @@ fun ArtistsTabContent(
                             onEdit = { onEditArtistSongs(artist.artistId) },
                             onToggleAutoDownload = { viewModel.toggleAutoDownloadForArtist(artist) },
                             groupAction = "Move to group..." to { viewModel.prepareToMoveArtist(artist) },
-                            onHideArtist = { viewModel.hideArtist(artist) }
+                            onHideArtist = { viewModel.hideArtist(artist) },
+                            processUrls = viewModel::processThumbnails
                         )
                     }
                     is LibraryArtistItem.GroupItem -> {
+                        val group = libraryItem.group
                         GroupItem(
-                            group = libraryItem.group,
-                            onClick = { onGoToArtistGroup(libraryItem.group.groupId) },
-                            onRenameClick = { viewModel.prepareToRenameGroup(libraryItem.group) },
-                            onDeleteClick = { viewModel.itemPendingDeletion.value = DeletableItem.DeletableArtistGroup(libraryItem.group) }
+                            group = group,
+                            thumbnailUrls = libraryItem.thumbnailUrls,
+                            onClick = { onGoToArtistGroup(group.groupId) },
+                            onPlayClick = { viewModel.playArtistGroup(group) },
+                            onShuffleClick = { viewModel.shuffleArtistGroup(group) },
+                            onRenameClick = { viewModel.prepareToRenameGroup(group) },
+                            onDeleteClick = { viewModel.itemPendingDeletion.value = DeletableItem.DeletableArtistGroup(group) }
                         )
                     }
                 }
@@ -86,6 +91,7 @@ fun ArtistItem(
     onShuffle: () -> Unit,
     onEdit: () -> Unit,
     onToggleAutoDownload: () -> Unit,
+    processUrls: suspend (List<String>) -> List<String>,
     groupAction: Pair<String, () -> Unit>? = null,
     onHideArtist: (() -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -107,8 +113,9 @@ fun ArtistItem(
         },
         leadingContent = {
             CompositeThumbnailImage(
-                urls = artistForList.finalThumbnailUrls,
+                urls = artistForList.allThumbnailUrls,
                 contentDescription = "Thumbnail for ${artist.name}",
+                processUrls = processUrls,
                 modifier = Modifier.size(50.dp)
             )
         },
@@ -152,7 +159,10 @@ fun ArtistItem(
 @Composable
 fun GroupItem(
     group: ArtistGroup,
+    thumbnailUrls: List<String>,
     onClick: () -> Unit,
+    onPlayClick: () -> Unit,
+    onShuffleClick: () -> Unit,
     onRenameClick: () -> Unit,
     onDeleteClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -162,9 +172,8 @@ fun GroupItem(
     ListItem(
         headlineContent = { Text(group.name, fontWeight = FontWeight.Bold) },
         leadingContent = {
-            Icon(
-                imageVector = Icons.Default.Folder,
-                contentDescription = "Group folder icon",
+            FolderWithThumbnails(
+                urls = thumbnailUrls,
                 modifier = Modifier.size(50.dp)
             )
         },
@@ -174,6 +183,15 @@ fun GroupItem(
                     Icon(Icons.Default.MoreVert, contentDescription = "More options")
                 }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                    DropdownMenuItem(text = { Text("Play") }, onClick = {
+                        onPlayClick()
+                        showMenu = false
+                    })
+                    DropdownMenuItem(text = { Text("Shuffle") }, onClick = {
+                        onShuffleClick()
+                        showMenu = false
+                    })
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                     DropdownMenuItem(text = { Text("Rename") }, onClick = {
                         onRenameClick()
                         showMenu = false

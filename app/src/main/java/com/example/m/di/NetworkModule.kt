@@ -16,6 +16,7 @@ import org.schabi.newpipe.extractor.downloader.Response
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import javax.inject.Named
 import javax.inject.Singleton
 
 @Module
@@ -24,15 +25,15 @@ object NetworkModule {
 
     @Singleton
     @Provides
+    @Named("NewPipe")
     fun provideOkHttpClient(
-        @ApplicationContext context: Context // Inject the app context
+        @ApplicationContext context: Context
     ): OkHttpClient {
-        // THE FIX: Add a persistent cache to our network client.
         val cacheSize = 10L * 1024 * 1024 // 10 MB
         val cache = Cache(File(context.cacheDir, "http_cache"), cacheSize)
 
         return OkHttpClient.Builder()
-            .cache(cache) // Add the cache
+            .cache(cache)
             .readTimeout(30, TimeUnit.SECONDS)
             .connectTimeout(30, TimeUnit.SECONDS)
             .addInterceptor { chain ->
@@ -58,7 +59,8 @@ object NetworkModule {
 
     @Singleton
     @Provides
-    fun provideDownloader(okHttpClient: OkHttpClient): Downloader {
+    @Named("NewPipe")
+    fun provideDownloader(@Named("NewPipe") okHttpClient: OkHttpClient): Downloader {
         return object : Downloader() {
             @Throws(IOException::class)
             override fun execute(request: Request): Response {

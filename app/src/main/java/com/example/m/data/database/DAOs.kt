@@ -171,6 +171,13 @@ interface PlaylistDao {
     @Query("UPDATE playlist_songs SET customOrderPosition = :position WHERE playlistId = :playlistId AND songId = :songId")
     suspend fun updateSongPositionInPlaylist(playlistId: Long, songId: Long, position: Int)
 
+    @Transaction
+    suspend fun updateSongOrder(playlistId: Long, songs: List<Song>) {
+        songs.forEachIndexed { index, song ->
+            updateSongPositionInPlaylist(playlistId, song.songId, index)
+        }
+    }
+
     @Query("SELECT IFNULL(MAX(customOrderPosition), -1) FROM playlist_songs WHERE playlistId = :playlistId")
     suspend fun getMaxPlaylistSongPosition(playlistId: Long): Int
 
@@ -215,6 +222,19 @@ interface ListeningHistoryDao {
 
     @Query("SELECT COUNT(*) FROM listening_history WHERE songId = :songId")
     suspend fun getHistoryCountForSong(songId: Long): Int
+
+    @Query("DELETE FROM listening_history")
+    suspend fun clearAllHistory()
+
+    @Query("""
+        DELETE FROM listening_history
+        WHERE logId NOT IN (
+            SELECT logId FROM listening_history
+            ORDER BY timestamp DESC
+            LIMIT :keepCount
+        )
+    """)
+    suspend fun clearHistoryExceptLast(keepCount: Int)
 }
 
 @Dao
@@ -263,8 +283,8 @@ interface ArtistDao {
     @Query("SELECT * FROM artists WHERE name = :name LIMIT 1")
     suspend fun getArtistByName(name: String): Artist?
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertArtistSongCrossRef(crossRef: ArtistSongCrossRef)
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertArtistSongCrossRef(crossRef: ArtistSongCrossRef)
 
     fun getArtistWithSongs(artistId: Long): Flow<ArtistWithSongs?> {
         return getArtistWithSongsMapSortedByCustom(artistId).map { artistSongsMap ->
@@ -288,6 +308,13 @@ interface ArtistDao {
 
     @Query("UPDATE artist_song_cross_ref SET customOrderPosition = :position WHERE artistId = :artistId AND songId = :songId")
     suspend fun updateArtistSongPosition(artistId: Long, songId: Long, position: Int)
+
+    @Transaction
+    suspend fun updateSongOrder(artistId: Long, songs: List<Song>) {
+        songs.forEachIndexed { index, song ->
+            updateArtistSongPosition(artistId, song.songId, index)
+        }
+    }
 
     @Transaction
     @Query("""
@@ -334,7 +361,7 @@ interface ArtistDao {
     @Query("""
         SELECT S.* FROM songs AS S
         INNER JOIN artist_song_cross_ref AS A_S ON S.songId = A_S.songId
-        WHERE A_S.artistId = :artistId
+        WHERE A_S.artistId = :artistId AND S.isInLibrary = 1
         ORDER BY A_S.customOrderPosition ASC
     """)
     suspend fun getSongsForArtistSortedByCustom(artistId: Long): List<Song>
@@ -367,6 +394,10 @@ interface ArtistGroupDao {
     @Transaction
     @Query("SELECT * FROM artist_groups WHERE groupId = :groupId")
     fun getGroupWithArtists(groupId: Long): Flow<ArtistGroupWithArtists?>
+
+    @Transaction
+    @Query("SELECT * FROM artist_groups WHERE groupId = :groupId")
+    suspend fun getGroupWithArtistsOnce(groupId: Long): ArtistGroupWithArtists?
 
     @Query("SELECT * FROM artist_groups ORDER BY name ASC")
     fun getAllGroups(): Flow<List<ArtistGroup>>

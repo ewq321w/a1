@@ -10,6 +10,7 @@ import com.example.m.data.database.PlaylistDao
 import com.example.m.data.database.PlaylistWithSongs
 import com.example.m.data.database.Song
 import com.example.m.data.database.SongDao
+import com.example.m.managers.ThumbnailProcessor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,7 +22,8 @@ import javax.inject.Inject
 class EditPlaylistViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val playlistDao: PlaylistDao,
-    private val songDao: SongDao
+    private val songDao: SongDao,
+    private val thumbnailProcessor: ThumbnailProcessor
 ) : ViewModel() {
 
     private val playlistId: Long = checkNotNull(savedStateHandle["playlistId"])
@@ -29,9 +31,10 @@ class EditPlaylistViewModel @Inject constructor(
     private val _playlistWithSongs = MutableStateFlow<PlaylistWithSongs?>(null)
     val playlistWithSongs: StateFlow<PlaylistWithSongs?> = _playlistWithSongs
 
-    // +++ ADD STATE TO TRACK THE SONG PENDING REMOVAL +++
     var songPendingRemoval by mutableStateOf<Song?>(null)
         private set
+
+    suspend fun processThumbnails(urls: List<String>) = thumbnailProcessor.process(urls)
 
     init {
         viewModelScope.launch {
@@ -61,46 +64,31 @@ class EditPlaylistViewModel @Inject constructor(
     }
 
     fun saveChanges(newName: String) {
-        val currentPlaylist = _playlistWithSongs.value?.playlist ?: return
-        val currentSongs = _playlistWithSongs.value?.songs ?: return
+        val currentPlaylistWithSongs = _playlistWithSongs.value ?: return
+        val currentPlaylist = currentPlaylistWithSongs.playlist
+        val currentSongs = currentPlaylistWithSongs.songs
 
         viewModelScope.launch {
             if (currentPlaylist.name != newName) {
                 playlistDao.updatePlaylist(currentPlaylist.copy(name = newName))
             }
-
-            currentSongs.forEachIndexed { index, song ->
-                playlistDao.updateSongPositionInPlaylist(playlistId, song.songId, index)
-            }
+            playlistDao.updateSongOrder(playlistId, currentSongs)
         }
     }
 
-    // --- NEW FUNCTIONS TO HANDLE THE CONFIRMATION FLOW ---
-
-    /**
-     * Called when the user clicks the remove icon on a song.
-     * This sets the state to show the confirmation dialog.
-     */
     fun onRemoveSongClicked(song: Song) {
         songPendingRemoval = song
     }
 
-    /**
-     * Called when the user confirms the removal in the dialog.
-     */
     fun confirmSongRemoval() {
         songPendingRemoval?.let { songToRemove ->
             viewModelScope.launch {
                 playlistDao.deleteSongFromPlaylist(playlistId, songToRemove.songId)
-                // Flow will automatically update the list, so we just hide the dialog
                 songPendingRemoval = null
             }
         }
     }
 
-    /**
-     * Called when the user dismisses the confirmation dialog.
-     */
     fun cancelSongRemoval() {
         songPendingRemoval = null
     }

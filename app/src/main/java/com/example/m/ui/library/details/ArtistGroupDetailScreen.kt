@@ -118,7 +118,8 @@ fun ArtistGroupDetailScreen(
                         onEdit = { onEditArtistSongs(artist.artistId) },
                         onToggleAutoDownload = { viewModel.toggleAutoDownloadForArtist(artist) },
                         groupAction = "Remove from group" to { viewModel.removeArtistFromGroup(artist) },
-                        onHideArtist = { viewModel.hideArtist(artist) }
+                        onHideArtist = { viewModel.hideArtist(artist) },
+                        processUrls = viewModel::processThumbnails
                     )
                 }
             }

@@ -2,20 +2,18 @@ package com.example.m.ui.library
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import coil.ImageLoader
-import coil.request.ImageRequest
 import com.example.m.data.PreferencesManager
 import com.example.m.data.database.*
 import com.example.m.data.repository.LibraryRepository
 import com.example.m.download.DownloadService
 import com.example.m.managers.PlaylistManager
+import com.example.m.managers.ThumbnailProcessor
 import com.example.m.playback.MusicServiceConnection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -23,17 +21,16 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import java.io.File
-import java.nio.ByteBuffer
 import javax.inject.Inject
 
 data class ArtistForList(
     val artist: Artist,
-    val finalThumbnailUrls: List<String>
+    val allThumbnailUrls: List<String>
 )
 
 data class PlaylistSummary(
     val playlistWithSongs: PlaylistWithSongs,
-    val finalThumbnailUrls: List<String>
+    val allThumbnailUrls: List<String>
 )
 
 sealed interface DeletableItem {
@@ -63,12 +60,12 @@ class LibraryViewModel @Inject constructor(
     private val libraryRepository: LibraryRepository,
     private val musicServiceConnection: MusicServiceConnection,
     @ApplicationContext private val context: Context,
-    private val imageLoader: ImageLoader,
     private val playlistDao: PlaylistDao,
     private val songDao: SongDao,
     private val artistDao: ArtistDao,
     private val artistGroupDao: ArtistGroupDao,
-    private val playlistManager: PlaylistManager
+    private val playlistManager: PlaylistManager,
+    private val thumbnailProcessor: ThumbnailProcessor
 ) : ViewModel() {
 
     private val _selectedView = MutableStateFlow(preferencesManager.lastLibraryView)
@@ -108,18 +105,16 @@ class LibraryViewModel @Inject constructor(
     private val _navigateToArtist = MutableSharedFlow<Long>()
     val navigateToArtist: SharedFlow<Long> = _navigateToArtist.asSharedFlow()
 
+    suspend fun processThumbnails(urls: List<String>) = thumbnailProcessor.process(urls)
+
     @OptIn(ExperimentalCoroutinesApi::class)
     val playlists: StateFlow<List<PlaylistSummary>> = libraryRepository.getPlaylistsWithSongs()
-        .mapLatest { playlistsWithSongs ->
-            coroutineScope {
-                playlistsWithSongs.map { pws ->
-                    async {
-                        PlaylistSummary(
-                            playlistWithSongs = pws,
-                            finalThumbnailUrls = getFinalThumbnails(pws.songs.map { it.thumbnailUrl })
-                        )
-                    }
-                }.awaitAll()
+        .map { playlistsWithSongs ->
+            playlistsWithSongs.map { pws ->
+                PlaylistSummary(
+                    playlistWithSongs = pws,
+                    allThumbnailUrls = pws.songs.map { it.thumbnailUrl }
+                )
             }
         }.flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -134,19 +129,14 @@ class LibraryViewModel @Inject constructor(
             artistGroupDao.getGroupsWithArtists()
         ) { artistsWithSongs, groupsWithArtists ->
 
-            val artistItems = coroutineScope {
-                artistsWithSongs.map { artistWithSongs ->
-                    async {
-                        val librarySongs = artistWithSongs.songs.filter { it.isInLibrary }
-                        val thumbnailUrls = librarySongs.map { it.thumbnailUrl }
-                        LibraryArtistItem.ArtistItem(
-                            ArtistForList(
-                                artist = artistWithSongs.artist,
-                                finalThumbnailUrls = getFinalThumbnails(thumbnailUrls)
-                            )
-                        )
-                    }
-                }.awaitAll()
+            val artistItems = artistsWithSongs.map { artistWithSongs ->
+                val librarySongs = artistWithSongs.songs.filter { it.isInLibrary }
+                LibraryArtistItem.ArtistItem(
+                    ArtistForList(
+                        artist = artistWithSongs.artist,
+                        allThumbnailUrls = librarySongs.map { it.thumbnailUrl }
+                    )
+                )
             }
 
             val groupItems = coroutineScope {
@@ -158,18 +148,26 @@ class LibraryViewModel @Inject constructor(
                 }
 
                 groupsWithArtists.map { groupWithArtists ->
-                    async {
-                        val urls = groupWithArtists.artists.flatMap { artist ->
-                            (songsForArtistsInGroups[artist.artistId] ?: emptyList())
-                                .filter { it.song.isInLibrary }
-                                .map { it.song.thumbnailUrl }
+                    val finalUrls = mutableListOf<String>()
+                    val seenUrls = mutableSetOf<String>()
+
+                    for (artist in groupWithArtists.artists) {
+                        if (finalUrls.size >= 4) break
+
+                        val songsForThisArtist = songsForArtistsInGroups[artist.artistId] ?: emptyList()
+                        val representativeSong = songsForThisArtist
+                            .firstOrNull { it.song.isInLibrary && it.song.thumbnailUrl !in seenUrls }
+
+                        if (representativeSong != null) {
+                            finalUrls.add(representativeSong.song.thumbnailUrl)
+                            seenUrls.add(representativeSong.song.thumbnailUrl)
                         }
-                        LibraryArtistItem.GroupItem(
-                            group = groupWithArtists.group,
-                            thumbnailUrls = getFinalThumbnails(urls)
-                        )
                     }
-                }.awaitAll()
+                    LibraryArtistItem.GroupItem(
+                        group = groupWithArtists.group,
+                        thumbnailUrls = finalUrls
+                    )
+                }
             }
             (artistItems + groupItems)
         }
@@ -207,21 +205,6 @@ class LibraryViewModel @Inject constructor(
     }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    init {
-        viewModelScope.launch {
-            songs.collect { songList ->
-                launch(Dispatchers.IO) {
-                    songList.forEach { song ->
-                        val request = ImageRequest.Builder(context)
-                            .data(song.thumbnailUrl)
-                            .build()
-                        imageLoader.enqueue(request)
-                    }
-                }
-            }
-        }
-    }
 
     fun runLibraryMaintenance() {
         viewModelScope.launch {
@@ -282,40 +265,6 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
-    private suspend fun getFinalThumbnails(urls: List<String>): List<String> = coroutineScope {
-        if (urls.isEmpty()) return@coroutineScope emptyList()
-
-        val uniqueUrls = urls.filter { it.isNotBlank() }.distinct().take(20)
-        if (uniqueUrls.size <= 2) return@coroutineScope uniqueUrls
-
-        val urlToHashMap = uniqueUrls.map { url ->
-            async(Dispatchers.IO) {
-                val request = ImageRequest.Builder(context)
-                    .data(url)
-                    .allowHardware(false)
-                    .size(50, 50)
-                    .build()
-                val bitmap = (imageLoader.execute(request).drawable as? BitmapDrawable)?.bitmap
-                val hash = bitmap?.let {
-                    val byteBuffer = ByteBuffer.allocate(it.byteCount)
-                    it.copyPixelsToBuffer(byteBuffer)
-                    byteBuffer.array().contentHashCode()
-                }
-                url to hash
-            }
-        }.awaitAll()
-
-        val trulyUniqueUrls = urlToHashMap
-            .distinctBy { it.second }
-            .map { it.first }
-
-        return@coroutineScope when {
-            trulyUniqueUrls.size <= 2 -> trulyUniqueUrls.take(1)
-            trulyUniqueUrls.size == 3 -> trulyUniqueUrls + trulyUniqueUrls.first()
-            else -> trulyUniqueUrls.take(4)
-        }
-    }
-
     fun setSelectedView(view: String) {
         _selectedView.value = view
         preferencesManager.lastLibraryView = view
@@ -326,6 +275,17 @@ class LibraryViewModel @Inject constructor(
         if (songsToPlay.isNotEmpty()) {
             viewModelScope.launch {
                 musicServiceConnection.playSongList(songsToPlay, selectedIndex)
+            }
+        }
+    }
+
+    fun shuffleAllSongs() {
+        val songsToPlay = songs.value
+        if (songsToPlay.isNotEmpty()) {
+            val (downloaded, remote) = songsToPlay.partition { it.localFilePath != null }
+            val finalShuffledList = downloaded.shuffled() + remote.shuffled()
+            viewModelScope.launch {
+                musicServiceConnection.playSongList(finalShuffledList, 0)
             }
         }
     }
@@ -365,9 +325,45 @@ class LibraryViewModel @Inject constructor(
     }
 
     fun shufflePlaylist(playlist: PlaylistWithSongs) {
-        val shuffledSongs = playlist.songs.shuffled()
+        val songsToPlay = playlist.songs
+        if (songsToPlay.isNotEmpty()) {
+            val (downloaded, remote) = songsToPlay.partition { it.localFilePath != null }
+            val finalShuffledList = downloaded.shuffled() + remote.shuffled()
+            viewModelScope.launch {
+                musicServiceConnection.playSongList(finalShuffledList, 0)
+            }
+        }
+    }
+
+    fun playArtistGroup(group: ArtistGroup) {
         viewModelScope.launch {
-            musicServiceConnection.playSongList(shuffledSongs, 0)
+            val allSongs = withContext(Dispatchers.IO) {
+                val groupWithArtists = artistGroupDao.getGroupWithArtistsOnce(group.groupId) ?: return@withContext emptyList()
+                groupWithArtists.artists.map { artist ->
+                    async { artistDao.getSongsForArtistSortedByCustom(artist.artistId) }
+                }.awaitAll().flatten()
+            }
+
+            if (allSongs.isNotEmpty()) {
+                musicServiceConnection.playSongList(allSongs, 0)
+            }
+        }
+    }
+
+    fun shuffleArtistGroup(group: ArtistGroup) {
+        viewModelScope.launch {
+            val allSongs = withContext(Dispatchers.IO) {
+                val groupWithArtists = artistGroupDao.getGroupWithArtistsOnce(group.groupId) ?: return@withContext emptyList()
+                groupWithArtists.artists.map { artist ->
+                    async { artistDao.getSongsForArtistSortedByCustom(artist.artistId) }
+                }.awaitAll().flatten()
+            }
+
+            if (allSongs.isNotEmpty()) {
+                val (downloaded, remote) = allSongs.partition { it.localFilePath != null }
+                val shuffledList = downloaded.shuffled() + remote.shuffled()
+                musicServiceConnection.playSongList(shuffledList, 0)
+            }
         }
     }
 
@@ -418,9 +414,11 @@ class LibraryViewModel @Inject constructor(
 
     fun shuffleArtist(artist: Artist) {
         viewModelScope.launch {
-            val songs = artistDao.getSongsForArtistSortedByCustom(artist.artistId)
-            if (songs.isNotEmpty()) {
-                musicServiceConnection.playSongList(songs.shuffled(), 0)
+            val songsToPlay = artistDao.getSongsForArtistSortedByCustom(artist.artistId)
+            if (songsToPlay.isNotEmpty()) {
+                val (downloaded, remote) = songsToPlay.partition { it.localFilePath != null }
+                val finalShuffledList = downloaded.shuffled() + remote.shuffled()
+                musicServiceConnection.playSongList(finalShuffledList, 0)
             }
         }
     }

@@ -10,6 +10,7 @@ import com.example.m.data.repository.LibraryRepository
 import com.example.m.managers.PlaylistManager
 import com.example.m.playback.MusicServiceConnection
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
@@ -54,13 +55,22 @@ class HistoryViewModel @Inject constructor(
         viewModelScope.launch {
             listeningHistoryDao.deleteHistoryEntry(entry.logId)
 
-            // Check if the song should be removed from the songs table
             if (!entry.song.isInLibrary) {
                 val historyCount = listeningHistoryDao.getHistoryCountForSong(entry.song.songId)
                 val playlistCount = playlistDao.getPlaylistCountForSong(entry.song.songId)
                 if (historyCount == 0 && playlistCount == 0) {
                     songDao.deleteSong(entry.song)
                 }
+            }
+        }
+    }
+
+    fun clearHistory(keep: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (keep == 0) {
+                listeningHistoryDao.clearAllHistory()
+            } else {
+                listeningHistoryDao.clearHistoryExceptLast(keep)
             }
         }
     }
@@ -88,10 +98,11 @@ class HistoryViewModel @Inject constructor(
 
     fun onShuffleSong(song: Song) {
         val currentSongs = history.value.map { it.song }
-        val index = currentSongs.indexOf(song)
-        if (index != -1) {
+        if (currentSongs.isNotEmpty()) {
+            val (downloaded, remote) = currentSongs.partition { it.localFilePath != null }
+            val finalShuffledList = downloaded.shuffled() + remote.shuffled()
             viewModelScope.launch {
-                musicServiceConnection.shuffleSongList(currentSongs, index)
+                musicServiceConnection.playSongList(finalShuffledList, 0)
             }
         }
     }

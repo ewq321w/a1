@@ -102,8 +102,10 @@ class ArtistDetailViewModel @Inject constructor(
     fun shuffleArtist() {
         val currentSongs = songs.value
         if (currentSongs.isNotEmpty()) {
+            val (downloaded, remote) = currentSongs.partition { it.localFilePath != null }
+            val finalShuffledList = downloaded.shuffled() + remote.shuffled()
             viewModelScope.launch {
-                musicServiceConnection.playSongList(currentSongs.shuffled(), 0)
+                musicServiceConnection.playSongList(finalShuffledList, 0)
             }
         }
     }

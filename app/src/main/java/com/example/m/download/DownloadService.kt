@@ -26,6 +26,7 @@ import java.util.*
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
+import javax.inject.Named
 
 @AndroidEntryPoint
 class DownloadService : Service() {
@@ -37,6 +38,7 @@ class DownloadService : Service() {
     @Inject
     lateinit var downloadQueueDao: DownloadQueueDao
     @Inject
+    @Named("NewPipe")
     lateinit var okHttpClient: OkHttpClient
 
     private val serviceJob = Job()
@@ -170,7 +172,7 @@ class DownloadService : Service() {
                     val downloadedSong = song.copy(localFilePath = uri.toString())
                     songDao.upsertDownloadedSong(downloadedSong)
                     isDownloadSuccessful = true
-                    break // Exit loop on success
+                    break
                 } else {
                     throw IOException("MediaStore failed to create new file entry.")
                 }
@@ -184,10 +186,8 @@ class DownloadService : Service() {
                     updateNotification(song.title, 0, notificationId, isError = true, statusText = "Download failed")
                 }
             }
-        } // End of retry loop
+        }
 
-        // **FIX**: Removed the incorrect 'finally' keyword. This code now runs
-        // correctly after the for-loop has finished.
         if (tempFile.exists()) {
             tempFile.delete()
         }

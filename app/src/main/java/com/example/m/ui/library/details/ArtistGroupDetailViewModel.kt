@@ -1,7 +1,6 @@
 package com.example.m.ui.library.details
 
 import android.content.Context
-import android.graphics.drawable.BitmapDrawable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -9,10 +8,10 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import coil.ImageLoader
-import coil.request.ImageRequest
 import com.example.m.data.database.*
 import com.example.m.data.repository.LibraryRepository
 import com.example.m.managers.PlaylistManager
+import com.example.m.managers.ThumbnailProcessor
 import com.example.m.playback.MusicServiceConnection
 import com.example.m.ui.library.ArtistForList
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -20,7 +19,6 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
-import java.nio.ByteBuffer
 import javax.inject.Inject
 
 @HiltViewModel
@@ -32,7 +30,8 @@ class ArtistGroupDetailViewModel @Inject constructor(
     val playlistManager: PlaylistManager,
     private val libraryRepository: LibraryRepository,
     @ApplicationContext private val context: Context,
-    private val imageLoader: ImageLoader
+    private val imageLoader: ImageLoader,
+    private val thumbnailProcessor: ThumbnailProcessor
 ) : ViewModel() {
     private val groupId: Long = checkNotNull(savedStateHandle["groupId"])
 
@@ -42,6 +41,8 @@ class ArtistGroupDetailViewModel @Inject constructor(
 
     val allPlaylists: StateFlow<List<Playlist>> = libraryRepository.getAllPlaylists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    suspend fun processThumbnails(urls: List<String>) = thumbnailProcessor.process(urls)
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val artistsForList: StateFlow<List<ArtistForList>> = groupWithArtists.flatMapLatest { group ->
@@ -53,10 +54,10 @@ class ArtistGroupDetailViewModel @Inject constructor(
                 val artistForListData = coroutineScope {
                     artists.map { artist ->
                         async {
-                            val thumbnailUrls = artistDao.getThumbnailsForArtist(artist.artistId)
+                            val orderedSongs = artistDao.getSongsForArtistSortedByCustom(artist.artistId)
                             ArtistForList(
                                 artist = artist,
-                                finalThumbnailUrls = getFinalThumbnails(thumbnailUrls)
+                                allThumbnailUrls = orderedSongs.map { it.thumbnailUrl }
                             )
                         }
                     }.awaitAll()
@@ -112,40 +113,6 @@ class ArtistGroupDetailViewModel @Inject constructor(
                     playlistManager.startDownload(song)
                 }
             }
-        }
-    }
-
-    private suspend fun getFinalThumbnails(urls: List<String>): List<String> = coroutineScope {
-        if (urls.isEmpty()) return@coroutineScope emptyList()
-
-        val uniqueUrls = urls.filter { it.isNotBlank() }.distinct().take(20)
-        if (uniqueUrls.size <= 1) return@coroutineScope uniqueUrls
-
-        val urlToHashMap = uniqueUrls.map { url ->
-            async(Dispatchers.IO) {
-                val request = ImageRequest.Builder(context)
-                    .data(url)
-                    .allowHardware(false)
-                    .size(50, 50)
-                    .build()
-                val bitmap = (imageLoader.execute(request).drawable as? BitmapDrawable)?.bitmap
-                val hash = bitmap?.let {
-                    val byteBuffer = ByteBuffer.allocate(it.byteCount)
-                    it.copyPixelsToBuffer(byteBuffer)
-                    byteBuffer.array().contentHashCode()
-                }
-                url to hash
-            }
-        }.awaitAll()
-
-        val trulyUniqueUrls = urlToHashMap
-            .distinctBy { it.second }
-            .map { it.first }
-
-        return@coroutineScope when {
-            trulyUniqueUrls.size <= 2 -> trulyUniqueUrls.take(1)
-            trulyUniqueUrls.size == 3 -> trulyUniqueUrls + trulyUniqueUrls.first()
-            else -> trulyUniqueUrls.take(4)
         }
     }
 

@@ -85,17 +85,17 @@ fun EditArtistSongsScreen(
                 item {
                     Column(
                         modifier = Modifier
-                            .fillMaxWidth() // <<< THIS LINE FIXES THE CENTERING
+                            .fillMaxWidth()
                             .padding(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         CompositeThumbnailImage(
                             urls = songs.map { it.thumbnailUrl },
                             contentDescription = "Artist thumbnail collage",
+                            processUrls = viewModel::processThumbnails,
                             modifier = Modifier.size(150.dp)
                         )
                         Spacer(Modifier.height(16.dp))
-                        // Display artist name as non-editable text
                         Text(
                             text = artistWithSongs?.artist?.name ?: "",
                             style = MaterialTheme.typography.headlineSmall
@@ -106,7 +106,6 @@ fun EditArtistSongsScreen(
 
                 items(songs, { it.songId }) { song ->
                     ReorderableItem(state, key = song.songId) { isDragging ->
-                        // The remove action is now to delete the song entirely
                         val onRemoveClickRemembered = remember(song) { { viewModel.onSongRemoveClicked(song) } }
 
                         EditSongItem(

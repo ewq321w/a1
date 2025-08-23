@@ -2,15 +2,14 @@ package com.example.m.ui.library.components
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -131,7 +130,7 @@ fun EmptyStateMessage(message: String) {
             .padding(16.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(text = message, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f))
+        Text(text = message, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f))
     }
 }
 
@@ -139,18 +138,34 @@ fun EmptyStateMessage(message: String) {
 fun CompositeThumbnailImage(
     urls: List<String>,
     contentDescription: String,
+    processUrls: suspend (List<String>) -> List<String>,
     modifier: Modifier = Modifier
 ) {
-    if (urls.isEmpty()) {
+    var finalUrls by remember { mutableStateOf<List<String>?>(null) }
+
+    LaunchedEffect(key1 = urls) {
+        finalUrls = processUrls(urls)
+    }
+
+    val currentUrls = finalUrls
+
+    if (currentUrls == null) {
+        Icon(
+            imageVector = Icons.Default.MusicNote,
+            contentDescription = contentDescription,
+            modifier = modifier,
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+        )
+    } else if (currentUrls.isEmpty()) {
         Icon(
             imageVector = Icons.Default.MusicNote,
             contentDescription = contentDescription,
             modifier = modifier,
             tint = MaterialTheme.colorScheme.primary
         )
-    } else if (urls.size <= 2) {
+    } else if (currentUrls.size <= 2) {
         AsyncImage(
-            model = urls.firstOrNull(),
+            model = currentUrls.firstOrNull(),
             contentDescription = contentDescription,
             modifier = modifier,
             contentScale = ContentScale.Crop,
@@ -161,7 +176,7 @@ fun CompositeThumbnailImage(
         Column(modifier = modifier) {
             Row(modifier = Modifier.weight(1f)) {
                 AsyncImage(
-                    model = urls.getOrNull(0),
+                    model = currentUrls.getOrNull(0),
                     contentDescription = contentDescription,
                     modifier = Modifier.weight(1f),
                     contentScale = ContentScale.Crop,
@@ -169,7 +184,7 @@ fun CompositeThumbnailImage(
                     placeholder = painterResource(id = R.drawable.placeholder_gray)
                 )
                 AsyncImage(
-                    model = urls.getOrNull(1),
+                    model = currentUrls.getOrNull(1),
                     contentDescription = contentDescription,
                     modifier = Modifier.weight(1f),
                     contentScale = ContentScale.Crop,
@@ -179,7 +194,7 @@ fun CompositeThumbnailImage(
             }
             Row(modifier = Modifier.weight(1f)) {
                 AsyncImage(
-                    model = urls.getOrNull(2),
+                    model = currentUrls.getOrNull(2),
                     contentDescription = contentDescription,
                     modifier = Modifier.weight(1f),
                     contentScale = ContentScale.Crop,
@@ -187,7 +202,7 @@ fun CompositeThumbnailImage(
                     placeholder = painterResource(id = R.drawable.placeholder_gray)
                 )
                 AsyncImage(
-                    model = urls.getOrNull(3),
+                    model = currentUrls.getOrNull(3),
                     contentDescription = contentDescription,
                     modifier = Modifier.weight(1f),
                     contentScale = ContentScale.Crop,
@@ -196,5 +211,63 @@ fun CompositeThumbnailImage(
                 )
             }
         }
+    }
+}
+
+@Composable
+fun FolderWithThumbnails(
+    urls: List<String>,
+    modifier: Modifier = Modifier
+) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Icon(
+            imageVector = Icons.Default.Folder,
+            contentDescription = "Artist Group",
+            modifier = Modifier.fillMaxSize(),
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+        )
+
+        val gridModifier = Modifier
+            .fillMaxSize(0.65f)
+            .padding(top = 4.dp)
+
+        if (urls.isNotEmpty()) {
+            Column(
+                modifier = gridModifier,
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    ThumbnailCell(url = urls.getOrNull(0), modifier = Modifier.weight(1f))
+                    ThumbnailCell(url = urls.getOrNull(1), modifier = Modifier.weight(1f))
+                }
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    ThumbnailCell(url = urls.getOrNull(2), modifier = Modifier.weight(1f))
+                    ThumbnailCell(url = urls.getOrNull(3), modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThumbnailCell(url: String?, modifier: Modifier) {
+    if (url != null) {
+        AsyncImage(
+            model = url,
+            contentDescription = null,
+            modifier = modifier
+                .fillMaxSize()
+                .clip(CircleShape),
+            contentScale = ContentScale.Crop,
+            error = painterResource(id = R.drawable.placeholder_gray)
+        )
+    } else {
+        Spacer(modifier = modifier.fillMaxSize())
     }
 }

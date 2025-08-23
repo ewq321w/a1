@@ -7,9 +7,9 @@ import androidx.compose.ui.graphics.Color
 val Primary = Color(0xFF4F90E7) // YouTube's iconic red
 
 // --- Dark Theme Colors (YouTube Music inspired) ---
-val DarkBackground = Color(0xFF0C0C0C) // Very dark background
-val DarkSurface = Color(0xFF151515)    // Slightly lighter dark gray for surfaces/cards
-val DarkSurfaceVariant = Color(0xFF1C1C1C) // Even lighter dark gray for distinct components (e.g., mini-player, nav bar)
+val DarkBackground = Color(0xFF050505) // Very dark background
+val DarkSurface = Color(0xFF0C0C0C)    // Slightly lighter dark gray for surfaces/cards
+val DarkSurfaceVariant = Color(0xFF101010) // Even lighter dark gray for distinct components (e.g., mini-player, nav bar)
 val DarkOnPrimary = Color(0xFFFFFFFF)  // Text/icons on primary (red)
 val DarkOnBackground = Color(0xFFFFFFFF) // Text/icons on background
 val DarkOnSurface = Color(0xFFFFFFFF)  // Text/icons on surface

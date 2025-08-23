@@ -138,7 +138,7 @@ class LibraryRepository @Inject constructor(
         val maxPosition = artistDao.getMaxArtistSongPosition(artist.artistId)
         val newPosition = maxPosition + 1
 
-        artistDao.insertArtistSongCrossRef(
+        artistDao.upsertArtistSongCrossRef(
             ArtistSongCrossRef(
                 artistId = artist.artistId,
                 songId = song.songId,

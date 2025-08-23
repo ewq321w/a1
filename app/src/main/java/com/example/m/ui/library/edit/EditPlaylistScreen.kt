@@ -28,7 +28,6 @@ fun EditPlaylistScreen(
     var playlistName by remember(playlistWithSongs) {
         mutableStateOf(playlistWithSongs?.playlist?.name ?: "")
     }
-    // +++ GET THE SONG PENDING REMOVAL STATE FROM THE VIEWMODEL +++
     val songPendingRemoval by remember { derivedStateOf { viewModel.songPendingRemoval } }
 
     val songs = playlistWithSongs?.songs ?: emptyList()
@@ -42,7 +41,6 @@ fun EditPlaylistScreen(
         }
     })
 
-    // +++ SHOW THE CONFIRMATION DIALOG WHEN A SONG IS PENDING REMOVAL +++
     songPendingRemoval?.let { songToRemove ->
         ConfirmDeleteDialog(
             itemType = "song from this playlist",
@@ -98,6 +96,7 @@ fun EditPlaylistScreen(
                         CompositeThumbnailImage(
                             urls = songs.map { it.thumbnailUrl },
                             contentDescription = "Playlist thumbnail",
+                            processUrls = viewModel::processThumbnails,
                             modifier = Modifier.size(150.dp)
                         )
                         Spacer(Modifier.height(16.dp))
@@ -117,7 +116,6 @@ fun EditPlaylistScreen(
                     contentType = { "EditableSongItem" }
                 ) { song ->
                     ReorderableItem(state, key = song.songId) { isDragging ->
-                        // <<< UPDATE THE REMOVE CLICK ACTION >>>
                         val onRemoveClickRemembered = remember(song) { { viewModel.onRemoveSongClicked(song) } }
 
                         EditSongItem(

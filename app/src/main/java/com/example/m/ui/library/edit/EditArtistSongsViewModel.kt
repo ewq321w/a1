@@ -10,6 +10,7 @@ import com.example.m.data.database.ArtistDao
 import com.example.m.data.database.ArtistWithSongs
 import com.example.m.data.database.Song
 import com.example.m.data.repository.LibraryRepository
+import com.example.m.managers.ThumbnailProcessor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,7 +22,8 @@ import javax.inject.Inject
 class EditArtistSongsViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val artistDao: ArtistDao,
-    private val libraryRepository: LibraryRepository // +++ Add repository
+    private val libraryRepository: LibraryRepository,
+    private val thumbnailProcessor: ThumbnailProcessor
 ) : ViewModel() {
 
     private val artistId: Long = checkNotNull(savedStateHandle["artistId"])
@@ -31,6 +33,8 @@ class EditArtistSongsViewModel @Inject constructor(
 
     var itemPendingDeletion by mutableStateOf<Song?>(null)
         private set
+
+    suspend fun processThumbnails(urls: List<String>) = thumbnailProcessor.process(urls)
 
     init {
         viewModelScope.launch {
@@ -59,9 +63,7 @@ class EditArtistSongsViewModel @Inject constructor(
         val currentSongs = _artistWithSongs.value?.songs ?: return
 
         viewModelScope.launch {
-            currentSongs.forEachIndexed { index, song ->
-                artistDao.updateArtistSongPosition(artistId, song.songId, index)
-            }
+            artistDao.updateSongOrder(artistId, currentSongs)
         }
     }
 
@@ -73,7 +75,6 @@ class EditArtistSongsViewModel @Inject constructor(
         itemPendingDeletion?.let { songToDelete ->
             viewModelScope.launch {
                 libraryRepository.deleteSongFromDeviceAndDb(songToDelete)
-                // The flow will automatically update the list
                 itemPendingDeletion = null
             }
         }

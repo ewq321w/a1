@@ -208,6 +208,9 @@ fun LibraryScreen(
                     }
 
                     if (selectedView == "Songs") {
+                        IconButton(onClick = { viewModel.shuffleAllSongs() }) {
+                            Icon(Icons.Default.Shuffle, contentDescription = "Shuffle All")
+                        }
                         SongSortMenu(
                             currentSortOrder = sortOrder,
                             onSortOrderSelected = { viewModel.setSortOrder(it) }

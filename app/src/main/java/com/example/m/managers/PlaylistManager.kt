@@ -68,7 +68,10 @@ class PlaylistManager @Inject constructor(
         val song = when (item) {
             is Song -> {
                 if (!item.isInLibrary) {
-                    val updatedSong = item.copy(isInLibrary = true)
+                    val updatedSong = item.copy(
+                        isInLibrary = true,
+                        dateAddedTimestamp = System.currentTimeMillis()
+                    )
                     songDao.updateSong(updatedSong)
                     updatedSong
                 } else {
@@ -81,7 +84,10 @@ class PlaylistManager @Inject constructor(
                 val existingSong = songDao.getSongByUrl(normalizedUrl)
                 if (existingSong != null) {
                     if (!existingSong.isInLibrary) {
-                        val updatedSong = existingSong.copy(isInLibrary = true)
+                        val updatedSong = existingSong.copy(
+                            isInLibrary = true,
+                            dateAddedTimestamp = System.currentTimeMillis()
+                        )
                         songDao.updateSong(updatedSong)
                         updatedSong
                     } else {
