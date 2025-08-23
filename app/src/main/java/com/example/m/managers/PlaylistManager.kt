@@ -65,34 +65,14 @@ class PlaylistManager @Inject constructor(
     }
 
     suspend fun getSongForItem(item: Any): Song {
-        val song = when (item) {
-            is Song -> {
-                if (!item.isInLibrary) {
-                    val updatedSong = item.copy(
-                        isInLibrary = true,
-                        dateAddedTimestamp = System.currentTimeMillis()
-                    )
-                    songDao.updateSong(updatedSong)
-                    updatedSong
-                } else {
-                    item
-                }
-            }
+        return when (item) {
+            is Song -> item
             is StreamInfoItem -> {
                 val normalizedUrl = item.url?.replace("music.youtube.com", "www.youtube.com")
                     ?: item.url ?: ""
                 val existingSong = songDao.getSongByUrl(normalizedUrl)
                 if (existingSong != null) {
-                    if (!existingSong.isInLibrary) {
-                        val updatedSong = existingSong.copy(
-                            isInLibrary = true,
-                            dateAddedTimestamp = System.currentTimeMillis()
-                        )
-                        songDao.updateSong(updatedSong)
-                        updatedSong
-                    } else {
-                        existingSong
-                    }
+                    existingSong
                 } else {
                     val videoId = item.url?.substringAfter("v=")?.substringBefore('&')
                     val newSong = Song(
@@ -102,18 +82,16 @@ class PlaylistManager @Inject constructor(
                         artist = item.uploaderName ?: "Unknown Artist",
                         duration = item.duration,
                         thumbnailUrl = getHighQualityThumbnailUrl(videoId),
-                        localFilePath = null,
-                        isInLibrary = true
+                        localFilePath = null
                     )
                     val newId = songDao.insertSong(newSong)
-                    newSong.copy(songId = newId)
+                    val finalSong = newSong.copy(songId = newId)
+                    libraryRepository.linkSongToArtist(finalSong)
+                    finalSong
                 }
             }
             else -> throw IllegalArgumentException("Unsupported item type for playlist addition")
         }
-
-        libraryRepository.linkSongToArtist(song)
-        return song
     }
 
     suspend fun cacheAndGetSong(item: StreamInfoItem): Song {

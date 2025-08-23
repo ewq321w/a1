@@ -11,9 +11,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -37,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import com.example.m.R
+import com.example.m.managers.DownloadStatus
 import com.example.m.ui.common.getThumbnail
 import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
 import java.text.DecimalFormat
@@ -82,6 +82,7 @@ fun AlbumItem(
 @Composable
 fun SearchResultItem(
     result: SearchResult,
+    downloadStatus: DownloadStatus?,
     isSong: Boolean,
     imageLoader: ImageLoader,
     onPlay: () -> Unit,
@@ -90,6 +91,7 @@ fun SearchResultItem(
     onAddToPlaylistClick: () -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    val isDownloading = downloadStatus is DownloadStatus.Downloading || downloadStatus is DownloadStatus.Queued
 
     Row(
         modifier = Modifier
@@ -124,24 +126,47 @@ fun SearchResultItem(
                 fontSize = 14.sp
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (result.isDownloaded) {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = "Downloaded",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .size(16.dp)
-                            .padding(end = 4.dp)
-                    )
-                } else if (result.isInLibrary) {
-                    Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = "In Library",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .size(16.dp)
-                            .padding(end = 4.dp)
-                    )
+                Box(
+                    modifier = Modifier.width(20.dp), // Provides consistent spacing
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    val iconSize = 16.dp
+                    when (downloadStatus) {
+                        is DownloadStatus.Downloading -> CircularProgressIndicator(
+                            progress = { downloadStatus.progress / 100f },
+                            modifier = Modifier.size(iconSize),
+                            strokeWidth = 1.5.dp
+                        )
+                        is DownloadStatus.Queued -> Icon(
+                            imageVector = Icons.Default.HourglassTop,
+                            contentDescription = "Queued",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(iconSize)
+                        )
+                        is DownloadStatus.Failed -> Icon(
+                            imageVector = Icons.Default.ErrorOutline,
+                            contentDescription = "Failed",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(iconSize)
+                        )
+                        null -> {
+                            if (result.isDownloaded) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Downloaded",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(iconSize)
+                                )
+                            } else if (result.isInLibrary) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "In Library",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(iconSize)
+                                )
+                            }
+                        }
+                    }
                 }
                 Text(
                     text = result.streamInfo.uploaderName ?: "Unknown Artist",
@@ -197,9 +222,14 @@ fun SearchResultItem(
                         showMenu = false
                     }
                 )
+                val downloadText = when {
+                    isDownloading -> "Downloading..."
+                    result.isDownloaded -> "Downloaded"
+                    else -> "Download"
+                }
                 DropdownMenuItem(
-                    text = { Text(if (result.isDownloaded) "Downloaded" else "Download") },
-                    enabled = !result.isDownloaded,
+                    text = { Text(downloadText) },
+                    enabled = !isDownloading && !result.isDownloaded,
                     onClick = {
                         onDownload()
                         showMenu = false

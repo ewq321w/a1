@@ -1,20 +1,21 @@
 package com.example.m.ui.search
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import coil.ImageLoader
 import com.example.m.data.database.Playlist
-import com.example.m.data.database.Song
 import com.example.m.data.database.SongDao
 import com.example.m.data.repository.LibraryRepository
 import com.example.m.data.repository.YoutubeRepository
+import com.example.m.managers.DownloadStatus
+import com.example.m.managers.DownloadStatusManager
 import com.example.m.managers.PlaylistManager
 import com.example.m.playback.MusicServiceConnection
+import com.example.m.ui.common.PlaylistActionHandler
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -34,279 +35,192 @@ data class SearchResult(
     val isDownloaded: Boolean = false
 )
 
+data class SearchResultForList(
+    val result: SearchResult,
+    val downloadStatus: DownloadStatus?
+)
+
 data class AlbumResult(
-    val albumInfo: PlaylistInfoItem,
-    val score: Int
+    val albumInfo: PlaylistInfoItem
 )
 
 data class ArtistResult(
-    val artistInfo: ChannelInfoItem,
-    val score: Int
+    val artistInfo: ChannelInfoItem
 )
 
 data class SearchUiState(
-    val searchQuery: String = "",
     val isLoading: Boolean = false,
-    val errorMessage: String? = null,
-    val selectedFilter: String = "music_songs",
-    val detailedViewCategory: SearchCategory? = null,
-    val topResult: InfoItem? = null,
+    val query: String = "",
     val songs: List<SearchResult> = emptyList(),
     val albums: List<AlbumResult> = emptyList(),
     val artists: List<ArtistResult> = emptyList(),
-    val videos: List<SearchResult> = emptyList(),
-    val videoChannels: List<ArtistResult> = emptyList() // To hold channels for the "Videos" search
+    val videoChannels: List<ArtistResult> = emptyList(),
+    val videoPlaylists: List<AlbumResult> = emptyList(),
+    val videoStreams: List<SearchResult> = emptyList(),
+    val detailedViewCategory: SearchCategory? = null,
+    val selectedFilter: String = "music_songs"
 )
 
 @HiltViewModel
 class SearchViewModel @Inject constructor(
+    val imageLoader: ImageLoader,
     private val youtubeRepository: YoutubeRepository,
     private val musicServiceConnection: MusicServiceConnection,
-    private val songDao: SongDao,
-    libraryRepository: LibraryRepository,
     private val playlistManager: PlaylistManager,
-    val imageLoader: ImageLoader
+    private val libraryRepository: LibraryRepository,
+    private val songDao: SongDao,
+    private val downloadStatusManager: DownloadStatusManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SearchUiState())
-    val uiState: StateFlow<SearchUiState> = _uiState
+    val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
 
-    private val localLibrary: StateFlow<List<Song>> = songDao.getAllSongs()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val playlistActionHandler = PlaylistActionHandler(playlistManager)
 
     val allPlaylists: StateFlow<List<Playlist>> = libraryRepository.getAllPlaylists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    var itemToAddToPlaylist by mutableStateOf<Any?>(null)
-        private set
-    var showCreatePlaylistDialog by mutableStateOf(false)
-        private set
-    private var pendingItem: Any? = null
+    private fun resultsWithStatus(
+        results: List<SearchResult>,
+        statuses: Map<String, DownloadStatus>
+    ): List<SearchResultForList> {
+        return results.map { result ->
+            SearchResultForList(result, statuses[result.streamInfo.url])
+        }
+    }
 
-    init {
+    val songsWithStatus: StateFlow<List<SearchResultForList>> =
+        combine(
+            _uiState.map { it.songs },
+            downloadStatusManager.statuses,
+            ::resultsWithStatus
+        ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val videoStreamsWithStatus: StateFlow<List<SearchResultForList>> =
+        combine(
+            _uiState.map { it.videoStreams },
+            downloadStatusManager.statuses,
+            ::resultsWithStatus
+        ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+
+    fun onQueryChange(newQuery: String) {
+        _uiState.update { it.copy(query = newQuery) }
+    }
+
+    fun onFilterChange(newFilter: String) {
+        _uiState.update { it.copy(selectedFilter = newFilter) }
+        search()
+    }
+
+    fun search() {
+        if (uiState.value.query.isBlank()) return
+        _uiState.update { it.copy(isLoading = true) }
+
         viewModelScope.launch {
-            localLibrary.collect { librarySongs ->
-                val libraryMap = librarySongs.filter { !it.videoId.isNullOrBlank() }.associateBy { it.videoId!! }
-                val currentSongs = _uiState.value.songs
-                val currentVideos = _uiState.value.videos
+            val query = uiState.value.query
+            val filter = uiState.value.selectedFilter
 
-                if (currentSongs.isNotEmpty() || currentVideos.isNotEmpty()) {
-                    val updatedSongs = currentSongs.map { searchResult ->
-                        val videoId = extractVideoId(searchResult.streamInfo.url)
-                        val localSong = videoId?.let { libraryMap[it] }
-                        searchResult.copy(
-                            isInLibrary = localSong?.isInLibrary ?: false,
-                            isDownloaded = localSong?.localFilePath != null
-                        )
-                    }
-                    val updatedVideos = currentVideos.map { searchResult ->
-                        val videoId = extractVideoId(searchResult.streamInfo.url)
-                        val localSong = videoId?.let { libraryMap[it] }
-                        searchResult.copy(
-                            isInLibrary = localSong?.isInLibrary ?: false,
-                            isDownloaded = localSong?.localFilePath != null
-                        )
-                    }
-                    _uiState.update { it.copy(songs = updatedSongs, videos = updatedVideos) }
+            val results = youtubeRepository.search(query, filter)
+            updateSearchResults(results)
+        }
+    }
+
+    private suspend fun updateSearchResults(results: List<InfoItem>) {
+        coroutineScope {
+            val downloadedSongs = songDao.getAllDownloadedSongsOnce().associateBy { it.youtubeUrl }
+            val librarySongs = songDao.getLibrarySongsSortedByArtist().first().associateBy { it.youtubeUrl }
+
+            val songs = results.filterIsInstance<StreamInfoItem>().map {
+                val url = it.url ?: ""
+                async {
+                    SearchResult(
+                        streamInfo = it,
+                        isInLibrary = librarySongs.containsKey(url),
+                        isDownloaded = downloadedSongs.containsKey(url)
+                    )
+                }
+            }.awaitAll()
+
+            val albums = results.filterIsInstance<PlaylistInfoItem>().map { AlbumResult(it) }
+            val artists = results.filterIsInstance<ChannelInfoItem>().map { ArtistResult(it) }
+
+            if (uiState.value.selectedFilter == "music_songs") {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        songs = songs,
+                        albums = albums,
+                        artists = artists
+                    )
+                }
+            } else {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        videoStreams = songs,
+                        videoPlaylists = albums,
+                        videoChannels = artists
+                    )
                 }
             }
         }
     }
 
-
-    fun onSearchQueryChanged(query: String) {
-        _uiState.value = _uiState.value.copy(searchQuery = query)
-    }
-
-    private fun identifyArtists(channels: List<ChannelInfoItem>): List<ArtistResult> {
-        // Only include channels that are official "Topic" channels.
-        return channels
-            .filter { (it.name ?: "").endsWith(" - Topic", ignoreCase = true) }
-            .map { ArtistResult(it, 0) } // Score is not needed for this simple filter.
-    }
-
-    private fun identifyNormalChannels(channels: List<ChannelInfoItem>): List<ArtistResult> {
-        // Exclude channels that are "Topic" channels and sort by subscribers.
-        return channels
-            .filter { !(it.name ?: "").endsWith(" - Topic", ignoreCase = true) }
-            .sortedByDescending { it.subscriberCount }
-            .map { ArtistResult(it, 0) }
-    }
-
-    private fun identifyAlbums(playlists: List<PlaylistInfoItem>, artists: List<ArtistResult>): List<AlbumResult> {
-        val artistNames = artists.map { it.artistInfo.name?.replace(" - Topic", "")?.trim() }
-
-        return playlists.map { playlist ->
-            var score = 0
-            val uploader = playlist.uploaderName ?: ""
-            val playlistName = playlist.name ?: ""
-
-            if (artistNames.any { uploader.contains(it!!, ignoreCase = true) }) score += 10
-            if (uploader.endsWith(" - Topic", ignoreCase = true)) score += 8
-            if (uploader.endsWith("VEVO", ignoreCase = true)) score += 5
-
-            if (listOf("mix", "favorites", "liked", "playlist").any { playlistName.contains(it, ignoreCase = true) }) {
-                score -= 5
-            }
-            if ((playlist.streamCount ?: 0) in 5..30) {
-                score += 1
-            }
-
-            AlbumResult(playlist, score)
+    fun onSongSelected(selectedIndex: Int) {
+        val items = if (uiState.value.selectedFilter == "music_songs") {
+            uiState.value.songs
+        } else {
+            uiState.value.videoStreams
         }
-            .filter { it.score > 5 }
-            .sortedByDescending { it.score }
-    }
-
-    private fun extractVideoId(url: String?): String? {
-        return url?.substringAfter("v=")?.substringBefore('&')
-    }
-
-    fun executeSearch() {
-        if (_uiState.value.searchQuery.isBlank()) return
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null, detailedViewCategory = null)
-            try {
-                val localSongVideoIdMap = localLibrary.value.filter { !it.videoId.isNullOrBlank() }.associateBy { it.videoId }
-
-                if (_uiState.value.selectedFilter == "music_songs") {
-                    val musicResults = youtubeRepository.searchMusic(_uiState.value.searchQuery)
-
-                    val sortedSongs = musicResults.songs
-                        .map { song ->
-                            val score = if (song.uploaderName?.endsWith(" - Topic", ignoreCase = true) == true) {
-                                10
-                            } else {
-                                5
-                            }
-                            Pair(song, score)
-                        }
-                        .sortedByDescending { it.second }
-                        .map { it.first }
-
-                    val songSearchResults = sortedSongs.map { streamInfo ->
-                        val videoId = extractVideoId(streamInfo.url)
-                        val localSong = videoId?.let { localSongVideoIdMap[it] }
-                        SearchResult(streamInfo, localSong?.isInLibrary ?: false, localSong?.localFilePath != null)
-                    }
-
-                    val topicArtists = identifyArtists(musicResults.artists)
-                    val albumResults = identifyAlbums(musicResults.albums, topicArtists)
-
-                    _uiState.value = _uiState.value.copy(
-                        songs = songSearchResults,
-                        albums = albumResults,
-                        artists = topicArtists,
-                        topResult = songSearchResults.firstOrNull()?.streamInfo,
-                        videos = emptyList(),
-                        videoChannels = emptyList()
-                    )
-                } else {
-                    val (videoResults, channelResults) = coroutineScope {
-                        val videoJob = async { youtubeRepository.search(_uiState.value.searchQuery, "all") }
-                        val channelJob = async { youtubeRepository.search(_uiState.value.searchQuery, "channels") }
-                        Pair(videoJob.await(), channelJob.await())
-                    }
-
-                    val videoSearchResults = videoResults
-                        .filterIsInstance<StreamInfoItem>()
-                        .filter { !(it.uploaderName ?: "").endsWith(" - Topic", ignoreCase = true) }
-                        .map { streamInfo ->
-                            val videoId = extractVideoId(streamInfo.url)
-                            val localSong = videoId?.let { localSongVideoIdMap[it] }
-                            SearchResult(streamInfo, localSong?.isInLibrary ?: false, localSong?.localFilePath != null)
-                        }
-
-                    val channelSearchResults = identifyNormalChannels(
-                        channelResults.filterIsInstance<ChannelInfoItem>()
-                    )
-
-                    _uiState.value = _uiState.value.copy(
-                        videos = videoSearchResults,
-                        videoChannels = channelSearchResults,
-                        songs = emptyList(), albums = emptyList(), artists = emptyList(), topResult = null
-                    )
-                }
-
-            } catch (e: Exception) {
-                e.printStackTrace()
-                _uiState.value = _uiState.value.copy(errorMessage = "Failed to load search results")
-            } finally {
-                _uiState.value = _uiState.value.copy(isLoading = false)
-            }
-        }
-    }
-
-    fun onSongSelected(selectedIndex: Int, items: List<SearchResult>) {
-        items.getOrNull(selectedIndex)?.let { result ->
+        if (items.isNotEmpty()) {
             viewModelScope.launch {
-                musicServiceConnection.playSingleSong(result.streamInfo)
+                musicServiceConnection.playSongList(items.map { it.streamInfo }, selectedIndex)
             }
         }
     }
 
-    fun onFilterChanged(filter: String) {
-        _uiState.value = _uiState.value.copy(selectedFilter = filter, songs = emptyList(), videos = emptyList(), albums = emptyList(), artists = emptyList(), topResult = null, detailedViewCategory = null)
-        if (_uiState.value.searchQuery.isNotBlank()) {
-            executeSearch()
-        }
+    fun showDetailedView(category: SearchCategory) {
+        _uiState.update { it.copy(detailedViewCategory = category) }
     }
 
-    fun showMore(category: SearchCategory) {
-        _uiState.value = _uiState.value.copy(detailedViewCategory = category)
-    }
-
-    fun closeDetailedView() {
-        _uiState.value = _uiState.value.copy(detailedViewCategory = null)
+    fun hideDetailedView() {
+        _uiState.update { it.copy(detailedViewCategory = null) }
     }
 
     fun addSongToLibrary(result: SearchResult) {
-        viewModelScope.launch {
-            playlistManager.getSongForItem(result.streamInfo)
+        viewModelScope.launch(Dispatchers.IO) {
+            val song = playlistManager.getSongForItem(result.streamInfo)
+            if (!song.isInLibrary) {
+                val updatedSong = song.copy(
+                    isInLibrary = true,
+                    dateAddedTimestamp = System.currentTimeMillis()
+                )
+                songDao.updateSong(updatedSong)
+                libraryRepository.linkSongToArtist(updatedSong)
+            }
         }
     }
 
     fun downloadSong(result: SearchResult) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
+            // First, ensure the song exists in the database and get its object.
             val song = playlistManager.getSongForItem(result.streamInfo)
+
+            // If the song is not already in the library, add it.
+            if (!song.isInLibrary) {
+                val updatedSong = song.copy(
+                    isInLibrary = true,
+                    dateAddedTimestamp = System.currentTimeMillis()
+                )
+                songDao.updateSong(updatedSong)
+                // Linking to an artist is handled by getSongForItem for new songs,
+                // but we call it here to be safe for existing songs not in the library.
+                libraryRepository.linkSongToArtist(updatedSong)
+            }
+
+            // Finally, start the download.
             playlistManager.startDownload(song)
         }
-    }
-
-    fun selectItemForPlaylist(item: Any) {
-        if (item is SearchResult) {
-            itemToAddToPlaylist = item.streamInfo
-        } else if (item is Song || item is StreamInfoItem) {
-            itemToAddToPlaylist = item
-        }
-    }
-
-    fun dismissAddToPlaylistSheet() {
-        itemToAddToPlaylist = null
-    }
-
-    fun onPlaylistSelectedForAddition(playlistId: Long) {
-        itemToAddToPlaylist?.let { item ->
-            playlistManager.addItemToPlaylist(playlistId, item)
-        }
-        dismissAddToPlaylistSheet()
-    }
-
-    fun prepareToCreatePlaylist() {
-        pendingItem = itemToAddToPlaylist
-        dismissAddToPlaylistSheet()
-        showCreatePlaylistDialog = true
-    }
-
-    fun createPlaylistAndAddPendingItem(name: String) {
-        pendingItem?.let { item ->
-            playlistManager.createPlaylistAndAddItem(name, item)
-            pendingItem = null
-        }
-        dismissCreatePlaylistDialog()
-    }
-
-    fun dismissCreatePlaylistDialog() {
-        showCreatePlaylistDialog = false
     }
 }

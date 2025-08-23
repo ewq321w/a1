@@ -15,13 +15,37 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.m.R
 import com.example.m.data.database.Song
+import com.example.m.managers.DownloadStatus
+import java.text.DecimalFormat
+
+internal fun formatDuration(totalSeconds: Long): String {
+    if (totalSeconds < 0) return ""
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return if (hours > 0) {
+        String.format("%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format("%d:%02d", minutes, seconds)
+    }
+}
+
+internal fun formatPlayCount(count: Int): String {
+    if (count < 0) return ""
+    if (count == 1) return "1 play"
+    if (count < 1000) return "$count plays"
+    val thousands = count / 1000.0
+    return "${DecimalFormat("0.#").format(thousands)}K plays"
+}
 
 @Composable
 fun SongItem(
     song: Song,
+    downloadStatus: DownloadStatus?,
     onClick: () -> Unit,
     onAddToPlaylistClick: () -> Unit,
     onPlayNextClick: () -> Unit,
@@ -36,31 +60,69 @@ fun SongItem(
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    val isDownloading = downloadStatus is DownloadStatus.Downloading || downloadStatus is DownloadStatus.Queued
 
     ListItem(
         headlineContent = { Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (song.localFilePath != null) {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = "Downloaded",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .size(16.dp)
-                            .padding(end = 4.dp)
-                    )
-                } else if (song.isInLibrary) {
-                    Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = "In Library",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .size(16.dp)
-                            .padding(end = 4.dp)
-                    )
+                Box(
+                    modifier = Modifier.width(20.dp), // Provides consistent spacing
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    val iconSize = 16.dp
+                    when (downloadStatus) {
+                        is DownloadStatus.Downloading -> {
+                            CircularProgressIndicator(
+                                progress = { downloadStatus.progress / 100f },
+                                modifier = Modifier.size(iconSize),
+                                strokeWidth = 1.5.dp
+                            )
+                        }
+                        is DownloadStatus.Queued -> {
+                            Icon(
+                                imageVector = Icons.Default.HourglassTop,
+                                contentDescription = "Queued",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(iconSize)
+                            )
+                        }
+                        is DownloadStatus.Failed -> {
+                            Icon(
+                                imageVector = Icons.Default.ErrorOutline,
+                                contentDescription = "Failed",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(iconSize)
+                            )
+                        }
+                        null -> {
+                            if (song.localFilePath != null) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Downloaded",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(iconSize)
+                                )
+                            } else if (song.isInLibrary) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "In Library",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(iconSize)
+                                )
+                            }
+                        }
+                    }
                 }
-                Text(song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis)
+
+                var supportText = song.artist
+                if (song.duration > 0) {
+                    supportText += " • ${formatDuration(song.duration)}"
+                }
+                if (song.playCount > 0) {
+                    supportText += " • ${formatPlayCount(song.playCount)}"
+                }
+                Text(supportText, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
             }
         },
         leadingContent = {
@@ -92,9 +154,14 @@ fun SongItem(
                         )
                     }
                     onDownloadClick?.let {
+                        val downloadText = when {
+                            isDownloading -> "Downloading..."
+                            song.localFilePath != null -> "Downloaded"
+                            else -> "Download"
+                        }
                         DropdownMenuItem(
-                            text = { Text(if (song.localFilePath != null) "Downloaded" else "Download") },
-                            enabled = song.localFilePath == null,
+                            text = { Text(downloadText) },
+                            enabled = !isDownloading && song.localFilePath == null,
                             onClick = { it(); showMenu = false }
                         )
                     }
@@ -130,7 +197,7 @@ fun EmptyStateMessage(message: String) {
             .padding(16.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(text = message, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f))
+        Text(text = message, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f))
     }
 }
 

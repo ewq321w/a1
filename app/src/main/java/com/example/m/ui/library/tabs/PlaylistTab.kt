@@ -17,14 +17,13 @@ import androidx.compose.ui.unit.dp
 import com.example.m.data.database.PlaylistWithSongs
 import com.example.m.ui.library.DeletableItem
 import com.example.m.ui.library.LibraryViewModel
-import com.example.m.ui.library.PlaylistSummary
 import com.example.m.ui.library.components.CompositeThumbnailImage
 import com.example.m.ui.library.components.ConfirmDeleteDialog
 import com.example.m.ui.library.components.EmptyStateMessage
 
 @Composable
 fun PlaylistTabContent(
-    playlists: List<PlaylistSummary>,
+    playlists: List<PlaylistWithSongs>,
     onPlaylistClick: (Long) -> Unit,
     onEditPlaylist: (Long) -> Unit,
     viewModel: LibraryViewModel
@@ -49,10 +48,9 @@ fun PlaylistTabContent(
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(
                 items = playlists,
-                key = { it.playlistWithSongs.playlist.playlistId },
+                key = { it.playlist.playlistId },
                 contentType = { "Playlist" }
-            ) { playlistSummary ->
-                val p = playlistSummary.playlistWithSongs
+            ) { p ->
                 val rememberedOnClick = remember { { onPlaylistClick(p.playlist.playlistId) } }
                 val rememberedOnPlay = remember { { viewModel.playPlaylist(p) } }
                 val rememberedOnShuffle = remember { { viewModel.shufflePlaylist(p) } }
@@ -63,7 +61,6 @@ fun PlaylistTabContent(
 
                 PlaylistItem(
                     playlistWithSongs = p,
-                    allThumbnailUrls = playlistSummary.allThumbnailUrls,
                     onClick = rememberedOnClick,
                     onPlay = rememberedOnPlay,
                     onShuffle = rememberedOnShuffle,
@@ -81,7 +78,6 @@ fun PlaylistTabContent(
 @Composable
 fun PlaylistItem(
     playlistWithSongs: PlaylistWithSongs,
-    allThumbnailUrls: List<String>,
     onClick: () -> Unit,
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
@@ -112,7 +108,7 @@ fun PlaylistItem(
         },
         leadingContent = {
             CompositeThumbnailImage(
-                urls = allThumbnailUrls,
+                urls = playlistWithSongs.songs.map { it.thumbnailUrl },
                 contentDescription = "Playlist thumbnail for ${playlistWithSongs.playlist.name}",
                 processUrls = viewModel::processThumbnails,
                 modifier = Modifier.size(50.dp)

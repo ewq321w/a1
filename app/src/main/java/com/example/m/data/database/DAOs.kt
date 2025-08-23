@@ -12,6 +12,9 @@ interface SongDao {
     @Update
     suspend fun updateSong(song: Song)
 
+    @Query("UPDATE songs SET playCount = playCount + 1 WHERE songId = :songId")
+    suspend fun incrementPlayCount(songId: Long)
+
     @Query("SELECT * FROM songs WHERE songId = :id")
     suspend fun getSongById(id: Long): Song?
 
@@ -39,16 +42,7 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE isInLibrary = 1 ORDER BY dateAddedTimestamp ASC")
     fun getLibrarySongsSortedByDateAdded(): Flow<List<Song>>
 
-    @Query("""
-        SELECT s.* FROM songs s
-        LEFT JOIN (
-            SELECT songId, COUNT(songId) as playCount
-            FROM listening_history
-            GROUP BY songId
-        ) ph ON s.songId = ph.songId
-        WHERE s.isInLibrary = 1
-        ORDER BY IFNULL(ph.playCount, 0) DESC, s.title ASC
-    """)
+    @Query("SELECT * FROM songs WHERE isInLibrary = 1 ORDER BY playCount DESC, title ASC")
     fun getLibrarySongsSortedByPlayCount(): Flow<List<Song>>
 
     @Query("""
@@ -190,11 +184,6 @@ data class RecentPlay(
     val recentPlayCount: Int
 )
 
-data class SongPlayCount(
-    val songId: Long,
-    val playCount: Int
-)
-
 data class HistoryEntry(
     @Embedded val song: Song,
     val logId: Long
@@ -210,9 +199,6 @@ interface ListeningHistoryDao {
 
     @Query("SELECT songId, COUNT(songId) as recentPlayCount FROM listening_history GROUP BY songId ORDER BY recentPlayCount DESC LIMIT :limit")
     fun getTopRecentSongs(limit: Int): Flow<List<RecentPlay>>
-
-    @Query("SELECT songId, COUNT(songId) as playCount FROM listening_history GROUP BY songId")
-    fun getAllPlayCounts(): Flow<List<SongPlayCount>>
 
     @Query("SELECT s.*, h.logId FROM songs s INNER JOIN listening_history h ON s.songId = h.songId ORDER BY h.timestamp DESC")
     fun getListeningHistory(): Flow<List<HistoryEntry>>
@@ -270,6 +256,11 @@ interface PlaybackStateDao {
 data class ArtistIdAndSong(
     val artistId: Long,
     @Embedded val song: Song
+)
+
+data class ArtistIdAndThumbnail(
+    val artistId: Long,
+    val thumbnailUrl: String
 )
 
 @Dao
@@ -350,6 +341,14 @@ interface ArtistDao {
 
     @Query("SELECT T.thumbnailUrl FROM artist_song_cross_ref AS A_S JOIN songs AS T ON A_S.songId = T.songId WHERE A_S.artistId = :artistId ORDER BY A_S.customOrderPosition ASC LIMIT 4")
     suspend fun getThumbnailsForArtist(artistId: Long): List<String>
+
+    @Query("""
+        SELECT ascr.artistId, s.thumbnailUrl FROM songs s
+        INNER JOIN artist_song_cross_ref ascr ON s.songId = ascr.songId
+        WHERE ascr.artistId IN (:artistIds) AND s.isInLibrary = 1
+        GROUP BY ascr.artistId
+    """)
+    suspend fun getRepresentativeThumbnailsForArtists(artistIds: List<Long>): List<ArtistIdAndThumbnail>
 
     @Query("""
         SELECT ascr.artistId, s.* FROM songs s 

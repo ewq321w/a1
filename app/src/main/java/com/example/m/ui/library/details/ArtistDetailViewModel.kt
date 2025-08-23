@@ -9,8 +9,10 @@ import androidx.lifecycle.viewModelScope
 import com.example.m.data.PreferencesManager
 import com.example.m.data.database.*
 import com.example.m.data.repository.LibraryRepository
+import com.example.m.managers.DownloadStatusManager
 import com.example.m.managers.PlaylistManager
 import com.example.m.playback.MusicServiceConnection
+import com.example.m.ui.library.SongForList
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -30,9 +32,9 @@ class ArtistDetailViewModel @Inject constructor(
     private val musicServiceConnection: MusicServiceConnection,
     private val songDao: SongDao,
     private val artistDao: ArtistDao,
-    private val listeningHistoryDao: ListeningHistoryDao,
     private val playlistManager: PlaylistManager,
-    private val preferencesManager: PreferencesManager
+    private val preferencesManager: PreferencesManager,
+    private val downloadStatusManager: DownloadStatusManager
 ) : ViewModel() {
     private val artistId: Long = checkNotNull(savedStateHandle["artistId"])
 
@@ -45,19 +47,20 @@ class ArtistDetailViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val songs: StateFlow<List<Song>> = combine(
+    val songs: StateFlow<List<SongForList>> = combine(
         artistWithSongs,
         sortOrder,
-        listeningHistoryDao.getAllPlayCounts()
-    ) { artistWithSongs, order, playCounts ->
+        downloadStatusManager.statuses
+    ) { artistWithSongs, order, statuses ->
         val songList = artistWithSongs?.songs ?: emptyList()
-        val playCountMap = playCounts.associateBy({ it.songId }, { it.playCount })
-
-        when (order) {
+        val sortedList = when (order) {
             ArtistSortOrder.CUSTOM -> songList
             ArtistSortOrder.TITLE -> songList.sortedBy { it.title }
             ArtistSortOrder.DATE_ADDED -> songList.sortedBy { it.dateAddedTimestamp }
-            ArtistSortOrder.PLAY_COUNT -> songList.sortedByDescending { playCountMap[it.songId] ?: 0 }
+            ArtistSortOrder.PLAY_COUNT -> songList.sortedByDescending { it.playCount }
+        }
+        sortedList.map { song ->
+            SongForList(song, statuses[song.youtubeUrl])
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -75,7 +78,7 @@ class ArtistDetailViewModel @Inject constructor(
     val navigateToArtist: SharedFlow<Long> = _navigateToArtist.asSharedFlow()
 
     fun onSongSelected(selectedIndex: Int) {
-        val currentSongs = songs.value
+        val currentSongs = songs.value.map { it.song }
         if (currentSongs.isNotEmpty()) {
             viewModelScope.launch {
                 musicServiceConnection.playSongList(currentSongs, selectedIndex)
@@ -84,14 +87,11 @@ class ArtistDetailViewModel @Inject constructor(
     }
 
     fun downloadSong(song: Song) {
-        viewModelScope.launch {
-            val librarySong = playlistManager.getSongForItem(song)
-            playlistManager.startDownload(librarySong)
-        }
+        playlistManager.startDownload(song)
     }
 
     fun playArtist() {
-        val currentSongs = songs.value
+        val currentSongs = songs.value.map { it.song }
         if (currentSongs.isNotEmpty()) {
             viewModelScope.launch {
                 musicServiceConnection.playSongList(currentSongs, 0)
@@ -100,7 +100,7 @@ class ArtistDetailViewModel @Inject constructor(
     }
 
     fun shuffleArtist() {
-        val currentSongs = songs.value
+        val currentSongs = songs.value.map { it.song }
         if (currentSongs.isNotEmpty()) {
             val (downloaded, remote) = currentSongs.partition { it.localFilePath != null }
             val finalShuffledList = downloaded.shuffled() + remote.shuffled()
@@ -179,7 +179,7 @@ class ArtistDetailViewModel @Inject constructor(
     }
 
     fun onShuffleSong(song: Song) {
-        val currentSongs = songs.value
+        val currentSongs = songs.value.map { it.song }
         val index = currentSongs.indexOf(song)
         if (index != -1) {
             viewModelScope.launch {

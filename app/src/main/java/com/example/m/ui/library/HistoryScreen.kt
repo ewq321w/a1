@@ -1,6 +1,7 @@
 package com.example.m.ui.library
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -137,19 +138,23 @@ fun HistoryScreen(
                             )
                         }
                     }
-                }
+                },
+                windowInsets = TopAppBarDefaults.windowInsets
             )
         },
         containerColor = MaterialTheme.colorScheme.background
-    ) { paddingValues ->
+    ) { innerScaffoldPadding ->
         if (history.isEmpty()) {
             EmptyStateMessage(message = "Your listening history will appear here.")
         } else {
-            LazyColumn(modifier = Modifier.padding(paddingValues)) {
-                itemsIndexed(history, key = { _, entry -> entry.logId }) { index, entry ->
-                    val song = entry.song
+            LazyColumn(modifier = Modifier
+                .padding(innerScaffoldPadding)
+                .navigationBarsPadding()) {
+                itemsIndexed(history, key = { _, item -> item.entry.logId }) { index, item ->
+                    val song = item.entry.song
                     SongItem(
                         song = song,
+                        downloadStatus = item.downloadStatus,
                         onClick = { viewModel.onSongSelected(index) },
                         onAddToPlaylistClick = { viewModel.selectItemForPlaylist(song) },
                         onPlayNextClick = { viewModel.onPlaySongNext(song) },
@@ -158,7 +163,7 @@ fun HistoryScreen(
                         onShuffleClick = { viewModel.onShuffleSong(song) },
                         onAddToLibraryClick = { viewModel.addToLibrary(song) },
                         onDownloadClick = { viewModel.download(song) },
-                        onDeleteFromHistoryClick = { viewModel.deleteFromHistory(entry) }
+                        onDeleteFromHistoryClick = { viewModel.deleteFromHistory(item.entry) }
                     )
                 }
             }

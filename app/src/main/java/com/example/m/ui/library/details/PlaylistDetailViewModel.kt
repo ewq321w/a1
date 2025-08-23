@@ -11,8 +11,10 @@ import androidx.lifecycle.viewModelScope
 import com.example.m.data.PreferencesManager
 import com.example.m.data.database.*
 import com.example.m.data.repository.LibraryRepository
+import com.example.m.managers.DownloadStatusManager
 import com.example.m.managers.PlaylistManager
 import com.example.m.playback.MusicServiceConnection
+import com.example.m.ui.library.SongForList
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -36,10 +38,10 @@ class PlaylistDetailViewModel @Inject constructor(
     private val playlistDao: PlaylistDao,
     private val songDao: SongDao,
     private val artistDao: ArtistDao,
-    private val listeningHistoryDao: ListeningHistoryDao,
     @ApplicationContext private val context: Context,
     private val playlistManager: PlaylistManager,
-    private val preferencesManager: PreferencesManager
+    private val preferencesManager: PreferencesManager,
+    private val downloadStatusManager: DownloadStatusManager
 ) : ViewModel() {
     private val playlistId: Long = checkNotNull(savedStateHandle["playlistId"])
 
@@ -54,20 +56,21 @@ class PlaylistDetailViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val songs: StateFlow<List<Song>> = combine(
+    val songs: StateFlow<List<SongForList>> = combine(
         basePlaylistWithSongs,
         _sortOrder,
-        listeningHistoryDao.getAllPlayCounts()
-    ) { playlistWithSongs, order, playCounts ->
+        downloadStatusManager.statuses
+    ) { playlistWithSongs, order, statuses ->
         val songList = playlistWithSongs?.songs ?: emptyList()
-        val playCountMap = playCounts.associateBy({ it.songId }, { it.playCount })
-
-        when (order) {
+        val sortedList = when (order) {
             PlaylistSortOrder.CUSTOM -> songList
             PlaylistSortOrder.TITLE -> songList.sortedBy { it.title }
             PlaylistSortOrder.ARTIST -> songList.sortedBy { it.artist }
             PlaylistSortOrder.DATE_ADDED -> songList.sortedBy { it.dateAddedTimestamp }
-            PlaylistSortOrder.PLAY_COUNT -> songList.sortedByDescending { playCountMap[it.songId] ?: 0 }
+            PlaylistSortOrder.PLAY_COUNT -> songList.sortedByDescending { it.playCount }
+        }
+        sortedList.map { song ->
+            SongForList(song, statuses[song.youtubeUrl])
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -85,7 +88,7 @@ class PlaylistDetailViewModel @Inject constructor(
     val navigateToArtist: SharedFlow<Long> = _navigateToArtist.asSharedFlow()
 
     fun onSongSelected(selectedIndex: Int) {
-        val currentSongs = songs.value
+        val currentSongs = songs.value.map { it.song }
         if (currentSongs.isNotEmpty()) {
             viewModelScope.launch {
                 musicServiceConnection.playSongList(currentSongs, selectedIndex)
@@ -94,10 +97,7 @@ class PlaylistDetailViewModel @Inject constructor(
     }
 
     fun downloadSong(song: Song) {
-        viewModelScope.launch {
-            val librarySong = playlistManager.getSongForItem(song)
-            playlistManager.startDownload(librarySong)
-        }
+        playlistManager.startDownload(song)
     }
 
     fun setSortOrder(order: PlaylistSortOrder) {
@@ -106,7 +106,7 @@ class PlaylistDetailViewModel @Inject constructor(
     }
 
     fun shufflePlaylist() {
-        val currentSongs = songs.value
+        val currentSongs = songs.value.map { it.song }
         if (currentSongs.isNotEmpty()) {
             val (downloaded, remote) = currentSongs.partition { it.localFilePath != null }
             val finalShuffledList = downloaded.shuffled() + remote.shuffled()
@@ -145,7 +145,8 @@ class PlaylistDetailViewModel @Inject constructor(
             if (currentPlaylist.downloadAutomatically) {
                 playlistDao.updatePlaylist(currentPlaylist.copy(downloadAutomatically = false))
             }
-            songs.value.forEach { song ->
+            songs.value.forEach { songForList ->
+                val song = songForList.song
                 if (song.localFilePath != null) {
                     try {
                         val uri = song.localFilePath!!.toUri()
@@ -164,9 +165,11 @@ class PlaylistDetailViewModel @Inject constructor(
     }
 
     fun downloadAllSongs() {
-        val songsToDownload = songs.value.filter {
-            it.localFilePath == null || !File(it.localFilePath!!).exists()
-        }
+        val songsToDownload = songs.value
+            .map { it.song }
+            .filter {
+                it.localFilePath == null || !File(it.localFilePath!!).exists()
+            }
 
         songsToDownload.forEach { song ->
             playlistManager.startDownload(song)
@@ -217,7 +220,7 @@ class PlaylistDetailViewModel @Inject constructor(
     }
 
     fun onShuffleSong(song: Song) {
-        val currentSongs = songs.value
+        val currentSongs = songs.value.map { it.song }
         val index = currentSongs.indexOf(song)
         if (index != -1) {
             viewModelScope.launch {

@@ -1,17 +1,18 @@
 package com.example.m.ui.main
 
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
-import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.m.ui.navigation.AppNavHost
 import com.example.m.ui.navigation.bottomNavItems
@@ -20,16 +21,28 @@ import com.example.m.ui.player.PlayerScreen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(
-    mainViewModel: MainViewModel = hiltViewModel()
-) {
+fun MainScreen() {
+    val activity = LocalContext.current as ComponentActivity
+    val mainViewModel: MainViewModel = hiltViewModel(activity)
+
     val navController = rememberNavController()
     val nowPlaying by mainViewModel.nowPlaying.collectAsState()
     val isPlaying by mainViewModel.isPlaying.collectAsState()
     val playbackState by mainViewModel.playbackState.collectAsState()
     val showPlayerScreen by mainViewModel.isPlayerScreenVisible
 
+    val snackbarHostState = remember { SnackbarHostState() }
+    val maintenanceResult by mainViewModel.maintenanceResult
+
+    LaunchedEffect(maintenanceResult) {
+        maintenanceResult?.let {
+            snackbarHostState.showSnackbar(it)
+            mainViewModel.clearMaintenanceResult()
+        }
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
             Column {
@@ -47,11 +60,11 @@ fun MainScreen(
                 }
 
                 NavigationBar(
+                    modifier = Modifier.height(85.dp),
                     containerColor = MaterialTheme.colorScheme.surface
                 ) {
                     val navBackStack by navController.currentBackStack.collectAsState()
 
-                    // Find the route of the last main screen in the back stack
                     val currentTabRoute = navBackStack
                         .lastOrNull { entry -> bottomNavItems.any { it.route == entry.destination.route } }
                         ?.destination?.route

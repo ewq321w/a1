@@ -1,10 +1,7 @@
 package com.example.m.ui.library.tabs
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -12,13 +9,14 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.m.data.database.Artist
 import com.example.m.data.database.ArtistGroup
-import com.example.m.ui.library.ArtistForList
+import com.example.m.data.database.ArtistWithSongs
 import com.example.m.ui.library.DeletableItem
 import com.example.m.ui.library.LibraryArtistItem
 import com.example.m.ui.library.LibraryViewModel
@@ -42,7 +40,7 @@ fun ArtistsTabContent(
                 items = artists,
                 key = { item ->
                     when (item) {
-                        is LibraryArtistItem.ArtistItem -> "artist-${item.artistForList.artist.artistId}"
+                        is LibraryArtistItem.ArtistItem -> "artist-${item.artistWithSongs.artist.artistId}"
                         is LibraryArtistItem.GroupItem -> "group-${item.group.groupId}"
                     }
                 },
@@ -52,16 +50,16 @@ fun ArtistsTabContent(
             ) { libraryItem ->
                 when (libraryItem) {
                     is LibraryArtistItem.ArtistItem -> {
-                        val artist = libraryItem.artistForList.artist
+                        val artistWithSongs = libraryItem.artistWithSongs
                         ArtistItem(
-                            artistForList = libraryItem.artistForList,
-                            onClick = { onArtistClick(artist.artistId) },
-                            onPlay = { viewModel.playArtist(artist) },
-                            onShuffle = { viewModel.shuffleArtist(artist) },
-                            onEdit = { onEditArtistSongs(artist.artistId) },
-                            onToggleAutoDownload = { viewModel.toggleAutoDownloadForArtist(artist) },
-                            groupAction = "Move to group..." to { viewModel.prepareToMoveArtist(artist) },
-                            onHideArtist = { viewModel.hideArtist(artist) },
+                            artistWithSongs = artistWithSongs,
+                            onClick = { onArtistClick(artistWithSongs.artist.artistId) },
+                            onPlay = { viewModel.playArtist(artistWithSongs.artist) },
+                            onShuffle = { viewModel.shuffleArtist(artistWithSongs.artist) },
+                            onEdit = { onEditArtistSongs(artistWithSongs.artist.artistId) },
+                            onToggleAutoDownload = { viewModel.toggleAutoDownloadForArtist(artistWithSongs.artist) },
+                            groupAction = "Move to group..." to { viewModel.prepareToMoveArtist(artistWithSongs.artist) },
+                            onHideArtist = { viewModel.hideArtist(artistWithSongs.artist) },
                             processUrls = viewModel::processThumbnails
                         )
                     }
@@ -70,6 +68,7 @@ fun ArtistsTabContent(
                         GroupItem(
                             group = group,
                             thumbnailUrls = libraryItem.thumbnailUrls,
+                            artistCount = libraryItem.artistCount,
                             onClick = { onGoToArtistGroup(group.groupId) },
                             onPlayClick = { viewModel.playArtistGroup(group) },
                             onShuffleClick = { viewModel.shuffleArtistGroup(group) },
@@ -85,7 +84,7 @@ fun ArtistsTabContent(
 
 @Composable
 fun ArtistItem(
-    artistForList: ArtistForList,
+    artistWithSongs: ArtistWithSongs,
     onClick: () -> Unit,
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
@@ -97,23 +96,28 @@ fun ArtistItem(
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
-    val artist = artistForList.artist
+    val artist = artistWithSongs.artist
+    val librarySongs = artistWithSongs.songs.filter { it.isInLibrary }
 
     ListItem(
         headlineContent = { Text(artist.name) },
         supportingContent = {
-            if (artist.downloadAutomatically) {
-                Icon(
-                    imageVector = Icons.Default.CheckCircle,
-                    contentDescription = "Downloads Automatically",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(16.dp)
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (artist.downloadAutomatically) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = "Downloads Automatically",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                }
+                Text("${librarySongs.size} songs")
             }
         },
         leadingContent = {
             CompositeThumbnailImage(
-                urls = artistForList.allThumbnailUrls,
+                urls = librarySongs.map { it.thumbnailUrl },
                 contentDescription = "Thumbnail for ${artist.name}",
                 processUrls = processUrls,
                 modifier = Modifier.size(50.dp)
@@ -160,6 +164,7 @@ fun ArtistItem(
 fun GroupItem(
     group: ArtistGroup,
     thumbnailUrls: List<String>,
+    artistCount: Int,
     onClick: () -> Unit,
     onPlayClick: () -> Unit,
     onShuffleClick: () -> Unit,
@@ -171,6 +176,9 @@ fun GroupItem(
 
     ListItem(
         headlineContent = { Text(group.name, fontWeight = FontWeight.Bold) },
+        supportingContent = {
+            Text("$artistCount artists")
+        },
         leadingContent = {
             FolderWithThumbnails(
                 urls = thumbnailUrls,

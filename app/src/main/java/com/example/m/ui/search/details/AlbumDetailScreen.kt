@@ -1,9 +1,5 @@
 package com.example.m.ui.search.details
 
-import android.Manifest
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,7 +20,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -32,10 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -50,9 +42,7 @@ import com.example.m.data.database.Song
 import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.library.components.AddToPlaylistSheet
 import com.example.m.ui.library.components.CreatePlaylistDialog
-import com.example.m.ui.search.SearchResult
 import com.example.m.ui.search.SearchResultItem
-import kotlinx.coroutines.launch
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -63,26 +53,10 @@ fun AlbumDetailScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val allPlaylists by viewModel.allPlaylists.collectAsState()
-    val snackbarHostState = remember { SnackbarHostState() }
-    val coroutineScope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState()
-    var resultToDownload by remember { mutableStateOf<SearchResult?>(null) }
 
     val showCreatePlaylistDialog by remember { derivedStateOf { viewModel.showCreatePlaylistDialog } }
     val itemToAddToPlaylist by remember { derivedStateOf { viewModel.itemToAddToPlaylist } }
-
-    val requestPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean ->
-        if (isGranted) {
-            resultToDownload?.let { viewModel.downloadSong(it) }
-        } else {
-            coroutineScope.launch {
-                snackbarHostState.showSnackbar("Notification permission is required to see download progress.")
-            }
-        }
-        resultToDownload = null
-    }
 
     if (showCreatePlaylistDialog) {
         CreatePlaylistDialog(
@@ -176,22 +150,16 @@ fun AlbumDetailScreen(
                         )
                     }
 
-                    itemsIndexed(uiState.songs, key = { index, item -> item.streamInfo.url + index }) { index, searchResult ->
+                    itemsIndexed(uiState.songs, key = { index, item -> item.result.streamInfo.url + index }) { index, item ->
                         SearchResultItem(
-                            result = searchResult,
+                            result = item.result,
+                            downloadStatus = item.downloadStatus,
                             isSong = uiState.searchType == "music",
                             imageLoader = viewModel.imageLoader,
                             onPlay = { viewModel.onSongSelected(index) },
-                            onDownload = {
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                    resultToDownload = searchResult
-                                    requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                } else {
-                                    viewModel.downloadSong(searchResult)
-                                }
-                            },
-                            onAddToLibrary = { viewModel.addSongToLibrary(searchResult) },
-                            onAddToPlaylistClick = { viewModel.selectItemForPlaylist(searchResult) }
+                            onDownload = { viewModel.downloadSong(item.result) },
+                            onAddToLibrary = { viewModel.addSongToLibrary(item.result) },
+                            onAddToPlaylistClick = { viewModel.selectItemForPlaylist(item) }
                         )
                     }
                 }

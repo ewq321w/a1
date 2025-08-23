@@ -1,29 +1,12 @@
 package com.example.m.ui.search
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,232 +16,141 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.ImageLoader
 import coil.compose.AsyncImage
+import com.example.m.ui.common.getThumbnail
 
 @Composable
-fun MusicSearchResultsLayout(
+fun MusicSearchLayout(
     uiState: SearchUiState,
+    songsWithStatus: List<SearchResultForList>,
     imageLoader: ImageLoader,
-    onShowMoreClicked: (SearchCategory) -> Unit,
-    onCloseDetailedView: () -> Unit,
-    onPlaySong: (Int, List<SearchResult>) -> Unit,
+    onSongClicked: (Int) -> Unit,
+    onAlbumClicked: (AlbumResult) -> Unit,
+    onArtistClicked: (ArtistResult) -> Unit,
+    onShowMore: (SearchCategory) -> Unit,
     onDownloadSong: (SearchResult) -> Unit,
-    onAddSongToLibrary: (SearchResult) -> Unit,
-    onAddSongToPlaylistClick: (SearchResult) -> Unit,
-    onArtistClick: (ArtistResult) -> Unit
+    onAddToLibrary: (SearchResult) -> Unit,
+    onAddToPlaylist: (SearchResult) -> Unit
 ) {
-    if (uiState.detailedViewCategory != null) {
-        DetailedResultsView(
-            category = uiState.detailedViewCategory,
-            uiState = uiState,
-            imageLoader = imageLoader,
-            onBack = onCloseDetailedView,
-            onPlaySong = onPlaySong,
-            onDownloadSong = onDownloadSong,
-            onAddSongToLibrary = onAddSongToLibrary,
-            onAddSongToPlaylistClick = onAddSongToPlaylistClick,
-            onArtistClick = onArtistClick
-        )
-    } else {
-        SummaryResultsView(
-            uiState = uiState,
-            imageLoader = imageLoader,
-            onShowMoreClicked = onShowMoreClicked,
-            onPlaySong = onPlaySong,
-            onDownloadSong = onDownloadSong,
-            onAddSongToLibrary = onAddSongToLibrary,
-            onAddSongToPlaylistClick = onAddSongToPlaylistClick,
-            onArtistClick = onArtistClick
-        )
-    }
-}
-
-@Composable
-private fun SummaryResultsView(
-    uiState: SearchUiState,
-    imageLoader: ImageLoader,
-    onShowMoreClicked: (SearchCategory) -> Unit,
-    onPlaySong: (Int, List<SearchResult>) -> Unit,
-    onDownloadSong: (SearchResult) -> Unit,
-    onAddSongToLibrary: (SearchResult) -> Unit,
-    onAddSongToPlaylistClick: (SearchResult) -> Unit,
-    onArtistClick: (ArtistResult) -> Unit
-) {
-    LazyColumn(modifier = Modifier.fillMaxSize()) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 16.dp)
+    ) {
         if (uiState.songs.isNotEmpty()) {
-            item(key = "songs_section") {
-                SongResultSection(
-                    songs = uiState.songs.take(4),
+            item {
+                SectionHeader(
+                    title = "Songs",
+                    showMoreButton = uiState.songs.size > 3,
+                    onMoreClicked = { onShowMore(SearchCategory.SONGS) }
+                )
+            }
+            itemsIndexed(songsWithStatus.take(3), key = { _, item -> item.result.streamInfo.url!! }) { index, item ->
+                SearchResultItem(
+                    result = item.result,
+                    downloadStatus = item.downloadStatus,
+                    isSong = true,
                     imageLoader = imageLoader,
-                    onMoreClicked = { onShowMoreClicked(SearchCategory.SONGS) },
-                    onPlay = { index -> onPlaySong(index, uiState.songs) },
-                    onDownloadSong = onDownloadSong,
-                    onAddSongToLibrary = onAddSongToLibrary,
-                    onAddToPlaylistClick = onAddSongToPlaylistClick
+                    onPlay = { onSongClicked(index) },
+                    onDownload = { onDownloadSong(item.result) },
+                    onAddToLibrary = { onAddToLibrary(item.result) },
+                    onAddToPlaylistClick = { onAddToPlaylist(item.result) }
+                )
+            }
+        }
+
+        if (uiState.albums.isNotEmpty()) {
+            item {
+                SectionHeader(
+                    title = "Albums",
+                    showMoreButton = uiState.albums.size > 3,
+                    onMoreClicked = { onShowMore(SearchCategory.ALBUMS) }
+                )
+            }
+            items(uiState.albums.take(3), key = { it.albumInfo.url!! }) { item ->
+                ListItem(
+                    modifier = Modifier.clickable { onAlbumClicked(item) },
+                    headlineContent = { Text(item.albumInfo.name ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    supportingContent = {
+                        if (item.albumInfo.uploaderName != null) {
+                            Text(item.albumInfo.uploaderName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    },
+                    leadingContent = {
+                        AsyncImage(
+                            model = item.albumInfo.getThumbnail(),
+                            imageLoader = imageLoader,
+                            contentDescription = item.albumInfo.name,
+                            modifier = Modifier.size(50.dp)
+                        )
+                    }
                 )
             }
         }
 
         if (uiState.artists.isNotEmpty()) {
-            item(key = "artists_section") {
-                ArtistResultSection(
-                    artists = uiState.artists.take(1),
+            item {
+                SectionHeader(
+                    title = "Artists",
+                    showMoreButton = uiState.artists.size > 3,
+                    onMoreClicked = { onShowMore(SearchCategory.ARTISTS) }
+                )
+            }
+            items(uiState.artists.take(3), key = { it.artistInfo.url!! }) { item ->
+                ArtistListItem(
+                    artistResult = item,
                     imageLoader = imageLoader,
-                    onMoreClicked = { onShowMoreClicked(SearchCategory.ARTISTS) },
-                    onArtistClicked = onArtistClick,
-                    showMoreButton = uiState.artists.size > 1
+                    onArtistClicked = { onArtistClicked(item) }
                 )
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DetailedResultsView(
-    category: SearchCategory,
-    uiState: SearchUiState,
-    imageLoader: ImageLoader,
-    onBack: () -> Unit,
-    onPlaySong: (Int, List<SearchResult>) -> Unit,
-    onDownloadSong: (SearchResult) -> Unit,
-    onAddSongToLibrary: (SearchResult) -> Unit,
-    onAddSongToPlaylistClick: (SearchResult) -> Unit,
-    onArtistClick: (ArtistResult) -> Unit
+private fun SectionHeader(
+    title: String,
+    showMoreButton: Boolean,
+    onMoreClicked: () -> Unit
 ) {
-    val title = when (category) {
-        SearchCategory.SONGS -> "Songs"
-        SearchCategory.ARTISTS -> "Artists"
-        else -> ""
-    }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(title) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                }
-            )
-        }
-    ) { paddingValues ->
-        LazyColumn(
-            modifier = Modifier
-                .padding(paddingValues)
-                .fillMaxSize()
-        ) {
-            when (category) {
-                SearchCategory.SONGS -> {
-                    itemsIndexed(uiState.songs, key = { index, item -> item.streamInfo.url + index }) { index, item ->
-                        SearchResultItem(
-                            result = item,
-                            isSong = true,
-                            imageLoader = imageLoader,
-                            onPlay = { onPlaySong(index, uiState.songs) },
-                            onDownload = { onDownloadSong(item) },
-                            onAddToLibrary = { onAddSongToLibrary(item) },
-                            onAddToPlaylistClick = { onAddSongToPlaylistClick(item) }
-                        )
-                    }
-                }
-                SearchCategory.ARTISTS -> {
-                    items(uiState.artists, key = { it.artistInfo.url!! }) { item ->
-                        ListItem(
-                            modifier = Modifier.clickable { onArtistClick(item) },
-                            headlineContent = { Text(item.artistInfo.name ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            leadingContent = {
-                                AsyncImage(
-                                    model = item.artistInfo.thumbnails.lastOrNull()?.url,
-                                    imageLoader = imageLoader,
-                                    contentDescription = item.artistInfo.name,
-                                    modifier = Modifier
-                                        .size(50.dp)
-                                        .clip(CircleShape)
-                                )
-                            }
-                        )
-                    }
-                }
-                else -> {}
-            }
-        }
-    }
-}
-
-@Composable
-private fun SongResultSection(
-    songs: List<SearchResult>,
-    imageLoader: ImageLoader,
-    onMoreClicked: () -> Unit,
-    onPlay: (Int) -> Unit,
-    onDownloadSong: (SearchResult) -> Unit,
-    onAddSongToLibrary: (SearchResult) -> Unit,
-    onAddToPlaylistClick: (SearchResult) -> Unit
-) {
-    Column {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Songs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        if (showMoreButton) {
             TextButton(onClick = onMoreClicked) { Text("More") }
         }
-        songs.forEachIndexed { index, songResult ->
-            SearchResultItem(
-                result = songResult,
-                isSong = true,
-                imageLoader = imageLoader,
-                onPlay = { onPlay(index) },
-                onDownload = { onDownloadSong(songResult) },
-                onAddToLibrary = { onAddSongToLibrary(songResult) },
-                onAddToPlaylistClick = { onAddToPlaylistClick(songResult) }
-            )
-        }
     }
 }
 
 @Composable
-private fun ArtistResultSection(
-    artists: List<ArtistResult>,
+private fun ArtistListItem(
+    artistResult: ArtistResult,
     imageLoader: ImageLoader,
-    onMoreClicked: () -> Unit,
-    onArtistClicked: (ArtistResult) -> Unit,
-    showMoreButton: Boolean
+    onArtistClicked: (ArtistResult) -> Unit
 ) {
-    Column(Modifier.padding(vertical = 8.dp)) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Artists", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            if (showMoreButton) {
-                TextButton(onClick = onMoreClicked) { Text("More") }
+    ListItem(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onArtistClicked(artistResult) },
+        headlineContent = { Text(artistResult.artistInfo.name ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        supportingContent = {
+            val subs = formatSubscriberCount(artistResult.artistInfo.subscriberCount)
+            if (subs.isNotEmpty()) {
+                Text(text = subs, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-        }
-        artists.forEach { artistResult ->
-            ListItem(
+        },
+        leadingContent = {
+            AsyncImage(
+                model = artistResult.artistInfo.thumbnails.lastOrNull()?.url,
+                imageLoader = imageLoader,
+                contentDescription = artistResult.artistInfo.name,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onArtistClicked(artistResult) },
-                headlineContent = { Text(artistResult.artistInfo.name ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                supportingContent = {
-                    val subs = formatSubscriberCount(artistResult.artistInfo.subscriberCount)
-                    if (subs.isNotEmpty()) {
-                        Text(text = subs, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                },
-                leadingContent = {
-                    AsyncImage(
-                        model = artistResult.artistInfo.thumbnails.lastOrNull()?.url,
-                        imageLoader = imageLoader,
-                        contentDescription = artistResult.artistInfo.name,
-                        modifier = Modifier
-                            .size(50.dp)
-                            .clip(CircleShape)
-                    )
-                }
+                    .size(50.dp)
+                    .clip(CircleShape)
             )
         }
-    }
+    )
 }

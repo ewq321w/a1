@@ -13,7 +13,6 @@ import com.example.m.data.repository.LibraryRepository
 import com.example.m.managers.PlaylistManager
 import com.example.m.managers.ThumbnailProcessor
 import com.example.m.playback.MusicServiceConnection
-import com.example.m.ui.library.ArtistForList
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
@@ -45,27 +44,18 @@ class ArtistGroupDetailViewModel @Inject constructor(
     suspend fun processThumbnails(urls: List<String>) = thumbnailProcessor.process(urls)
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val artistsForList: StateFlow<List<ArtistForList>> = groupWithArtists.flatMapLatest { group ->
+    val artistsInGroup: StateFlow<List<ArtistWithSongs>> = groupWithArtists.flatMapLatest { group ->
         val artists = group?.artists ?: emptyList()
         if (artists.isEmpty()) {
             flowOf(emptyList())
         } else {
-            flow {
-                val artistForListData = coroutineScope {
-                    artists.map { artist ->
-                        async {
-                            val orderedSongs = artistDao.getSongsForArtistSortedByCustom(artist.artistId)
-                            ArtistForList(
-                                artist = artist,
-                                allThumbnailUrls = orderedSongs.map { it.thumbnailUrl }
-                            )
-                        }
-                    }.awaitAll()
-                }
-                emit(artistForListData)
+            val artistFlows = artists.map { artistDao.getArtistWithSongs(it.artistId) }
+            combine(artistFlows) { results ->
+                results.filterNotNull()
             }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
 
     var itemToAddToPlaylist by mutableStateOf<Any?>(null)
         private set

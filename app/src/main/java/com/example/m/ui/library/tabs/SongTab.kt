@@ -7,12 +7,13 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import com.example.m.data.database.Song
+import com.example.m.ui.library.SongForList
 import com.example.m.ui.library.SongSortOrder
 import com.example.m.ui.library.components.SongItem
 
 @Composable
 fun SongsTabContent(
-    songs: List<Song>,
+    songs: List<SongForList>,
     sortOrder: SongSortOrder,
     onSongSelected: (Int) -> Unit,
     onAddToPlaylistClick: (Song) -> Unit,
@@ -29,8 +30,9 @@ fun SongsTabContent(
         ) {
             itemsIndexed(
                 items = songs,
-                key = { _, song -> song.songId }
-            ) { index, song ->
+                key = { _, item -> item.song.songId }
+            ) { index, item ->
+                val song = item.song
                 val rememberedOnSongSelected = remember { { onSongSelected(index) } }
                 val rememberedOnAddToPlaylistClick = remember { { onAddToPlaylistClick(song) } }
                 val rememberedOnDeleteClick = remember { { onDeleteSongClick(song) } }
@@ -42,6 +44,7 @@ fun SongsTabContent(
 
                 SongItem(
                     song = song,
+                    downloadStatus = item.downloadStatus,
                     onClick = rememberedOnSongSelected,
                     onAddToPlaylistClick = rememberedOnAddToPlaylistClick,
                     onDeleteClick = rememberedOnDeleteClick,

@@ -30,7 +30,7 @@ fun ArtistGroupDetailScreen(
     viewModel: ArtistGroupDetailViewModel = hiltViewModel()
 ) {
     val groupWithArtists by viewModel.groupWithArtists.collectAsState()
-    val artistsForList by viewModel.artistsForList.collectAsState()
+    val artistsInGroup by viewModel.artistsInGroup.collectAsState()
     val allPlaylists by viewModel.allPlaylists.collectAsState()
 
     val showCreatePlaylistDialog by remember { derivedStateOf { viewModel.showCreatePlaylistDialog } }
@@ -97,7 +97,7 @@ fun ArtistGroupDetailScreen(
             )
         }
     ) { paddingValues ->
-        if (artistsForList.isEmpty()) {
+        if (artistsInGroup.isEmpty()) {
             val message = if (groupWithArtists == null) "Loading..." else "This group is empty."
             Box(Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
                 if (groupWithArtists == null) {
@@ -108,10 +108,10 @@ fun ArtistGroupDetailScreen(
             }
         } else {
             LazyColumn(modifier = Modifier.padding(paddingValues)) {
-                items(artistsForList, key = { it.artist.artistId }) { artistForList ->
-                    val artist = artistForList.artist
+                items(artistsInGroup, key = { it.artist.artistId }) { artistWithSongs ->
+                    val artist = artistWithSongs.artist
                     ArtistItem(
-                        artistForList = artistForList,
+                        artistWithSongs = artistWithSongs,
                         onClick = { onArtistClick(artist.artistId) },
                         onPlay = { viewModel.playArtist(artist) },
                         onShuffle = { viewModel.shuffleArtist(artist) },

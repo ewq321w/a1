@@ -12,6 +12,8 @@ import com.example.m.data.PreferencesManager
 import com.example.m.data.database.*
 import com.example.m.data.repository.LibraryRepository
 import com.example.m.download.DownloadService
+import com.example.m.managers.DownloadStatus
+import com.example.m.managers.DownloadStatusManager
 import com.example.m.managers.PlaylistManager
 import com.example.m.managers.ThumbnailProcessor
 import com.example.m.playback.MusicServiceConnection
@@ -23,14 +25,9 @@ import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import java.io.File
 import javax.inject.Inject
 
-data class ArtistForList(
-    val artist: Artist,
-    val allThumbnailUrls: List<String>
-)
-
-data class PlaylistSummary(
-    val playlistWithSongs: PlaylistWithSongs,
-    val allThumbnailUrls: List<String>
+data class SongForList(
+    val song: Song,
+    val downloadStatus: DownloadStatus?
 )
 
 sealed interface DeletableItem {
@@ -50,8 +47,8 @@ enum class DownloadFilter { ALL, DOWNLOADED }
 enum class PlaylistFilter { ALL, IN_PLAYLIST }
 
 sealed interface LibraryArtistItem {
-    data class ArtistItem(val artistForList: ArtistForList) : LibraryArtistItem
-    data class GroupItem(val group: ArtistGroup, val thumbnailUrls: List<String>) : LibraryArtistItem
+    data class ArtistItem(val artistWithSongs: ArtistWithSongs) : LibraryArtistItem
+    data class GroupItem(val group: ArtistGroup, val thumbnailUrls: List<String>, val artistCount: Int) : LibraryArtistItem
 }
 
 @HiltViewModel
@@ -65,7 +62,8 @@ class LibraryViewModel @Inject constructor(
     private val artistDao: ArtistDao,
     private val artistGroupDao: ArtistGroupDao,
     private val playlistManager: PlaylistManager,
-    private val thumbnailProcessor: ThumbnailProcessor
+    private val thumbnailProcessor: ThumbnailProcessor,
+    private val downloadStatusManager: DownloadStatusManager
 ) : ViewModel() {
 
     private val _selectedView = MutableStateFlow(preferencesManager.lastLibraryView)
@@ -78,11 +76,6 @@ class LibraryViewModel @Inject constructor(
     val playlistFilter: StateFlow<PlaylistFilter> = _playlistFilter
 
     val itemPendingDeletion = mutableStateOf<DeletableItem?>(null)
-
-    var isDoingMaintenance by mutableStateOf(false)
-        private set
-    var maintenanceResult by mutableStateOf<String?>(null)
-        private set
 
     private val _sortOrder = MutableStateFlow(preferencesManager.songsSortOrder)
     val sortOrder: StateFlow<SongSortOrder> = _sortOrder
@@ -107,16 +100,7 @@ class LibraryViewModel @Inject constructor(
 
     suspend fun processThumbnails(urls: List<String>) = thumbnailProcessor.process(urls)
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val playlists: StateFlow<List<PlaylistSummary>> = libraryRepository.getPlaylistsWithSongs()
-        .map { playlistsWithSongs ->
-            playlistsWithSongs.map { pws ->
-                PlaylistSummary(
-                    playlistWithSongs = pws,
-                    allThumbnailUrls = pws.songs.map { it.thumbnailUrl }
-                )
-            }
-        }.flowOn(Dispatchers.Default)
+    val playlists: StateFlow<List<PlaylistWithSongs>> = libraryRepository.getPlaylistsWithSongs()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val allPlaylists: StateFlow<List<Playlist>> = libraryRepository.getAllPlaylists()
@@ -127,55 +111,38 @@ class LibraryViewModel @Inject constructor(
         combine(
             artistDao.getAllArtistsSortedByCustom(),
             artistGroupDao.getGroupsWithArtists()
-        ) { artistsWithSongs, groupsWithArtists ->
-
-            val artistItems = artistsWithSongs.map { artistWithSongs ->
-                val librarySongs = artistWithSongs.songs.filter { it.isInLibrary }
-                LibraryArtistItem.ArtistItem(
-                    ArtistForList(
-                        artist = artistWithSongs.artist,
-                        allThumbnailUrls = librarySongs.map { it.thumbnailUrl }
-                    )
-                )
-            }
+        ) { artists, groups ->
+            val artistItems = artists.map { LibraryArtistItem.ArtistItem(it) }
 
             val groupItems = coroutineScope {
-                val allArtistIdsInGroups = groupsWithArtists.flatMap { it.artists }.map { it.artistId }
-                val songsForArtistsInGroups = if (allArtistIdsInGroups.isNotEmpty()) {
-                    artistDao.getSongsGroupedByArtistId(allArtistIdsInGroups).groupBy { it.artistId }
+                val allArtistIdsInGroups = groups.flatMap { it.artists }.map { it.artistId }
+                val thumbsByArtistId = if (allArtistIdsInGroups.isNotEmpty()) {
+                    artistDao.getRepresentativeThumbnailsForArtists(allArtistIdsInGroups)
+                        .groupBy { it.artistId }
                 } else {
                     emptyMap()
                 }
 
-                groupsWithArtists.map { groupWithArtists ->
-                    val finalUrls = mutableListOf<String>()
-                    val seenUrls = mutableSetOf<String>()
+                groups.map { groupWithArtists ->
+                    val urls = groupWithArtists.artists.mapNotNull { artist ->
+                        thumbsByArtistId[artist.artistId]?.firstOrNull()?.thumbnailUrl
+                    }.take(4)
 
-                    for (artist in groupWithArtists.artists) {
-                        if (finalUrls.size >= 4) break
-
-                        val songsForThisArtist = songsForArtistsInGroups[artist.artistId] ?: emptyList()
-                        val representativeSong = songsForThisArtist
-                            .firstOrNull { it.song.isInLibrary && it.song.thumbnailUrl !in seenUrls }
-
-                        if (representativeSong != null) {
-                            finalUrls.add(representativeSong.song.thumbnailUrl)
-                            seenUrls.add(representativeSong.song.thumbnailUrl)
-                        }
-                    }
                     LibraryArtistItem.GroupItem(
                         group = groupWithArtists.group,
-                        thumbnailUrls = finalUrls
+                        thumbnailUrls = urls,
+                        artistCount = groupWithArtists.artists.size
                     )
                 }
             }
+
             (artistItems + groupItems)
         }
             .flowOn(Dispatchers.Default)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val songs: StateFlow<List<Song>> = sortOrder.flatMapLatest { order ->
+    val songs: StateFlow<List<SongForList>> = sortOrder.flatMapLatest { order ->
         val songsFlow = when (order) {
             SongSortOrder.ARTIST -> songDao.getLibrarySongsSortedByArtist()
             SongSortOrder.TITLE -> songDao.getLibrarySongsSortedByTitle()
@@ -187,8 +154,9 @@ class LibraryViewModel @Inject constructor(
             songsFlow,
             libraryRepository.getSongsInPlaylists(),
             _downloadFilter,
-            _playlistFilter
-        ) { allSongs, songsInPlaylists, downloadFilter, playlistFilter ->
+            _playlistFilter,
+            downloadStatusManager.statuses
+        ) { allSongs, songsInPlaylists, downloadFilter, playlistFilter, statuses ->
             val songsInPlaylistsIds = songsInPlaylists.map { it.songId }.toSet()
             allSongs.filter { song ->
                 val downloadMatch = when (downloadFilter) {
@@ -200,67 +168,23 @@ class LibraryViewModel @Inject constructor(
                     PlaylistFilter.IN_PLAYLIST -> songsInPlaylistsIds.contains(song.songId)
                 }
                 downloadMatch && playlistMatch
+            }.map { song ->
+                SongForList(song, statuses[song.youtubeUrl])
             }
         }
     }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    fun runLibraryMaintenance() {
-        viewModelScope.launch {
-            isDoingMaintenance = true
-            val reQueuedCount: Int
-            val cleanedCount: Int
-            val fixedLinksCount: Int
-            val cleanedArtistsCount: Int
-            val cleanedSongsCount: Int
-
-            withContext(Dispatchers.IO) {
-                reQueuedCount = libraryRepository.verifyLibraryEntries()
-                cleanedCount = libraryRepository.cleanOrphanedFiles()
-                fixedLinksCount = libraryRepository.fixMissingArtistLinks()
-                cleanedArtistsCount = libraryRepository.cleanOrphanedArtists()
-                cleanedSongsCount = libraryRepository.cleanOrphanedSongs()
-            }
-
-            val results = listOfNotNull(
-                if (reQueuedCount > 0) "$reQueuedCount songs re-queued" else null,
-                if (cleanedCount > 0) "$cleanedCount orphaned files deleted" else null,
-                if (fixedLinksCount > 0) "$fixedLinksCount artist links fixed" else null,
-                if (cleanedArtistsCount > 0) "$cleanedArtistsCount orphaned artists removed" else null,
-                if (cleanedSongsCount > 0) "$cleanedSongsCount cached songs removed" else null
-            )
-
-            maintenanceResult = if (results.isEmpty()) {
-                "Library check complete. No issues found."
-            } else {
-                "Check complete: ${results.joinToString(", ")}."
-            }
-
-
-            if (reQueuedCount > 0) {
-                val intent = Intent(context, DownloadService::class.java).apply {
-                    action = DownloadService.ACTION_PROCESS_QUEUE
-                }
-                context.startService(intent)
-            }
-            isDoingMaintenance = false
-        }
-    }
-
-    fun clearMaintenanceResult() {
-        maintenanceResult = null
-    }
-
     fun setSortOrder(order: SongSortOrder) {
         _sortOrder.value = order
         preferencesManager.songsSortOrder = order
     }
 
-    fun saveCustomArtistOrder(reorderedArtists: List<ArtistForList>) {
+    fun saveCustomArtistOrder(reorderedArtists: List<ArtistWithSongs>) {
         viewModelScope.launch(Dispatchers.IO) {
-            reorderedArtists.forEachIndexed { index, artistForList ->
-                artistDao.updateArtistPosition(artistForList.artist.artistId, index.toLong())
+            reorderedArtists.forEachIndexed { index, artistWithSongs ->
+                artistDao.updateArtistPosition(artistWithSongs.artist.artistId, index.toLong())
             }
         }
     }
@@ -271,7 +195,7 @@ class LibraryViewModel @Inject constructor(
     }
 
     fun onSongSelected(selectedIndex: Int) {
-        val songsToPlay = songs.value
+        val songsToPlay = songs.value.map { it.song }
         if (songsToPlay.isNotEmpty()) {
             viewModelScope.launch {
                 musicServiceConnection.playSongList(songsToPlay, selectedIndex)
@@ -280,7 +204,7 @@ class LibraryViewModel @Inject constructor(
     }
 
     fun shuffleAllSongs() {
-        val songsToPlay = songs.value
+        val songsToPlay = songs.value.map { it.song }
         if (songsToPlay.isNotEmpty()) {
             val (downloaded, remote) = songsToPlay.partition { it.localFilePath != null }
             val finalShuffledList = downloaded.shuffled() + remote.shuffled()
@@ -290,11 +214,21 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
-    fun downloadSong(song: Song) {
-        viewModelScope.launch {
-            val librarySong = playlistManager.getSongForItem(song)
-            playlistManager.startDownload(librarySong)
+    fun addSongToLibrary(song: Song) {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (!song.isInLibrary) {
+                val updatedSong = song.copy(
+                    isInLibrary = true,
+                    dateAddedTimestamp = System.currentTimeMillis()
+                )
+                songDao.updateSong(updatedSong)
+                libraryRepository.linkSongToArtist(updatedSong)
+            }
         }
+    }
+
+    fun downloadSong(song: Song) {
+        playlistManager.startDownload(song)
     }
 
     fun setDownloadFilter(filter: DownloadFilter) { _downloadFilter.value = filter }
@@ -537,7 +471,7 @@ class LibraryViewModel @Inject constructor(
     }
 
     fun onShuffleSong(song: Song) {
-        val currentSongs = songs.value
+        val currentSongs = songs.value.map { it.song }
         val index = currentSongs.indexOf(song)
         if (index != -1) {
             viewModelScope.launch {

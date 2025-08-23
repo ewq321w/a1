@@ -7,6 +7,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.m.data.database.*
 import com.example.m.data.repository.LibraryRepository
+import com.example.m.managers.DownloadStatus
+import com.example.m.managers.DownloadStatusManager
 import com.example.m.managers.PlaylistManager
 import com.example.m.playback.MusicServiceConnection
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -16,6 +18,11 @@ import kotlinx.coroutines.launch
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import javax.inject.Inject
 
+data class HistoryEntryForList(
+    val entry: HistoryEntry,
+    val downloadStatus: DownloadStatus?
+)
+
 @HiltViewModel
 class HistoryViewModel @Inject constructor(
     private val listeningHistoryDao: ListeningHistoryDao,
@@ -24,11 +31,20 @@ class HistoryViewModel @Inject constructor(
     private val libraryRepository: LibraryRepository,
     private val artistDao: ArtistDao,
     private val songDao: SongDao,
-    private val playlistDao: PlaylistDao
+    private val playlistDao: PlaylistDao,
+    private val downloadStatusManager: DownloadStatusManager
 ) : ViewModel() {
 
-    val history: StateFlow<List<HistoryEntry>> = listeningHistoryDao.getListeningHistory()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val history: StateFlow<List<HistoryEntryForList>> =
+        combine(
+            listeningHistoryDao.getListeningHistory(),
+            downloadStatusManager.statuses
+        ) { historyEntries, statuses ->
+            historyEntries.map { entry ->
+                HistoryEntryForList(entry, statuses[entry.song.youtubeUrl])
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
 
     val allPlaylists: StateFlow<List<Playlist>> = libraryRepository.getAllPlaylists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -43,7 +59,7 @@ class HistoryViewModel @Inject constructor(
     val navigateToArtist: SharedFlow<Long> = _navigateToArtist.asSharedFlow()
 
     fun onSongSelected(selectedIndex: Int) {
-        val currentSongs = history.value.map { it.song }
+        val currentSongs = history.value.map { it.entry.song }
         if (currentSongs.isNotEmpty()) {
             viewModelScope.launch {
                 musicServiceConnection.playSongList(currentSongs, selectedIndex)
@@ -77,15 +93,19 @@ class HistoryViewModel @Inject constructor(
 
     fun addToLibrary(song: Song) {
         viewModelScope.launch {
-            playlistManager.getSongForItem(song)
+            if (!song.isInLibrary) {
+                val updatedSong = song.copy(
+                    isInLibrary = true,
+                    dateAddedTimestamp = System.currentTimeMillis()
+                )
+                songDao.updateSong(updatedSong)
+                libraryRepository.linkSongToArtist(updatedSong)
+            }
         }
     }
 
     fun download(song: Song) {
-        viewModelScope.launch {
-            val librarySong = playlistManager.getSongForItem(song)
-            playlistManager.startDownload(librarySong)
-        }
+        playlistManager.startDownload(song)
     }
 
     fun onPlaySongNext(song: Song) {
@@ -97,7 +117,7 @@ class HistoryViewModel @Inject constructor(
     }
 
     fun onShuffleSong(song: Song) {
-        val currentSongs = history.value.map { it.song }
+        val currentSongs = history.value.map { it.entry.song }
         if (currentSongs.isNotEmpty()) {
             val (downloaded, remote) = currentSongs.partition { it.localFilePath != null }
             val finalShuffledList = downloaded.shuffled() + remote.shuffled()

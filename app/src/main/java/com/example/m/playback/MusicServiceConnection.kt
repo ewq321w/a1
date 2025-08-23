@@ -319,34 +319,35 @@ class MusicServiceConnection @Inject constructor(
         }
     }
 
-    private suspend fun createMediaItemForItem(item: Any): MediaItem? {
-        return withContext(Dispatchers.IO) {
-            try {
-                val song = when (item) {
-                    is Song -> item
-                    is StreamInfoItem -> playlistManager.cacheAndGetSong(item)
-                    else -> null
-                } ?: return@withContext null
-
-                if (song.localFilePath != null) {
-                    try {
-                        val uri = song.localFilePath!!.toUri()
-                        context.contentResolver.openInputStream(uri)?.close()
-                        return@withContext createLocalMediaItem(song, uri)
-                    } catch (e: Exception) {
-                        return@withContext createStreamingMediaItem(song)
-                    }
-                } else {
-                    return@withContext createStreamingMediaItem(song)
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                return@withContext null
-            }
+    private fun isUriValid(uri: Uri): Boolean {
+        return try {
+            context.contentResolver.openInputStream(uri)?.use { it.close() }
+            true
+        } catch (e: Exception) {
+            false
         }
     }
 
-    private suspend fun createMediaMetadata(song: Song): MediaMetadata {
+    private suspend fun createMediaItemForItem(item: Any): MediaItem? {
+        return withContext(Dispatchers.IO) {
+            val song = when (item) {
+                is Song -> item
+                is StreamInfoItem -> playlistManager.cacheAndGetSong(item)
+                else -> null
+            } ?: return@withContext null
+
+            if (song.localFilePath != null) {
+                val uri = song.localFilePath!!.toUri()
+                if (isUriValid(uri)) {
+                    return@withContext createLocalMediaItem(song, uri)
+                }
+            }
+            // Fallback to streaming if local file path is null or invalid
+            return@withContext createStreamingMediaItem(song)
+        }
+    }
+
+    private fun createMediaMetadata(song: Song): MediaMetadata {
         return MediaMetadata.Builder()
             .setTitle(song.title)
             .setArtist(song.artist)
@@ -439,6 +440,7 @@ class MusicServiceConnection @Inject constructor(
                             listeningHistoryDao.insertPlayLog(
                                 ListeningHistory(songId = songId, timestamp = System.currentTimeMillis())
                             )
+                            songDao.incrementPlayCount(songId)
                         }
                         isCurrentSongLogged = true
                     }

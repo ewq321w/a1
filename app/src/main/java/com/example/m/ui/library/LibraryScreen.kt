@@ -1,15 +1,13 @@
 package com.example.m.ui.library
 
-import android.Manifest
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.m.data.database.Artist
@@ -19,7 +17,7 @@ import com.example.m.ui.library.components.*
 import com.example.m.ui.library.tabs.ArtistsTabContent
 import com.example.m.ui.library.tabs.PlaylistTabContent
 import com.example.m.ui.library.tabs.SongsTabContent
-import kotlinx.coroutines.launch
+import com.example.m.ui.main.MainViewModel
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -34,6 +32,9 @@ fun LibraryScreen(
     onGoToHistory: () -> Unit
 ) {
     val viewModel: LibraryViewModel = hiltViewModel()
+    val activity = LocalContext.current as ComponentActivity
+    val mainViewModel: MainViewModel = hiltViewModel(activity)
+
     val playlists by viewModel.playlists.collectAsState()
     val libraryArtistItems by viewModel.libraryArtistItems.collectAsState()
     val songs by viewModel.songs.collectAsState()
@@ -52,36 +53,11 @@ fun LibraryScreen(
     val allArtistGroups by viewModel.allArtistGroups.collectAsState()
     val sheetState = rememberModalBottomSheetState()
 
-    val isDoingMaintenance by remember { derivedStateOf { viewModel.isDoingMaintenance } }
-    val maintenanceResult by remember { derivedStateOf { viewModel.maintenanceResult } }
-    val snackbarHostState = remember { SnackbarHostState() }
-    val coroutineScope = rememberCoroutineScope()
-    var songToDownload by remember { mutableStateOf<Song?>(null) }
-
-    val requestPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean ->
-        if (isGranted) {
-            songToDownload?.let { viewModel.downloadSong(it) }
-        } else {
-            coroutineScope.launch {
-                snackbarHostState.showSnackbar("Notification permission is required to see download progress.")
-            }
-        }
-        songToDownload = null
-    }
-
+    val isDoingMaintenance by mainViewModel.isDoingMaintenance
 
     LaunchedEffect(Unit) {
         viewModel.navigateToArtist.collect { artistId ->
             onArtistClick(artistId)
-        }
-    }
-
-    LaunchedEffect(maintenanceResult) {
-        maintenanceResult?.let {
-            snackbarHostState.showSnackbar(it)
-            viewModel.clearMaintenanceResult()
         }
     }
 
@@ -198,7 +174,6 @@ fun LibraryScreen(
     }
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Library") },
@@ -219,7 +194,8 @@ fun LibraryScreen(
 
                     OptionsOverflowMenu(
                         selectedView = selectedView,
-                        viewModel = viewModel,
+                        mainViewModel = mainViewModel,
+                        libraryViewModel = viewModel,
                         downloadFilter = downloadFilter,
                         isDoingMaintenance = isDoingMaintenance,
                         onGoToHiddenArtists = onGoToHiddenArtists
@@ -228,19 +204,22 @@ fun LibraryScreen(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface
-                )
+                ),
+                windowInsets = TopAppBarDefaults.windowInsets
             )
         },
         floatingActionButton = {
             when (selectedView) {
                 "Playlists" -> FloatingActionButton(
                     onClick = { viewModel.prepareToCreateEmptyPlaylist() },
+                    modifier = Modifier.navigationBarsPadding(),
                     containerColor = MaterialTheme.colorScheme.primary
                 ) {
                     Icon(Icons.Default.Add, contentDescription = "Create Playlist")
                 }
                 "Artists" -> FloatingActionButton(
                     onClick = { viewModel.showCreateArtistGroupDialog = true },
+                    modifier = Modifier.navigationBarsPadding(),
                     containerColor = MaterialTheme.colorScheme.primary
                 ) {
                     Icon(Icons.Default.CreateNewFolder, contentDescription = "Create Artist Group")
@@ -248,8 +227,12 @@ fun LibraryScreen(
             }
         },
         containerColor = MaterialTheme.colorScheme.background
-    ) { paddingValues ->
-        Column(modifier = Modifier.padding(paddingValues)) {
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .padding(innerPadding)
+                .navigationBarsPadding()
+        ) {
             SingleChoiceSegmentedButtonRow(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -286,18 +269,11 @@ fun LibraryScreen(
                     onSongSelected = viewModel::onSongSelected,
                     onAddToPlaylistClick = { song -> viewModel.selectItemForPlaylist(song) },
                     onDeleteSongClick = { song -> viewModel.itemPendingDeletion.value = DeletableItem.DeletableSong(song) },
-                    onPlayNextClick = viewModel::onPlaySongNext,
-                    onAddToQueueClick = viewModel::onAddSongToQueue,
-                    onShuffleClick = viewModel::onShuffleSong,
-                    onGoToArtistClick = viewModel::onGoToArtist,
-                    onDownloadClick = { song ->
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            songToDownload = song
-                            requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        } else {
-                            viewModel.downloadSong(song)
-                        }
-                    }
+                    onPlayNextClick = { song -> viewModel.onPlaySongNext(song) },
+                    onAddToQueueClick = { song -> viewModel.onAddSongToQueue(song) },
+                    onShuffleClick = { song -> viewModel.onShuffleSong(song) },
+                    onGoToArtistClick = { song -> viewModel.onGoToArtist(song) },
+                    onDownloadClick = viewModel::downloadSong
                 )
             }
         }
@@ -307,7 +283,8 @@ fun LibraryScreen(
 @Composable
 private fun OptionsOverflowMenu(
     selectedView: String,
-    viewModel: LibraryViewModel,
+    mainViewModel: MainViewModel,
+    libraryViewModel: LibraryViewModel,
     downloadFilter: DownloadFilter,
     isDoingMaintenance: Boolean,
     onGoToHiddenArtists: () -> Unit
@@ -324,7 +301,7 @@ private fun OptionsOverflowMenu(
                     text = { Text("Downloaded") },
                     onClick = {
                         val newFilter = if (downloadFilter == DownloadFilter.DOWNLOADED) DownloadFilter.ALL else DownloadFilter.DOWNLOADED
-                        viewModel.setDownloadFilter(newFilter)
+                        libraryViewModel.setDownloadFilter(newFilter)
                         showMenu = false
                     },
                     leadingIcon = {
@@ -349,7 +326,7 @@ private fun OptionsOverflowMenu(
             DropdownMenuItem(
                 text = { Text("Library Health Check") },
                 enabled = !isDoingMaintenance,
-                onClick = { viewModel.runLibraryMaintenance(); showMenu = false },
+                onClick = { mainViewModel.runLibraryMaintenance(); showMenu = false },
                 leadingIcon = {
                     if (isDoingMaintenance) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                     else Icon(Icons.Default.Sync, contentDescription = "Run Library Health Check")

@@ -32,7 +32,8 @@ data class Song(
     var localFilePath: String? = null,
     val sourceType: SourceType = SourceType.STANDARD,
     val dateAddedTimestamp: Long = System.currentTimeMillis(),
-    val isInLibrary: Boolean = false
+    val isInLibrary: Boolean = false,
+    val playCount: Int = 0
 )
 
 @Entity(tableName = "playlists")
@@ -136,7 +137,6 @@ data class Artist(
     val name: String,
     val customOrderPosition: Long = 0,
     val downloadAutomatically: Boolean = false,
-    // --- NEW FIELDS FOR HIDING AND GROUPING ---
     val isHidden: Boolean = false,
     val parentGroupId: Long? = null
 )
@@ -176,7 +176,6 @@ data class ArtistWithSongs(
     val songs: List<Song>
 )
 
-// +++ ADD THESE NEW CLASSES FOR ARTIST GROUPS +++
 @Entity(tableName = "artist_groups")
 data class ArtistGroup(
     @PrimaryKey(autoGenerate = true)

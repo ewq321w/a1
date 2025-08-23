@@ -1,9 +1,5 @@
 package com.example.m.ui.search.details
 
-import android.Manifest
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,7 +25,6 @@ import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.library.components.AddToPlaylistSheet
 import com.example.m.ui.library.components.CreatePlaylistDialog
 import com.example.m.ui.search.SearchResultItem
-import kotlinx.coroutines.launch
 import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import com.example.m.ui.common.getAvatar
@@ -47,26 +42,10 @@ fun SearchedArtistDetailScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val allPlaylists by viewModel.allPlaylists.collectAsState()
-    val snackbarHostState = remember { SnackbarHostState() }
-    val coroutineScope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState()
-    var itemToDownload by remember { mutableStateOf<StreamInfoItem?>(null) }
 
     val showCreatePlaylistDialog by remember { derivedStateOf { viewModel.showCreatePlaylistDialog } }
     val itemToAddToPlaylist by remember { derivedStateOf { viewModel.itemToAddToPlaylist } }
-
-    val requestPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean ->
-        if (isGranted) {
-            itemToDownload?.let { viewModel.downloadSong(it) }
-        } else {
-            coroutineScope.launch {
-                snackbarHostState.showSnackbar("Notification permission is required to see download progress.")
-            }
-        }
-        itemToDownload = null
-    }
 
     if (showCreatePlaylistDialog) {
         CreatePlaylistDialog(
@@ -97,7 +76,6 @@ fun SearchedArtistDetailScreen(
     }
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text(uiState.channelInfo?.name ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -160,23 +138,17 @@ fun SearchedArtistDetailScreen(
                                 }
                             }
                         }
-                        items(uiState.songs.take(4)) { searchResult ->
-                            val index = uiState.songs.indexOf(searchResult)
+                        items(uiState.songs.take(4)) { item ->
+                            val index = uiState.songs.indexOf(item)
                             SearchResultItem(
-                                result = searchResult,
+                                result = item.result,
+                                downloadStatus = item.downloadStatus,
                                 isSong = uiState.searchType == "music",
                                 imageLoader = viewModel.imageLoader,
                                 onPlay = { viewModel.onSongSelected(index) },
-                                onDownload = {
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                        itemToDownload = searchResult.streamInfo
-                                        requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                    } else {
-                                        viewModel.downloadSong(searchResult.streamInfo)
-                                    }
-                                },
-                                onAddToLibrary = { viewModel.addSongToLibrary(searchResult.streamInfo) },
-                                onAddToPlaylistClick = { viewModel.selectItemForPlaylist(searchResult.streamInfo) }
+                                onDownload = { viewModel.downloadSong(item.result.streamInfo) },
+                                onAddToLibrary = { viewModel.addSongToLibrary(item.result.streamInfo) },
+                                onAddToPlaylistClick = { viewModel.selectItemForPlaylist(item.result.streamInfo) }
                             )
                         }
                     }

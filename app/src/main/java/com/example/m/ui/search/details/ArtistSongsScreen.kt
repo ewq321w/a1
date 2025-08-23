@@ -1,9 +1,5 @@
 package com.example.m.ui.search.details
 
-import android.Manifest
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -21,9 +17,7 @@ import com.example.m.data.database.Song
 import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.library.components.AddToPlaylistSheet
 import com.example.m.ui.library.components.CreatePlaylistDialog
-import com.example.m.ui.search.SearchResult
 import com.example.m.ui.search.SearchResultItem
-import kotlinx.coroutines.launch
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -35,26 +29,10 @@ fun ArtistSongsScreen(
     val uiState by viewModel.uiState.collectAsState()
     val title = if (uiState.searchType == "music") "Popular" else "Videos"
     val allPlaylists by viewModel.allPlaylists.collectAsState()
-    val snackbarHostState = remember { SnackbarHostState() }
-    val coroutineScope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState()
-    var resultToDownload by remember { mutableStateOf<SearchResult?>(null) }
 
     val showCreatePlaylistDialog by remember { derivedStateOf { viewModel.showCreatePlaylistDialog } }
     val itemToAddToPlaylist by remember { derivedStateOf { viewModel.itemToAddToPlaylist } }
-
-    val requestPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean ->
-        if (isGranted) {
-            resultToDownload?.let { viewModel.downloadSong(it) }
-        } else {
-            coroutineScope.launch {
-                snackbarHostState.showSnackbar("Notification permission is required to see download progress.")
-            }
-        }
-        resultToDownload = null
-    }
 
     if (showCreatePlaylistDialog) {
         CreatePlaylistDialog(
@@ -132,21 +110,15 @@ fun ArtistSongsScreen(
             }
             else -> {
                 LazyColumn(modifier = Modifier.padding(paddingValues).fillMaxSize()) {
-                    itemsIndexed(uiState.songs, key = { index, item -> item.streamInfo.url + index }) { index, item ->
+                    itemsIndexed(uiState.songs, key = { index, item -> item.result.streamInfo.url + index }) { index, item ->
                         SearchResultItem(
-                            result = item,
+                            result = item.result,
+                            downloadStatus = item.downloadStatus,
                             isSong = uiState.searchType == "music",
                             imageLoader = viewModel.imageLoader,
                             onPlay = { viewModel.onSongSelected(index) },
-                            onDownload = {
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                    resultToDownload = item
-                                    requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                } else {
-                                    viewModel.downloadSong(item)
-                                }
-                            },
-                            onAddToLibrary = { viewModel.addSongToLibrary(item) },
+                            onDownload = { viewModel.downloadSong(item.result) },
+                            onAddToLibrary = { viewModel.addSongToLibrary(item.result) },
                             onAddToPlaylistClick = { viewModel.selectItemForPlaylist(item) }
                         )
                     }

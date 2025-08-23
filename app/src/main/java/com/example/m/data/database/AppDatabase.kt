@@ -18,7 +18,7 @@ import androidx.room.TypeConverters
         ArtistSongCrossRef::class,
         ArtistGroup::class
     ],
-    version = 24, // <<< Database version is updated
+    version = 26,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

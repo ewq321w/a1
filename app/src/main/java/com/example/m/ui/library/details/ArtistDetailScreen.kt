@@ -1,9 +1,5 @@
 package com.example.m.ui.library.details
 
-import android.Manifest
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,7 +15,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.m.data.database.Song
 import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.library.components.*
-import kotlinx.coroutines.launch
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -42,23 +37,6 @@ fun ArtistDetailScreen(
     val showCreatePlaylistDialog by remember { derivedStateOf { viewModel.showCreatePlaylistDialog } }
     val itemToDelete by viewModel.itemPendingDeletion
     val sheetState = rememberModalBottomSheetState()
-
-    val snackbarHostState = remember { SnackbarHostState() }
-    val coroutineScope = rememberCoroutineScope()
-    var songToDownload by remember { mutableStateOf<Song?>(null) }
-
-    val requestPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean ->
-        if (isGranted) {
-            songToDownload?.let { viewModel.downloadSong(it) }
-        } else {
-            coroutineScope.launch {
-                snackbarHostState.showSnackbar("Notification permission is required to see download progress.")
-            }
-        }
-        songToDownload = null
-    }
 
     LaunchedEffect(Unit) {
         viewModel.navigateToArtist.collect { artistId ->
@@ -161,24 +139,18 @@ fun ArtistDetailScreen(
             EmptyStateMessage(message = "No songs found for this artist.")
         } else {
             LazyColumn(modifier = Modifier.padding(paddingValues)) {
-                itemsIndexed(songs, key = { _, song -> song.songId }) { index, song ->
+                itemsIndexed(songs, key = { _, item -> item.song.songId }) { index, item ->
                     SongItem(
-                        song = song,
+                        song = item.song,
+                        downloadStatus = item.downloadStatus,
                         onClick = { viewModel.onSongSelected(index) },
-                        onAddToPlaylistClick = { viewModel.selectItemForPlaylist(song) },
-                        onDeleteClick = { viewModel.itemPendingDeletion.value = song },
-                        onPlayNextClick = { viewModel.onPlaySongNext(song) },
-                        onAddToQueueClick = { viewModel.onAddSongToQueue(song) },
-                        onShuffleClick = { viewModel.onShuffleSong(song) },
-                        onGoToArtistClick = { viewModel.onGoToArtist(song) },
-                        onDownloadClick = {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                songToDownload = song
-                                requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                            } else {
-                                viewModel.downloadSong(song)
-                            }
-                        }
+                        onAddToPlaylistClick = { viewModel.selectItemForPlaylist(item.song) },
+                        onDeleteClick = { viewModel.itemPendingDeletion.value = item.song },
+                        onPlayNextClick = { viewModel.onPlaySongNext(item.song) },
+                        onAddToQueueClick = { viewModel.onAddSongToQueue(item.song) },
+                        onShuffleClick = { viewModel.onShuffleSong(item.song) },
+                        onGoToArtistClick = { viewModel.onGoToArtist(item.song) },
+                        onDownloadClick = { viewModel.downloadSong(item.song) }
                     )
                 }
             }

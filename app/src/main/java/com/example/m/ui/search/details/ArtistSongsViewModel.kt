@@ -12,9 +12,11 @@ import com.example.m.data.database.Song
 import com.example.m.data.database.SongDao
 import com.example.m.data.repository.LibraryRepository
 import com.example.m.data.repository.YoutubeRepository
+import com.example.m.managers.DownloadStatusManager
 import com.example.m.managers.PlaylistManager
 import com.example.m.playback.MusicServiceConnection
 import com.example.m.ui.search.SearchResult
+import com.example.m.ui.search.SearchResultForList
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
@@ -26,7 +28,7 @@ import javax.inject.Inject
 data class ArtistSongsUiState(
     val isLoading: Boolean = true,
     val channelInfo: ChannelInfo? = null,
-    val songs: List<SearchResult> = emptyList(),
+    val songs: List<SearchResultForList> = emptyList(),
     val errorMessage: String? = null,
     val searchType: String = "video"
 )
@@ -39,6 +41,7 @@ class ArtistSongsViewModel @Inject constructor(
     private val songDao: SongDao,
     private val playlistManager: PlaylistManager,
     private val libraryRepository: LibraryRepository,
+    private val downloadStatusManager: DownloadStatusManager,
     val imageLoader: ImageLoader
 ) : ViewModel() {
 
@@ -81,27 +84,29 @@ class ArtistSongsViewModel @Inject constructor(
                 }
 
                 if (artistDetails != null) {
-                    songUpdateJob = viewModelScope.launch {
-                        localLibrary.collect { librarySongs ->
-                            val libraryMap = librarySongs.filter { !it.videoId.isNullOrBlank() }.associateBy { it.videoId!! }
-                            val songResults = artistDetails.songs.map { streamInfo ->
-                                val videoId = extractVideoId(streamInfo.url)
-                                val localSong = videoId?.let { libraryMap[it] }
-                                SearchResult(
-                                    streamInfo,
-                                    localSong?.isInLibrary ?: false,
-                                    localSong?.localFilePath != null
-                                )
-                            }
-                            _uiState.update {
-                                it.copy(
-                                    isLoading = false,
-                                    channelInfo = artistDetails.channelInfo,
-                                    songs = songResults
-                                )
-                            }
+                    songUpdateJob = combine(
+                        localLibrary,
+                        downloadStatusManager.statuses
+                    ) { librarySongs, statuses ->
+                        val libraryMap = librarySongs.filter { !it.videoId.isNullOrBlank() }.associateBy { it.videoId!! }
+                        val songResults = artistDetails.songs.map { streamInfo ->
+                            val videoId = extractVideoId(streamInfo.url)
+                            val localSong = videoId?.let { libraryMap[it] }
+                            val searchResult = SearchResult(
+                                streamInfo,
+                                localSong?.isInLibrary ?: false,
+                                localSong?.localFilePath != null
+                            )
+                            SearchResultForList(searchResult, statuses[streamInfo.url])
                         }
-                    }
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                channelInfo = artistDetails.channelInfo,
+                                songs = songResults
+                            )
+                        }
+                    }.launchIn(viewModelScope)
                 } else {
                     _uiState.update { it.copy(isLoading = false, errorMessage = "Could not load content.") }
                 }
@@ -113,7 +118,7 @@ class ArtistSongsViewModel @Inject constructor(
     }
 
     fun onSongSelected(selectedIndex: Int) {
-        val items = uiState.value.songs.map { it.streamInfo }
+        val items = uiState.value.songs.map { it.result.streamInfo }
         if (items.isNotEmpty()) {
             viewModelScope.launch {
                 musicServiceConnection.playSongList(items, selectedIndex)
@@ -135,8 +140,8 @@ class ArtistSongsViewModel @Inject constructor(
     }
 
     fun selectItemForPlaylist(item: Any) {
-        if (item is SearchResult) {
-            itemToAddToPlaylist = item.streamInfo
+        if (item is SearchResultForList) {
+            itemToAddToPlaylist = item.result.streamInfo
         } else if (item is Song || item is StreamInfoItem) {
             itemToAddToPlaylist = item
         }

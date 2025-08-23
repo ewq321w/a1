@@ -32,8 +32,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    // Pass the same ViewModel instance to MainScreen
-                    MainScreen(mainViewModel = mainViewModel)
+                    MainScreen()
                 }
             }
         }
