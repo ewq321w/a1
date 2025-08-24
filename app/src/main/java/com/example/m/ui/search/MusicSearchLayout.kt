@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -39,11 +40,11 @@ fun MusicSearchLayout(
             item {
                 SectionHeader(
                     title = "Songs",
-                    showMoreButton = uiState.songs.size > 3,
+                    showMoreButton = uiState.songs.size > 4,
                     onMoreClicked = { onShowMore(SearchCategory.SONGS) }
                 )
             }
-            itemsIndexed(songsWithStatus.take(3), key = { _, item -> item.result.streamInfo.url!! }) { index, item ->
+            itemsIndexed(songsWithStatus.take(4), key = { index, item -> (item.result.streamInfo.url ?: "") + index }) { index, item ->
                 SearchResultItem(
                     result = item.result,
                     downloadStatus = item.downloadStatus,
@@ -65,7 +66,7 @@ fun MusicSearchLayout(
                     onMoreClicked = { onShowMore(SearchCategory.ALBUMS) }
                 )
             }
-            items(uiState.albums.take(3), key = { it.albumInfo.url!! }) { item ->
+            itemsIndexed(uiState.albums.take(3), key = { index, item -> (item.albumInfo.url ?: "") + index }) { _, item ->
                 ListItem(
                     modifier = Modifier.clickable { onAlbumClicked(item) },
                     headlineContent = { Text(item.albumInfo.name ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -81,7 +82,8 @@ fun MusicSearchLayout(
                             contentDescription = item.albumInfo.name,
                             modifier = Modifier.size(50.dp)
                         )
-                    }
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent)
                 )
             }
         }
@@ -90,11 +92,11 @@ fun MusicSearchLayout(
             item {
                 SectionHeader(
                     title = "Artists",
-                    showMoreButton = uiState.artists.size > 3,
+                    showMoreButton = uiState.artists.size > 1,
                     onMoreClicked = { onShowMore(SearchCategory.ARTISTS) }
                 )
             }
-            items(uiState.artists.take(3), key = { it.artistInfo.url!! }) { item ->
+            items(uiState.artists.take(1), key = { it.artistInfo.url!! }) { item ->
                 ArtistListItem(
                     artistResult = item,
                     imageLoader = imageLoader,
@@ -151,6 +153,7 @@ private fun ArtistListItem(
                     .size(50.dp)
                     .clip(CircleShape)
             )
-        }
+        },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent)
     )
 }

@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -39,12 +40,12 @@ fun VideoSearchLayout(
             item {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Videos", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    if (uiState.videoStreams.size > 3) {
+                    if (uiState.videoStreams.size > 4) {
                         TextButton(onClick = { onShowMore(SearchCategory.VIDEOS) }) { Text("More") }
                     }
                 }
             }
-            itemsIndexed(videoStreamsWithStatus.take(3), key = { _, item -> item.result.streamInfo.url!! }) { index, item ->
+            itemsIndexed(videoStreamsWithStatus.take(4), key = { index, item -> (item.result.streamInfo.url ?: "") + index }) { index, item ->
                 SearchResultItem(
                     result = item.result,
                     downloadStatus = item.downloadStatus,
@@ -67,7 +68,7 @@ fun VideoSearchLayout(
                     }
                 }
             }
-            items(uiState.videoPlaylists.take(3), key = { it.albumInfo.url!! }) { item ->
+            itemsIndexed(uiState.videoPlaylists.take(3), key = { index, item -> (item.albumInfo.url ?: "") + index }) { _, item ->
                 ListItem(
                     modifier = Modifier.clickable { onPlaylistClick(item) },
                     headlineContent = { Text(item.albumInfo.name ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -83,7 +84,8 @@ fun VideoSearchLayout(
                             contentDescription = item.albumInfo.name,
                             modifier = Modifier.size(50.dp)
                         )
-                    }
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent)
                 )
             }
         }
@@ -92,12 +94,12 @@ fun VideoSearchLayout(
             item {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Channels", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    if (uiState.videoChannels.size > 3) {
+                    if (uiState.videoChannels.size > 1) {
                         TextButton(onClick = { onShowMore(SearchCategory.CHANNELS) }) { Text("More") }
                     }
                 }
             }
-            items(uiState.videoChannels.take(3), key = { it.artistInfo.url!! }) { item ->
+            items(uiState.videoChannels.take(1), key = { it.artistInfo.url!! }) { item ->
                 ListItem(
                     modifier = Modifier.clickable { onChannelClick(item) },
                     headlineContent = { Text(item.artistInfo.name ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -114,7 +116,8 @@ fun VideoSearchLayout(
                             contentDescription = item.artistInfo.name,
                             modifier = Modifier.size(50.dp).clip(CircleShape)
                         )
-                    }
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent)
                 )
             }
         }

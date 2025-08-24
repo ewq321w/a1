@@ -6,11 +6,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
@@ -22,12 +24,15 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -54,6 +59,7 @@ fun AlbumDetailScreen(
     val uiState by viewModel.uiState.collectAsState()
     val allPlaylists by viewModel.allPlaylists.collectAsState()
     val sheetState = rememberModalBottomSheetState()
+    val listState = rememberLazyListState()
 
     val showCreatePlaylistDialog by remember { derivedStateOf { viewModel.showCreatePlaylistDialog } }
     val itemToAddToPlaylist by remember { derivedStateOf { viewModel.itemToAddToPlaylist } }
@@ -117,7 +123,8 @@ fun AlbumDetailScreen(
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                     }
-                }
+                },
+                windowInsets = TopAppBarDefaults.windowInsets
             )
         }
     ) { paddingValues ->
@@ -138,6 +145,7 @@ fun AlbumDetailScreen(
             }
             uiState.albumInfo != null -> {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier
                         .padding(paddingValues)
                         .fillMaxSize(),
@@ -161,6 +169,32 @@ fun AlbumDetailScreen(
                             onAddToLibrary = { viewModel.addSongToLibrary(item.result) },
                             onAddToPlaylistClick = { viewModel.selectItemForPlaylist(item) }
                         )
+                    }
+
+                    if (uiState.isLoadingMore) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator()
+                            }
+                        }
+                    }
+                }
+
+                // Check if we need to load more items
+                val layoutInfo = remember { derivedStateOf { listState.layoutInfo } }
+                LaunchedEffect(layoutInfo.value.visibleItemsInfo) {
+                    val lastVisibleItemIndex = layoutInfo.value.visibleItemsInfo.lastOrNull()?.index ?: 0
+                    if (uiState.songs.isNotEmpty() &&
+                        lastVisibleItemIndex >= uiState.songs.size - 5 && // Threshold to start loading
+                        !uiState.isLoadingMore &&
+                        uiState.nextPage != null
+                    ) {
+                        viewModel.loadMoreSongs()
                     }
                 }
             }

@@ -18,19 +18,21 @@ import com.example.m.playback.MusicServiceConnection
 import com.example.m.ui.search.SearchResult
 import com.example.m.ui.search.SearchResultForList
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import org.schabi.newpipe.extractor.Page
 import org.schabi.newpipe.extractor.channel.ChannelInfo
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import javax.inject.Inject
 
 data class ArtistSongsUiState(
     val isLoading: Boolean = true,
+    val isLoadingMore: Boolean = false,
     val channelInfo: ChannelInfo? = null,
     val songs: List<SearchResultForList> = emptyList(),
     val errorMessage: String? = null,
-    val searchType: String = "video"
+    val searchType: String = "video",
+    val nextPage: Page? = null
 )
 
 @HiltViewModel
@@ -62,7 +64,6 @@ class ArtistSongsViewModel @Inject constructor(
     var showCreatePlaylistDialog by mutableStateOf(false)
         private set
     private var pendingItem: Any? = null
-    private var songUpdateJob: Job? = null
 
     init {
         loadContent()
@@ -73,7 +74,6 @@ class ArtistSongsViewModel @Inject constructor(
     }
 
     private fun loadContent() {
-        songUpdateJob?.cancel()
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, searchType = this@ArtistSongsViewModel.searchType) }
             try {
@@ -84,35 +84,59 @@ class ArtistSongsViewModel @Inject constructor(
                 }
 
                 if (artistDetails != null) {
-                    songUpdateJob = combine(
-                        localLibrary,
-                        downloadStatusManager.statuses
-                    ) { librarySongs, statuses ->
-                        val libraryMap = librarySongs.filter { !it.videoId.isNullOrBlank() }.associateBy { it.videoId!! }
-                        val songResults = artistDetails.songs.map { streamInfo ->
-                            val videoId = extractVideoId(streamInfo.url)
-                            val localSong = videoId?.let { libraryMap[it] }
-                            val searchResult = SearchResult(
-                                streamInfo,
-                                localSong?.isInLibrary ?: false,
-                                localSong?.localFilePath != null
-                            )
-                            SearchResultForList(searchResult, statuses[streamInfo.url])
-                        }
-                        _uiState.update {
-                            it.copy(
-                                isLoading = false,
-                                channelInfo = artistDetails.channelInfo,
-                                songs = songResults
-                            )
-                        }
-                    }.launchIn(viewModelScope)
+                    updateSongsInState(artistDetails.songs)
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            channelInfo = artistDetails.channelInfo,
+                            nextPage = artistDetails.songsNextPage
+                        )
+                    }
                 } else {
                     _uiState.update { it.copy(isLoading = false, errorMessage = "Could not load content.") }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
                 _uiState.update { it.copy(isLoading = false, errorMessage = e.message ?: "An unknown error occurred.") }
+            }
+        }
+    }
+
+    fun loadMoreSongs() {
+        val currentState = uiState.value
+        if (currentState.isLoadingMore || currentState.nextPage == null) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingMore = true) }
+            val resultPage = youtubeRepository.getMoreArtistSongs(currentState.nextPage)
+            if (resultPage != null) {
+                val newItems = resultPage.items.filterIsInstance<StreamInfoItem>()
+                updateSongsInState(newItems, append = true)
+                _uiState.update { it.copy(nextPage = resultPage.nextPage) }
+            }
+            _uiState.update { it.copy(isLoadingMore = false) }
+        }
+    }
+
+    private fun updateSongsInState(songs: List<StreamInfoItem>, append: Boolean = false) {
+        val libraryMap = localLibrary.value.filter { !it.videoId.isNullOrBlank() }.associateBy { it.videoId!! }
+        val statuses = downloadStatusManager.statuses.value
+        val songResults = songs.map { streamInfo ->
+            val videoId = extractVideoId(streamInfo.url)
+            val localSong = videoId?.let { libraryMap[it] }
+            val searchResult = SearchResult(
+                streamInfo,
+                localSong?.isInLibrary ?: false,
+                localSong?.localFilePath != null
+            )
+            SearchResultForList(searchResult, statuses[streamInfo.url])
+        }
+
+        _uiState.update {
+            if (append) {
+                it.copy(songs = it.songs + songResults)
+            } else {
+                it.copy(songs = songResults)
             }
         }
     }

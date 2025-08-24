@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -18,11 +19,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import coil.ImageLoader
@@ -54,68 +58,111 @@ fun SearchScreen(
         allPlaylists = allPlaylists
     )
 
-    Column(
-        modifier = Modifier.fillMaxSize()
-    ) {
+    Scaffold(
+        topBar = {
+            if (uiState.detailedViewCategory == null) {
+                val keyboardController = LocalSoftwareKeyboardController.current
+                val focusManager = LocalFocusManager.current
+                TopAppBar(
+                    title = {
+                        val searchTextStyle = TextStyle(fontSize = 16.sp)
+                        TextField(
+                            value = uiState.query,
+                            onValueChange = viewModel::onQueryChange,
+                            placeholder = { Text("Search", style = searchTextStyle) },
+                            leadingIcon = {
+                                IconButton(onClick = {
+                                    viewModel.search()
+                                    keyboardController?.hide()
+                                    focusManager.clearFocus()
+                                }) {
+                                    Icon(Icons.Default.Search, contentDescription = "Search Icon")
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = {
+                                viewModel.search()
+                                keyboardController?.hide()
+                                focusManager.clearFocus()
+                            }),
+                            textStyle = searchTextStyle,
+                            colors = TextFieldDefaults.colors(
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                disabledIndicatorColor = Color.Transparent,
+                                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                                disabledContainerColor = MaterialTheme.colorScheme.surface
+                            )
+                        )
+                    },
+                    windowInsets = TopAppBarDefaults.windowInsets
+                )
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.background
+    ) { paddingValues ->
         if (uiState.detailedViewCategory == null) {
-            // Main search view with search bar and filters
-            SearchBar(
-                query = uiState.query,
-                onQueryChanged = viewModel::onQueryChange,
-                onSearch = viewModel::search
-            )
-            FilterChipSection(
-                selectedFilter = uiState.selectedFilter,
-                onFilterSelected = viewModel::onFilterChange
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+            ) {
+                FilterChipSection(
+                    selectedFilter = uiState.selectedFilter,
+                    onFilterSelected = viewModel::onFilterChange
+                )
 
-            if (uiState.isLoading) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            } else {
-                if (uiState.selectedFilter == "music_songs") {
-                    MusicSearchLayout(
-                        uiState = uiState,
-                        songsWithStatus = songsWithStatus,
-                        imageLoader = viewModel.imageLoader,
-                        onSongClicked = { index -> viewModel.onSongSelected(index) },
-                        onAlbumClicked = { albumResult ->
-                            val encodedUrl = URLEncoder.encode(albumResult.albumInfo.url, StandardCharsets.UTF_8.toString())
-                            navController.navigate("album_detail/music/$encodedUrl")
-                        },
-                        onArtistClicked = { artistResult ->
-                            val encodedUrl = URLEncoder.encode(artistResult.artistInfo.url, StandardCharsets.UTF_8.toString())
-                            navController.navigate("searched_artist_detail/music/$encodedUrl")
-                        },
-                        onShowMore = viewModel::showDetailedView,
-                        onDownloadSong = viewModel::downloadSong,
-                        onAddToLibrary = viewModel::addSongToLibrary,
-                        onAddToPlaylist = { result -> viewModel.playlistActionHandler.selectItemForPlaylist(result) }
-                    )
+                if (uiState.isLoading) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
                 } else {
-                    VideoSearchLayout(
-                        uiState = uiState,
-                        videoStreamsWithStatus = videoStreamsWithStatus,
-                        imageLoader = viewModel.imageLoader,
-                        onVideoClick = { index -> viewModel.onSongSelected(index) },
-                        onPlaylistClick = { albumResult ->
-                            val encodedUrl = URLEncoder.encode(albumResult.albumInfo.url, StandardCharsets.UTF_8.toString())
-                            navController.navigate("album_detail/video/$encodedUrl")
-                        },
-                        onChannelClick = { artistResult ->
-                            val encodedUrl = URLEncoder.encode(artistResult.artistInfo.url, StandardCharsets.UTF_8.toString())
-                            navController.navigate("searched_artist_detail/video/$encodedUrl")
-                        },
-                        onShowMore = viewModel::showDetailedView,
-                        onDownloadSong = viewModel::downloadSong,
-                        onAddToLibrary = viewModel::addSongToLibrary,
-                        onAddToPlaylist = { result -> viewModel.playlistActionHandler.selectItemForPlaylist(result) }
-                    )
+                    if (uiState.selectedFilter == "music_songs") {
+                        MusicSearchLayout(
+                            uiState = uiState,
+                            songsWithStatus = songsWithStatus,
+                            imageLoader = viewModel.imageLoader,
+                            onSongClicked = { index -> viewModel.onSongSelected(index) },
+                            onAlbumClicked = { albumResult ->
+                                val encodedUrl = URLEncoder.encode(albumResult.albumInfo.url, StandardCharsets.UTF_8.toString())
+                                navController.navigate("album_detail/music/$encodedUrl")
+                            },
+                            onArtistClicked = { artistResult ->
+                                val encodedUrl = URLEncoder.encode(artistResult.artistInfo.url, StandardCharsets.UTF_8.toString())
+                                navController.navigate("searched_artist_detail/music/$encodedUrl")
+                            },
+                            onShowMore = viewModel::showDetailedView,
+                            onDownloadSong = viewModel::downloadSong,
+                            onAddToLibrary = viewModel::addSongToLibrary,
+                            onAddToPlaylist = { result -> viewModel.playlistActionHandler.selectItemForPlaylist(result) }
+                        )
+                    } else {
+                        VideoSearchLayout(
+                            uiState = uiState,
+                            videoStreamsWithStatus = videoStreamsWithStatus,
+                            imageLoader = viewModel.imageLoader,
+                            onVideoClick = { index -> viewModel.onSongSelected(index) },
+                            onPlaylistClick = { albumResult ->
+                                val encodedUrl = URLEncoder.encode(albumResult.albumInfo.url, StandardCharsets.UTF_8.toString())
+                                navController.navigate("album_detail/video/$encodedUrl")
+                            },
+                            onChannelClick = { artistResult ->
+                                val encodedUrl = URLEncoder.encode(artistResult.artistInfo.url, StandardCharsets.UTF_8.toString())
+                                navController.navigate("searched_artist_detail/video/$encodedUrl")
+                            },
+                            onShowMore = viewModel::showDetailedView,
+                            onDownloadSong = viewModel::downloadSong,
+                            onAddToLibrary = viewModel::addSongToLibrary,
+                            onAddToPlaylist = { result -> viewModel.playlistActionHandler.selectItemForPlaylist(result) }
+                        )
+                    }
                 }
             }
         } else {
-            // Full-screen detailed view
+            // Full-screen detailed view is now drawn directly, not inside the padded Column
             DetailedView(
                 category = uiState.detailedViewCategory!!,
                 uiState = uiState,
@@ -124,6 +171,7 @@ fun SearchScreen(
                 imageLoader = viewModel.imageLoader,
                 onBack = viewModel::hideDetailedView,
                 onSongClicked = { index -> viewModel.onSongSelected(index) },
+                onLoadMore = viewModel::loadMoreResults,
                 onAlbumClicked = { albumResult ->
                     val encodedUrl = URLEncoder.encode(albumResult.albumInfo.url, StandardCharsets.UTF_8.toString())
                     val searchType = if (uiState.selectedFilter == "music_songs") "music" else "video"
@@ -152,12 +200,15 @@ private fun DetailedView(
     imageLoader: ImageLoader,
     onBack: () -> Unit,
     onSongClicked: (Int) -> Unit,
+    onLoadMore: () -> Unit,
     onAlbumClicked: (AlbumResult) -> Unit,
     onArtistClicked: (ArtistResult) -> Unit,
     onDownloadSong: (SearchResult) -> Unit,
     onAddToLibrary: (SearchResult) -> Unit,
     onAddToPlaylist: (SearchResult) -> Unit
 ) {
+    val listState = rememberLazyListState()
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -171,19 +222,26 @@ private fun DetailedView(
             )
         }
     ) { paddingValues ->
+        val itemsToShow = when (category) {
+            SearchCategory.SONGS -> songsWithStatus
+            SearchCategory.VIDEOS -> videoStreamsWithStatus
+            else -> emptyList()
+        }
+
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .padding(paddingValues)
                 .fillMaxSize()
                 .navigationBarsPadding()
         ) {
             when (category) {
-                SearchCategory.SONGS -> {
-                    itemsIndexed(songsWithStatus, key = { _, item -> item.result.streamInfo.url!! }) { index, item ->
+                SearchCategory.SONGS, SearchCategory.VIDEOS -> {
+                    itemsIndexed(itemsToShow, key = { index, item -> (item.result.streamInfo.url ?: "") + index }) { index, item ->
                         SearchResultItem(
                             result = item.result,
                             downloadStatus = item.downloadStatus,
-                            isSong = true,
+                            isSong = category == SearchCategory.SONGS,
                             imageLoader = imageLoader,
                             onPlay = { onSongClicked(index) },
                             onDownload = { onDownloadSong(item.result) },
@@ -194,72 +252,50 @@ private fun DetailedView(
                 }
                 SearchCategory.ALBUMS -> {
                     val items = if (uiState.selectedFilter == "music_songs") uiState.albums else uiState.videoPlaylists
-                    items(items, key = { it.albumInfo.url!! }) { item ->
+                    itemsIndexed(items, key = { index, item -> (item.albumInfo.url ?: "") + index }) { _, item ->
                         ListItem(
                             modifier = Modifier.clickable { onAlbumClicked(item) },
                             headlineContent = { Text(item.albumInfo.name ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             supportingContent = { if (item.albumInfo.uploaderName != null) { Text(item.albumInfo.uploaderName, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
-                            leadingContent = { AsyncImage( model = item.albumInfo.getThumbnail(), imageLoader = imageLoader, contentDescription = item.albumInfo.name, modifier = Modifier.size(50.dp)) }
+                            leadingContent = { AsyncImage( model = item.albumInfo.getThumbnail(), imageLoader = imageLoader, contentDescription = item.albumInfo.name, modifier = Modifier.size(50.dp)) },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent)
                         )
                     }
                 }
                 SearchCategory.ARTISTS, SearchCategory.CHANNELS -> {
                     val items = if (uiState.selectedFilter == "music_songs") uiState.artists else uiState.videoChannels
-                    items(items, key = { it.artistInfo.url!! }) { item ->
+                    itemsIndexed(items, key = { index, item -> (item.artistInfo.url ?: "") + index }) { _, item ->
                         ListItem(
                             modifier = Modifier.clickable { onArtistClicked(item) },
                             headlineContent = { Text(item.artistInfo.name ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             supportingContent = { val subs = formatSubscriberCount(item.artistInfo.subscriberCount); if (subs.isNotEmpty()) { Text(text = subs) } },
-                            leadingContent = { AsyncImage( model = item.artistInfo.thumbnails.lastOrNull()?.url, imageLoader = imageLoader, contentDescription = item.artistInfo.name, modifier = Modifier.size(50.dp).clip(CircleShape)) }
-                        )
-                    }
-                }
-                SearchCategory.VIDEOS -> {
-                    itemsIndexed(videoStreamsWithStatus, key = { _, item -> item.result.streamInfo.url!! }) { index, item ->
-                        SearchResultItem(
-                            result = item.result,
-                            downloadStatus = item.downloadStatus,
-                            isSong = false,
-                            imageLoader = imageLoader,
-                            onPlay = { onSongClicked(index) },
-                            onDownload = { onDownloadSong(item.result) },
-                            onAddToLibrary = { onAddToLibrary(item.result) },
-                            onAddToPlaylistClick = { onAddToPlaylist(item.result) }
+                            leadingContent = { AsyncImage( model = item.artistInfo.thumbnails.lastOrNull()?.url, imageLoader = imageLoader, contentDescription = item.artistInfo.name, modifier = Modifier.size(50.dp).clip(CircleShape)) },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent)
                         )
                     }
                 }
             }
+
+            if (uiState.isLoadingMore) {
+                item {
+                    Box(modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                }
+            }
+        }
+
+        val layoutInfo = remember { derivedStateOf { listState.layoutInfo } }
+        LaunchedEffect(layoutInfo.value.visibleItemsInfo) {
+            val totalItems = layoutInfo.value.totalItemsCount
+            val lastVisibleItemIndex = layoutInfo.value.visibleItemsInfo.lastOrNull()?.index ?: 0
+            if (totalItems > 0 && lastVisibleItemIndex >= totalItems - 5) {
+                onLoadMore()
+            }
         }
     }
-}
-
-
-@Composable
-private fun SearchBar(
-    query: String,
-    onQueryChanged: (String) -> Unit,
-    onSearch: () -> Unit
-) {
-    val keyboardController = LocalSoftwareKeyboardController.current
-    val focusManager = LocalFocusManager.current
-
-    OutlinedTextField(
-        value = query,
-        onValueChange = onQueryChanged,
-        label = { Text("Search") },
-        leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search Icon") },
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-        keyboardActions = KeyboardActions(onSearch = {
-            onSearch()
-            keyboardController?.hide()
-            focusManager.clearFocus()
-        }),
-        colors = OutlinedTextFieldDefaults.colors()
-    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -271,7 +307,7 @@ fun FilterChipSection(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+            .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         FilterChip(

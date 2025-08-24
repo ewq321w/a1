@@ -12,7 +12,6 @@ import com.example.m.data.database.Song
 import com.example.m.data.database.SongDao
 import com.example.m.data.repository.LibraryRepository
 import com.example.m.data.repository.YoutubeRepository
-import com.example.m.managers.DownloadStatus
 import com.example.m.managers.DownloadStatusManager
 import com.example.m.managers.PlaylistManager
 import com.example.m.playback.MusicServiceConnection
@@ -22,16 +21,19 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import org.schabi.newpipe.extractor.Page
 import org.schabi.newpipe.extractor.playlist.PlaylistInfo
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import javax.inject.Inject
 
 data class AlbumDetailUiState(
     val isLoading: Boolean = true,
+    val isLoadingMore: Boolean = false,
     val albumInfo: PlaylistInfo? = null,
     val songs: List<SearchResultForList> = emptyList(),
     val errorMessage: String? = null,
-    val searchType: String = "music"
+    val searchType: String = "music",
+    val nextPage: Page? = null
 )
 
 @HiltViewModel
@@ -78,9 +80,10 @@ class AlbumDetailViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, searchType = this@AlbumDetailViewModel.searchType) }
             try {
-                val details = youtubeRepository.getPlaylistDetails(albumUrl)
+                val result = youtubeRepository.getPlaylistDetails(albumUrl)
 
-                if (details != null) {
+                if (result != null) {
+                    val details = result.playlistInfo
                     songUpdateJob = combine(
                         localLibrary,
                         downloadStatusManager.statuses
@@ -100,7 +103,8 @@ class AlbumDetailViewModel @Inject constructor(
                             it.copy(
                                 isLoading = false,
                                 albumInfo = details,
-                                songs = songResults
+                                songs = songResults,
+                                nextPage = result.nextPage
                             )
                         }
                     }.launchIn(viewModelScope)
@@ -110,6 +114,52 @@ class AlbumDetailViewModel @Inject constructor(
             } catch (e: Exception) {
                 e.printStackTrace()
                 _uiState.update { it.copy(isLoading = false, errorMessage = e.message ?: "An unknown error occurred.") }
+            }
+        }
+    }
+
+    fun loadMoreSongs() {
+        val currentState = uiState.value
+        if (currentState.isLoadingMore || currentState.nextPage == null) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingMore = true) }
+            try {
+                val result = youtubeRepository.getMorePlaylistItems(albumUrl, currentState.nextPage)
+                if (result != null) {
+                    val newItems = result.items
+                    val librarySongs = localLibrary.value
+                    val statuses = downloadStatusManager.statuses.value
+                    val libraryMap = librarySongs.filter { !it.videoId.isNullOrBlank() }.associateBy { it.videoId!! }
+
+                    val newSongResults = newItems.map { streamInfo ->
+                        val videoId = extractVideoId(streamInfo.url)
+                        val localSong = videoId?.let { libraryMap[it] }
+                        val searchResult = SearchResult(
+                            streamInfo,
+                            localSong?.isInLibrary ?: false,
+                            localSong?.localFilePath != null
+                        )
+                        SearchResultForList(searchResult, statuses[streamInfo.url])
+                    }
+
+                    _uiState.update {
+                        val combinedSongs = buildList {
+                            addAll(it.songs)
+                            addAll(newSongResults)
+                        }
+                        it.copy(
+                            isLoadingMore = false,
+                            songs = combinedSongs,
+                            nextPage = result.nextPage
+                        )
+                    }
+                } else {
+                    _uiState.update { it.copy(isLoadingMore = false) }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _uiState.update { it.copy(isLoadingMore = false, errorMessage = e.message) }
             }
         }
     }

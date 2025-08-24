@@ -59,13 +59,14 @@ class HomeViewModel @Inject constructor(
             val discoveryQuery = "${seedSong.artist} songs"
             Log.d(TAG, "Discovery Mix seed artist: ${seedSong.artist}")
 
-            // FIXED: Call the restored scraper-based search function
             val searchResults = youtubeRepository.search(discoveryQuery, "music_songs")
 
             val downloadedVideoIds = _recentMixSongs.value.map { it.videoId }.toSet()
 
-            // FIXED: This now correctly assigns a List to the StateFlow's value
-            _discoveryMix.value = searchResults.filterIsInstance<StreamInfoItem>().filter { it.url != null && !downloadedVideoIds.contains(it.url.substringAfter("v=")) }
+            _discoveryMix.value = searchResults?.items
+                ?.filterIsInstance<StreamInfoItem>()
+                ?.filter { it.url != null && !downloadedVideoIds.contains(it.url.substringAfter("v=")) }
+                ?: emptyList()
         } else {
             _discoveryMix.value = emptyList()
         }
