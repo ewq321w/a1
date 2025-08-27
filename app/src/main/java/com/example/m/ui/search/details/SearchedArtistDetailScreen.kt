@@ -40,8 +40,8 @@ import java.text.DecimalFormat
 fun SearchedArtistDetailScreen(
     onBack: () -> Unit,
     onAlbumClick: (searchType: String, albumUrl: String) -> Unit,
-    onGoToSongs: (searchType: String, channelUrl: String) -> Unit,
-    onGoToAlbums: (searchType: String, channelUrl: String) -> Unit,
+    onGoToSongs: (searchType: String, channelUrl: String, artistName: String) -> Unit,
+    onGoToReleases: (searchType: String, channelUrl: String, artistName: String) -> Unit,
     viewModel: SearchedArtistDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -125,8 +125,9 @@ fun SearchedArtistDetailScreen(
                                     fontWeight = FontWeight.Bold
                                 )
                                 TextButton(onClick = {
-                                    uiState.channelInfo?.url?.let {
-                                        onGoToSongs(uiState.searchType, it)
+                                    val info = uiState.channelInfo
+                                    if (info?.url != null && info.name != null) {
+                                        onGoToSongs(uiState.searchType, info.url, info.name)
                                     }
                                 }) {
                                     Text("More")
@@ -148,7 +149,7 @@ fun SearchedArtistDetailScreen(
                         }
                     }
 
-                    if (uiState.albums.isNotEmpty()) {
+                    if (uiState.releases.isNotEmpty()) {
                         item {
                             Row(
                                 modifier = Modifier
@@ -157,15 +158,16 @@ fun SearchedArtistDetailScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                val headerText = if (uiState.searchType == "music") "Albums" else "Playlists"
+                                val headerText = if (uiState.searchType == "music") "Releases" else "Playlists"
                                 Text(
                                     text = headerText,
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold
                                 )
                                 TextButton(onClick = {
-                                    uiState.channelInfo?.url?.let {
-                                        onGoToAlbums(uiState.searchType, it)
+                                    val info = uiState.channelInfo
+                                    if (info?.url != null && info.name != null) {
+                                        onGoToReleases(uiState.searchType, info.url, info.name)
                                     }
                                 }) {
                                     Text("More")
@@ -176,11 +178,11 @@ fun SearchedArtistDetailScreen(
                                 contentPadding = PaddingValues(horizontal = 16.dp),
                                 horizontalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
-                                items(uiState.albums.take(10)) { album ->
+                                items(uiState.releases.take(10)) { release ->
                                     AlbumItem(
-                                        album = album,
+                                        album = release,
                                         imageLoader = viewModel.imageLoader,
-                                        onClick = { album.url?.let { onAlbumClick(uiState.searchType, it) } }
+                                        onClick = { release.url?.let { onAlbumClick(uiState.searchType, it) } }
                                     )
                                 }
                             }
@@ -205,8 +207,10 @@ private fun ArtistHeader(
             AsyncImage(
                 model = bannerUrl,
                 contentDescription = "Artist Banner",
-                modifier = Modifier.fillMaxWidth(),
-                contentScale = ContentScale.FillWidth,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1060f / 175f),
+                contentScale = ContentScale.Crop,
                 error = painterResource(id = R.drawable.placeholder_gray),
                 placeholder = painterResource(id = R.drawable.placeholder_gray)
             )

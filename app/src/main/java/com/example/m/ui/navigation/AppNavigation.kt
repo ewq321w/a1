@@ -182,13 +182,14 @@ fun AppNavHost(
                     val encodedUrl = URLEncoder.encode(albumUrl, StandardCharsets.UTF_8.toString())
                     navController.navigate("album_detail/$searchType/$encodedUrl")
                 },
-                onGoToSongs = { searchType, channelUrl ->
+                onGoToSongs = { searchType, channelUrl, _ ->
                     val encodedUrl = URLEncoder.encode(channelUrl, StandardCharsets.UTF_8.toString())
                     navController.navigate("artist_songs/$searchType/$encodedUrl")
                 },
-                onGoToAlbums = { searchType, channelUrl ->
+                onGoToReleases = { searchType, channelUrl, artistName ->
                     val encodedUrl = URLEncoder.encode(channelUrl, StandardCharsets.UTF_8.toString())
-                    navController.navigate("artist_albums/$searchType/$encodedUrl")
+                    val encodedName = URLEncoder.encode(artistName, StandardCharsets.UTF_8.toString())
+                    navController.navigate("artist_albums/$searchType/$encodedUrl?releaseType=all&artistName=$encodedName")
                 }
             )
         }
@@ -204,7 +205,7 @@ fun AppNavHost(
         }
 
         composable(
-            route = Screen.ArtistSongsDetail.route,
+            route = "artist_songs/{searchType}/{channelUrl}",
             arguments = listOf(
                 navArgument("searchType") { type = NavType.StringType },
                 navArgument("channelUrl") { type = NavType.StringType }
@@ -214,10 +215,20 @@ fun AppNavHost(
         }
 
         composable(
-            route = Screen.ArtistAlbumsDetail.route,
+            route = "artist_albums/{searchType}/{channelUrl}?releaseType={releaseType}&artistName={artistName}",
             arguments = listOf(
                 navArgument("searchType") { type = NavType.StringType },
-                navArgument("channelUrl") { type = NavType.StringType }
+                navArgument("channelUrl") { type = NavType.StringType },
+                navArgument("releaseType") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = "all"
+                },
+                navArgument("artistName") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                }
             )
         ) {
             ArtistAlbumsScreen(

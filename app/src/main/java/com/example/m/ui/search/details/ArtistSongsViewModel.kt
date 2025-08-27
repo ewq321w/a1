@@ -13,15 +13,22 @@ import com.example.m.data.database.SongDao
 import com.example.m.data.repository.LibraryRepository
 import com.example.m.data.repository.YoutubeRepository
 import com.example.m.managers.DownloadStatusManager
+import com.example.m.managers.PlaybackListManager
 import com.example.m.managers.PlaylistManager
 import com.example.m.playback.MusicServiceConnection
 import com.example.m.ui.search.SearchResult
 import com.example.m.ui.search.SearchResultForList
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.Page
+import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.channel.ChannelInfo
+import org.schabi.newpipe.extractor.exceptions.ExtractionException
+import org.schabi.newpipe.extractor.linkhandler.ListLinkHandler
+import org.schabi.newpipe.extractor.linkhandler.SearchQueryHandler
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import javax.inject.Inject
 
@@ -32,7 +39,9 @@ data class ArtistSongsUiState(
     val songs: List<SearchResultForList> = emptyList(),
     val errorMessage: String? = null,
     val searchType: String = "video",
-    val nextPage: Page? = null
+    val nextPage: Page? = null,
+    val songsTabHandler: ListLinkHandler? = null, // For tab pagination
+    val searchHandler: SearchQueryHandler? = null // For search pagination
 )
 
 @HiltViewModel
@@ -42,19 +51,18 @@ class ArtistSongsViewModel @Inject constructor(
     private val musicServiceConnection: MusicServiceConnection,
     private val songDao: SongDao,
     private val playlistManager: PlaylistManager,
-    private val libraryRepository: LibraryRepository,
+    libraryRepository: LibraryRepository,
     private val downloadStatusManager: DownloadStatusManager,
+    private val playbackListManager: PlaybackListManager,
     val imageLoader: ImageLoader
 ) : ViewModel() {
 
     private val channelUrl: String = savedStateHandle["channelUrl"]!!
     private val searchType: String = savedStateHandle["searchType"]!!
+    private var artistName: String? = null
 
     private val _uiState = MutableStateFlow(ArtistSongsUiState())
     val uiState: StateFlow<ArtistSongsUiState> = _uiState.asStateFlow()
-
-    private val localLibrary: StateFlow<List<Song>> = songDao.getAllSongs()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val allPlaylists: StateFlow<List<Playlist>> = libraryRepository.getAllPlaylists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -69,31 +77,63 @@ class ArtistSongsViewModel @Inject constructor(
         loadContent()
     }
 
-    private fun extractVideoId(url: String?): String? {
-        return url?.substringAfter("v=")?.substringBefore('&')
+    override fun onCleared() {
+        playbackListManager.clearCurrentListContext()
+        super.onCleared()
     }
 
     private fun loadContent() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, searchType = this@ArtistSongsViewModel.searchType) }
             try {
-                val artistDetails = if (searchType == "music") {
-                    youtubeRepository.getMusicArtistDetails(channelUrl)
-                } else {
-                    youtubeRepository.getVideoCreatorDetails(channelUrl)
-                }
+                if (searchType == "music") {
+                    // For music artists, use the search-based method for popular songs
+                    val channelInfo = withContext(Dispatchers.IO) {
+                        ChannelInfo.getInfo(ServiceList.YouTube, channelUrl)
+                    }
+                    this@ArtistSongsViewModel.artistName = channelInfo.name
 
-                if (artistDetails != null) {
-                    updateSongsInState(artistDetails.songs)
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            channelInfo = artistDetails.channelInfo,
-                            nextPage = artistDetails.songsNextPage
-                        )
+                    val plainArtistName = channelInfo.name.removeSuffix(" - Topic").trim()
+                    if (plainArtistName.isBlank()) {
+                        throw ExtractionException("Artist name could not be determined.")
+                    }
+
+                    val searchPage = youtubeRepository.search(plainArtistName, "music_songs")
+                    if (searchPage != null) {
+                        val unfilteredSongs = searchPage.items.filterIsInstance<StreamInfoItem>()
+                        val filteredSongs = unfilteredSongs.filter {
+                            it.uploaderName.equals(plainArtistName, ignoreCase = true)
+                        }
+                        updateSongsInState(filteredSongs)
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                channelInfo = channelInfo,
+                                nextPage = searchPage.nextPage,
+                                searchHandler = searchPage.queryHandler,
+                                songsTabHandler = null // Ensure tab handler is cleared
+                            )
+                        }
+                    } else {
+                        throw ExtractionException("Search returned no results for artist: $artistName")
                     }
                 } else {
-                    _uiState.update { it.copy(isLoading = false, errorMessage = "Could not load content.") }
+                    // For video channels, fetch content from their videos tab
+                    val artistDetails = youtubeRepository.getVideoCreatorDetails(channelUrl)
+                    if (artistDetails != null) {
+                        updateSongsInState(artistDetails.songs)
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                channelInfo = artistDetails.channelInfo,
+                                nextPage = artistDetails.songsNextPage,
+                                songsTabHandler = artistDetails.songsTabHandler,
+                                searchHandler = null // Ensure search handler is cleared
+                            )
+                        }
+                    } else {
+                        throw ExtractionException("Could not load channel details.")
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -103,33 +143,55 @@ class ArtistSongsViewModel @Inject constructor(
     }
 
     fun loadMoreSongs() {
-        val currentState = uiState.value
-        if (currentState.isLoadingMore || currentState.nextPage == null) return
-
         viewModelScope.launch {
+            val currentState = uiState.value
+            if (currentState.isLoadingMore || currentState.nextPage == null) return@launch
+
             _uiState.update { it.copy(isLoadingMore = true) }
-            val resultPage = youtubeRepository.getMoreArtistSongs(currentState.nextPage)
+
+            // Determine which pagination handler to use based on what was saved in the state
+            val resultPage = if (currentState.searchHandler != null) {
+                youtubeRepository.getMoreSearchResults(currentState.searchHandler, currentState.nextPage)
+            } else if (currentState.songsTabHandler != null) {
+                youtubeRepository.getMoreArtistSongs(currentState.songsTabHandler, currentState.nextPage)
+            } else {
+                null
+            }
+
             if (resultPage != null) {
                 val newItems = resultPage.items.filterIsInstance<StreamInfoItem>()
-                updateSongsInState(newItems, append = true)
+                val plainArtistName = artistName?.removeSuffix(" - Topic")?.trim()
+
+                // Only filter the results if we are in a search context (i.e., searchHandler is not null)
+                val filteredNewItems = if (currentState.searchHandler != null && !plainArtistName.isNullOrBlank()) {
+                    newItems.filter { it.uploaderName.equals(plainArtistName, ignoreCase = true) }
+                } else {
+                    newItems
+                }
+                updateSongsInState(filteredNewItems, append = true)
                 _uiState.update { it.copy(nextPage = resultPage.nextPage) }
             }
+
             _uiState.update { it.copy(isLoadingMore = false) }
         }
     }
 
-    private fun updateSongsInState(songs: List<StreamInfoItem>, append: Boolean = false) {
-        val libraryMap = localLibrary.value.filter { !it.videoId.isNullOrBlank() }.associateBy { it.videoId!! }
+
+    private suspend fun updateSongsInState(songs: List<StreamInfoItem>, append: Boolean = false) {
+        val librarySongs = songDao.getLibrarySongsSortedByArtist().first().associateBy { it.youtubeUrl }
+        val downloadedSongs = songDao.getAllDownloadedSongsOnce().associateBy { it.youtubeUrl }
         val statuses = downloadStatusManager.statuses.value
+
         val songResults = songs.map { streamInfo ->
-            val videoId = extractVideoId(streamInfo.url)
-            val localSong = videoId?.let { libraryMap[it] }
+            val rawUrl = streamInfo.url ?: ""
+            val normalizedUrl = rawUrl.replace("music.youtube.com", "www.youtube.com")
+
             val searchResult = SearchResult(
                 streamInfo,
-                localSong?.isInLibrary ?: false,
-                localSong?.localFilePath != null
+                isInLibrary = librarySongs.containsKey(normalizedUrl),
+                isDownloaded = downloadedSongs.containsKey(normalizedUrl)
             )
-            SearchResultForList(searchResult, statuses[streamInfo.url])
+            SearchResultForList(searchResult, statuses[normalizedUrl])
         }
 
         _uiState.update {
@@ -145,6 +207,8 @@ class ArtistSongsViewModel @Inject constructor(
         val items = uiState.value.songs.map { it.result.streamInfo }
         if (items.isNotEmpty()) {
             viewModelScope.launch {
+                val sourceHandler = uiState.value.searchHandler ?: uiState.value.songsTabHandler
+                playbackListManager.setCurrentListContext(sourceHandler, uiState.value.nextPage)
                 musicServiceConnection.playSongList(items, selectedIndex)
             }
         }

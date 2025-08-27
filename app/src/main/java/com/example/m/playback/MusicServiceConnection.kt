@@ -17,6 +17,7 @@ import coil.ImageLoader
 import coil.request.ImageRequest
 import com.example.m.data.database.*
 import com.example.m.data.repository.YoutubeRepository
+import com.example.m.managers.PlaybackListManager
 import com.example.m.managers.PlaylistManager
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
@@ -27,7 +28,7 @@ import kotlinx.coroutines.flow.StateFlow
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import org.schabi.newpipe.extractor.stream.StreamType
 import java.io.ByteArrayOutputStream
-import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.min
@@ -42,7 +43,8 @@ class MusicServiceConnection @Inject constructor(
     private val listeningHistoryDao: ListeningHistoryDao,
     private val playbackStateDao: PlaybackStateDao,
     private val imageLoader: ImageLoader,
-    private val playlistManager: PlaylistManager
+    private val playlistManager: PlaylistManager,
+    private val playbackListManager: PlaybackListManager
 ) {
     private val serviceComponent = ComponentName(context, MusicService::class.java)
     private var mediaBrowserFuture: ListenableFuture<MediaBrowser> =
@@ -67,6 +69,7 @@ class MusicServiceConnection @Inject constructor(
     private var isCurrentSongLogged = false
     private var isRestored = false
     private var restoreJob: Job? = null
+    private val isFetchingNextPage = AtomicBoolean(false)
 
     init {
         mediaBrowserFuture.addListener({
@@ -90,7 +93,7 @@ class MusicServiceConnection @Inject constructor(
                     Log.d(TAG, "Media item changed. Media ID from player: '$mediaId'")
 
                     isCurrentSongLogged = false
-                    prefetchNextTrack()
+                    prefetchNextTrackStream()
                     savePlaybackState()
 
                     coroutineScope.launch(Dispatchers.IO) {
@@ -103,13 +106,31 @@ class MusicServiceConnection @Inject constructor(
                             updateArtworkData(mediaItem)
                         }
                     }
+
+                    val currentQueueSize = browser.mediaItemCount
+                    val currentIndex = browser.currentMediaItemIndex
+                    if (currentQueueSize > 0 && currentIndex >= currentQueueSize - 3) {
+                        coroutineScope.launch {
+                            if (isFetchingNextPage.compareAndSet(false, true)) {
+                                val newStreamItems = playbackListManager.fetchNextPageStreamInfoItems()
+                                if (!newStreamItems.isNullOrEmpty()) {
+                                    val newMediaItems = newStreamItems.mapNotNull { createMediaItemForItem(it) }
+                                    withContext(Dispatchers.Main) {
+                                        browser.addMediaItems(newMediaItems)
+                                        Log.d(TAG, "Added ${newMediaItems.size} prefetched items to the queue.")
+                                    }
+                                }
+                                isFetchingNextPage.set(false)
+                            }
+                        }
+                    }
                 }
 
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     _isPlaying.value = isPlaying
                     if (isPlaying) {
                         startProgressUpdates()
-                        prefetchNextTrack()
+                        prefetchNextTrackStream()
                     } else {
                         stopProgressUpdates()
                         savePlaybackState()
@@ -229,7 +250,7 @@ class MusicServiceConnection @Inject constructor(
         }
     }
 
-    private fun prefetchNextTrack() {
+    private fun prefetchNextTrackStream() {
         val browser = this.mediaBrowser ?: return
         if (browser.mediaItemCount <= 1) return
 
@@ -247,6 +268,7 @@ class MusicServiceConnection @Inject constructor(
     }
 
     suspend fun playSingleSong(item: Any) {
+        playbackListManager.clearCurrentListContext()
         if (restoreJob?.isActive == true) {
             restoreJob?.cancel()
             Log.d(TAG, "Cancelling restore job due to new playback request.")
@@ -291,6 +313,7 @@ class MusicServiceConnection @Inject constructor(
     }
 
     suspend fun shuffleSongList(items: List<Any>, startIndex: Int) {
+        playbackListManager.clearCurrentListContext()
         if (items.isEmpty() || startIndex !in items.indices) return
 
         val selectedItem = items[startIndex]
@@ -328,7 +351,7 @@ class MusicServiceConnection @Inject constructor(
         }
     }
 
-    private suspend fun createMediaItemForItem(item: Any): MediaItem? {
+    suspend fun createMediaItemForItem(item: Any): MediaItem? {
         return withContext(Dispatchers.IO) {
             val song = when (item) {
                 is Song -> item

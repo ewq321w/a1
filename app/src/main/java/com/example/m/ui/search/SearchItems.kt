@@ -32,7 +32,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import com.example.m.R
@@ -92,6 +91,7 @@ fun SearchResultItem(
 ) {
     var showMenu by remember { mutableStateOf(false) }
     val isDownloading = downloadStatus is DownloadStatus.Downloading || downloadStatus is DownloadStatus.Queued
+    val showStatusIcon = downloadStatus != null || result.isDownloaded || result.isInLibrary
 
     Row(
         modifier = Modifier
@@ -123,47 +123,49 @@ fun SearchResultItem(
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                fontSize = 14.sp
+                style = MaterialTheme.typography.bodyMedium
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier.width(20.dp), // Provides consistent spacing
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    val iconSize = 16.dp
-                    when (downloadStatus) {
-                        is DownloadStatus.Downloading -> CircularProgressIndicator(
-                            progress = { downloadStatus.progress / 100f },
-                            modifier = Modifier.size(iconSize),
-                            strokeWidth = 1.5.dp
-                        )
-                        is DownloadStatus.Queued -> Icon(
-                            imageVector = Icons.Default.HourglassTop,
-                            contentDescription = "Queued",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(iconSize)
-                        )
-                        is DownloadStatus.Failed -> Icon(
-                            imageVector = Icons.Default.ErrorOutline,
-                            contentDescription = "Failed",
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(iconSize)
-                        )
-                        null -> {
-                            if (result.isDownloaded) {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = "Downloaded",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(iconSize)
-                                )
-                            } else if (result.isInLibrary) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = "In Library",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(iconSize)
-                                )
+                if (showStatusIcon) {
+                    Box(
+                        modifier = Modifier.width(20.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        val iconSize = 16.dp
+                        when (downloadStatus) {
+                            is DownloadStatus.Downloading -> CircularProgressIndicator(
+                                progress = { downloadStatus.progress / 100f },
+                                modifier = Modifier.size(iconSize),
+                                strokeWidth = 1.5.dp
+                            )
+                            is DownloadStatus.Queued -> Icon(
+                                imageVector = Icons.Default.HourglassTop,
+                                contentDescription = "Queued",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(iconSize)
+                            )
+                            is DownloadStatus.Failed -> Icon(
+                                imageVector = Icons.Default.ErrorOutline,
+                                contentDescription = "Failed",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(iconSize)
+                            )
+                            null -> {
+                                if (result.isDownloaded) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = "Downloaded",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(iconSize)
+                                    )
+                                } else if (result.isInLibrary) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "In Library",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(iconSize)
+                                    )
+                                }
                             }
                         }
                     }
@@ -172,14 +174,14 @@ fun SearchResultItem(
                     text = result.streamInfo.uploaderName ?: "Unknown Artist",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
-                    fontSize = 14.sp
+                    style = MaterialTheme.typography.bodySmall
                 )
                 if (result.streamInfo.duration > 0) {
                     Text(
                         text = " • ${formatDuration(result.streamInfo.duration)}",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
-                        fontSize = 14.sp
+                        style = MaterialTheme.typography.bodySmall
                     )
                 }
                 if (result.streamInfo.viewCount >= 0) {
@@ -187,7 +189,7 @@ fun SearchResultItem(
                         text = " • ${formatViewCount(result.streamInfo.viewCount)}",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
-                        fontSize = 14.sp
+                        style = MaterialTheme.typography.bodySmall
                     )
                 }
             }

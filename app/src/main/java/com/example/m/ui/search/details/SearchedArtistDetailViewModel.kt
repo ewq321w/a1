@@ -30,7 +30,7 @@ data class SearchedArtistDetailsUiState(
     val isLoading: Boolean = true,
     val channelInfo: ChannelInfo? = null,
     val songs: List<SearchResultForList> = emptyList(),
-    val albums: List<PlaylistInfoItem> = emptyList(),
+    val releases: List<PlaylistInfoItem> = emptyList(),
     val errorMessage: String? = null,
     val searchType: String = "video"
 )
@@ -81,7 +81,7 @@ class SearchedArtistDetailViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = true, searchType = this@SearchedArtistDetailViewModel.searchType) }
             try {
                 val artistDetails = if (searchType == "music") {
-                    youtubeRepository.getMusicArtistDetails(channelUrl)
+                    youtubeRepository.getMusicArtistDetails(channelUrl, fetchAllPages = false)
                 } else {
                     youtubeRepository.getVideoCreatorDetails(channelUrl)
                 }
@@ -107,7 +107,7 @@ class SearchedArtistDetailViewModel @Inject constructor(
                                 isLoading = false,
                                 channelInfo = artistDetails.channelInfo,
                                 songs = songResults,
-                                albums = artistDetails.albums
+                                releases = artistDetails.albums
                             )
                         }
                     }.launchIn(viewModelScope)

@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
@@ -212,7 +213,15 @@ private fun DetailedView(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(category.name.lowercase().replaceFirstChar { it.titlecase() }) },
+                title = {
+                    val titleText = when (category) {
+                        SearchCategory.ALBUMS -> if (uiState.selectedFilter == "music_songs") "Albums" else "Playlists"
+                        SearchCategory.ARTISTS -> "Artists"
+                        SearchCategory.CHANNELS -> "Channels"
+                        else -> category.name.lowercase().replaceFirstChar { it.titlecase() }
+                    }
+                    Text(titleText)
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
@@ -253,25 +262,81 @@ private fun DetailedView(
                 SearchCategory.ALBUMS -> {
                     val items = if (uiState.selectedFilter == "music_songs") uiState.albums else uiState.videoPlaylists
                     itemsIndexed(items, key = { index, item -> (item.albumInfo.url ?: "") + index }) { _, item ->
-                        ListItem(
-                            modifier = Modifier.clickable { onAlbumClicked(item) },
-                            headlineContent = { Text(item.albumInfo.name ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            supportingContent = { if (item.albumInfo.uploaderName != null) { Text(item.albumInfo.uploaderName, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
-                            leadingContent = { AsyncImage( model = item.albumInfo.getThumbnail(), imageLoader = imageLoader, contentDescription = item.albumInfo.name, modifier = Modifier.size(50.dp)) },
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent)
-                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onAlbumClicked(item) }
+                                .padding(horizontal = 16.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AsyncImage(
+                                model = item.albumInfo.getThumbnail(),
+                                imageLoader = imageLoader,
+                                contentDescription = item.albumInfo.name,
+                                modifier = Modifier.size(50.dp),
+                                contentScale = ContentScale.Crop
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = item.albumInfo.name ?: "",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                if (item.albumInfo.uploaderName != null) {
+                                    Text(
+                                        text = item.albumInfo.uploaderName!!,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
                 SearchCategory.ARTISTS, SearchCategory.CHANNELS -> {
                     val items = if (uiState.selectedFilter == "music_songs") uiState.artists else uiState.videoChannels
                     itemsIndexed(items, key = { index, item -> (item.artistInfo.url ?: "") + index }) { _, item ->
-                        ListItem(
-                            modifier = Modifier.clickable { onArtistClicked(item) },
-                            headlineContent = { Text(item.artistInfo.name ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            supportingContent = { val subs = formatSubscriberCount(item.artistInfo.subscriberCount); if (subs.isNotEmpty()) { Text(text = subs) } },
-                            leadingContent = { AsyncImage( model = item.artistInfo.thumbnails.lastOrNull()?.url, imageLoader = imageLoader, contentDescription = item.artistInfo.name, modifier = Modifier.size(50.dp).clip(CircleShape)) },
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent)
-                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onArtistClicked(item) }
+                                .padding(horizontal = 16.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AsyncImage(
+                                model = item.artistInfo.thumbnails.lastOrNull()?.url,
+                                imageLoader = imageLoader,
+                                contentDescription = item.artistInfo.name,
+                                modifier = Modifier
+                                    .size(50.dp)
+                                    .clip(CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = item.artistInfo.name ?: "",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                val subs = formatSubscriberCount(item.artistInfo.subscriberCount)
+                                if (subs.isNotEmpty()) {
+                                    Text(
+                                        text = subs,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

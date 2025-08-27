@@ -13,7 +13,7 @@ val DarkSurfaceVariant = Color(0xFF101010) // Even lighter dark gray for distinc
 val DarkOnPrimary = Color(0xFFFFFFFF)  // Text/icons on primary (red)
 val DarkOnBackground = Color(0xFFFFFFFF) // Text/icons on background
 val DarkOnSurface = Color(0xFFFFFFFF)  // Text/icons on surface
-val DarkOnSurfaceVariant = Color(0xFFCCCCCC) // Lighter gray text/icons for secondary info
+val DarkOnSurfaceVariant = Color(0xFFAAAAAA) // Lighter gray text/icons for secondary info
 val DarkOutline = Color(0xFF555555)    // For borders, inactive states
 
 val DarkRedContainer = Color(0xFF276FC0) // A dark, subtle red for selected containers

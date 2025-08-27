@@ -36,7 +36,10 @@ fun ArtistAlbumsScreen(
     viewModel: ArtistAlbumsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val title = if (uiState.searchType == "music") "Albums" else "Playlists"
+    val title = when {
+        uiState.searchType != "music" -> "Playlists"
+        else -> "Releases"
+    }
 
     Scaffold(
         topBar = {

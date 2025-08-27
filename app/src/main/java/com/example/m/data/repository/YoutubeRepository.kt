@@ -2,6 +2,7 @@ package com.example.m.data.repository
 
 import android.util.LruCache
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.InfoItem
 import org.schabi.newpipe.extractor.ListExtractor
@@ -31,7 +32,8 @@ data class ArtistDetails(
     val channelInfo: ChannelInfo,
     val songs: List<StreamInfoItem>,
     val albums: List<PlaylistInfoItem>,
-    val songsNextPage: Page?
+    val songsNextPage: Page?,
+    val songsTabHandler: ListLinkHandler? = null
 )
 
 data class PlaylistPage(
@@ -44,19 +46,16 @@ data class MorePlaylistItemsResult(
     val nextPage: Page?
 )
 
-data class SimplePage(
+data class SearchPage(
     val items: List<InfoItem>,
-    val nextPage: Page?
+    val nextPage: Page?,
+    val queryHandler: SearchQueryHandler?
 )
 
 @Singleton
 class YoutubeRepository @Inject constructor() {
 
     private val streamInfoCache = LruCache<String, StreamInfo>(100)
-
-    // Internal state to hold the handlers for pagination
-    private var lastSearchQueryHandler: SearchQueryHandler? = null
-    private var lastArtistSongsTabHandler: Any? = null
 
     suspend fun getPlaylistDetails(playlistUrl: String): PlaylistPage? {
         return withContext(Dispatchers.IO) {
@@ -97,18 +96,15 @@ class YoutubeRepository @Inject constructor() {
         return MusicSearchResults(songs, albums, artists)
     }
 
-    suspend fun search(query: String, filter: String): SimplePage? {
+    suspend fun search(query: String, filter: String): SearchPage? {
         return withContext(Dispatchers.IO) {
             try {
                 val service = ServiceList.YouTube
                 val contentFilter = if (filter == "all") emptyList() else listOf(filter)
                 val queryHandler = service.searchQHFactory.fromQuery(query, contentFilter, null)
 
-                // Store the handler for subsequent "load more" calls
-                lastSearchQueryHandler = queryHandler
-
                 val searchInfo = SearchInfo.getInfo(service, queryHandler)
-                SimplePage(searchInfo.relatedItems, searchInfo.nextPage)
+                SearchPage(searchInfo.relatedItems, searchInfo.nextPage, queryHandler)
             } catch (e: Exception) {
                 e.printStackTrace()
                 null
@@ -116,11 +112,13 @@ class YoutubeRepository @Inject constructor() {
         }
     }
 
-    suspend fun getMoreSearchResults(page: Page): ListExtractor.InfoItemsPage<InfoItem>? {
-        val handler = lastSearchQueryHandler ?: return null
+    suspend fun getMoreSearchResults(
+        queryHandler: SearchQueryHandler,
+        page: Page
+    ): ListExtractor.InfoItemsPage<InfoItem>? {
         return withContext(Dispatchers.IO) {
             try {
-                SearchInfo.getMoreItems(ServiceList.YouTube, handler, page)
+                SearchInfo.getMoreItems(ServiceList.YouTube, queryHandler, page)
             } catch (e: Exception) {
                 e.printStackTrace()
                 null
@@ -144,10 +142,7 @@ class YoutubeRepository @Inject constructor() {
         }
     }
 
-    suspend fun getMoreArtistSongs(nextPage: Page): ListExtractor.InfoItemsPage<InfoItem>? {
-        val handler = lastArtistSongsTabHandler
-        if (handler !is ListLinkHandler) return null
-
+    suspend fun getMoreArtistSongs(handler: ListLinkHandler, nextPage: Page): ListExtractor.InfoItemsPage<InfoItem>? {
         return withContext(Dispatchers.IO) {
             try {
                 ChannelTabInfo.getMoreItems(ServiceList.YouTube, handler, nextPage)
@@ -188,33 +183,101 @@ class YoutubeRepository @Inject constructor() {
         return Triple(songs, songsNextPage, songsTabHandler)
     }
 
-    suspend fun getMusicArtistDetails(channelUrl: String): ArtistDetails? {
+    private suspend fun fetchAllSearchResults(query: String, fetchAllPages: Boolean): List<PlaylistInfoItem> {
+        val initialSearchResult = search(query = query, filter = "music_albums")
+        if (initialSearchResult == null) return emptyList()
+
+        val albumList = initialSearchResult.items
+            .filterIsInstance<PlaylistInfoItem>().toMutableList()
+
+        if (fetchAllPages) {
+            var nextPage = initialSearchResult.nextPage
+            val queryHandler = initialSearchResult.queryHandler
+            if (queryHandler != null) {
+                while (nextPage != null) {
+                    val page = getMoreSearchResults(queryHandler, nextPage)
+                    if (page != null) {
+                        albumList.addAll(page.items.filterIsInstance<PlaylistInfoItem>())
+                        nextPage = page.nextPage
+                    } else {
+                        nextPage = null
+                    }
+                }
+            }
+        }
+        return albumList
+    }
+
+    suspend fun getAlbumsForArtist(artistName: String, fetchAllPages: Boolean): List<PlaylistInfoItem> {
+        return withContext(Dispatchers.IO) {
+            val plainName = artistName.removeSuffix(" - Topic").trim()
+            val topicName = "$plainName - Topic"
+
+            // Run searches for both plain name and topic name in parallel for efficiency.
+            val plainNameResultsDeferred = async { fetchAllSearchResults(plainName, fetchAllPages) }
+            val topicNameResultsDeferred = async { fetchAllSearchResults(topicName, fetchAllPages) }
+
+            val plainNameResults = plainNameResultsDeferred.await()
+            val topicNameResults = topicNameResultsDeferred.await()
+
+            // Combine the results and remove duplicates by their URL.
+            val combinedResults = (plainNameResults + topicNameResults).distinctBy { it.url }
+
+            // Filter the combined list to ensure the uploader is the artist, improving accuracy.
+            combinedResults.filter { album ->
+                album.uploaderName?.contains(plainName, ignoreCase = true) == true
+            }
+        }
+    }
+
+    suspend fun getMusicArtistDetails(channelUrl: String, fetchAllPages: Boolean): ArtistDetails? {
         return withContext(Dispatchers.IO) {
             try {
                 val service = ServiceList.YouTube
                 val channelInfo = ChannelInfo.getInfo(service, channelUrl)
 
-                val (songs, songsNextPage, songsTabHandler) = getPaginatedArtistSongs(channelInfo)
-                lastArtistSongsTabHandler = songsTabHandler
-
-                // Album logic remains unchanged (loads all)
-                var albums = emptyList<PlaylistInfoItem>()
+                // 1. Try to get albums from the "Albums" tab first. This is most reliable for normal channels.
+                var albums = mutableListOf<PlaylistInfoItem>()
                 val albumTabHandler = channelInfo.tabs.find { it.contentFilters.contains(ChannelTabs.ALBUMS) }
                 if (albumTabHandler != null) {
                     try {
                         val tabInfo = ChannelTabInfo.getInfo(service, albumTabHandler)
-                        val albumList = tabInfo.relatedItems.filterIsInstance<PlaylistInfoItem>().toMutableList()
-                        var nextPage = tabInfo.nextPage
-                        while(nextPage != null) {
-                            val page = ChannelTabInfo.getMoreItems(service, albumTabHandler, nextPage)
-                            albumList.addAll(page.items.filterIsInstance<PlaylistInfoItem>())
-                            nextPage = page.nextPage
+                        albums.addAll(tabInfo.relatedItems.filterIsInstance<PlaylistInfoItem>())
+                        if (fetchAllPages) {
+                            var nextPage = tabInfo.nextPage
+                            while (nextPage != null) {
+                                val page = ChannelTabInfo.getMoreItems(service, albumTabHandler, nextPage)
+                                albums.addAll(page.items.filterIsInstance<PlaylistInfoItem>())
+                                nextPage = page.nextPage
+                            }
                         }
-                        albums = albumList
-                    } catch (e: Exception) { e.printStackTrace() }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
                 }
 
-                ArtistDetails(channelInfo, songs, albums, songsNextPage)
+                // 2. If no albums were found via tabs, or if it's a Topic channel, use the comprehensive search-based method.
+                if (albums.isEmpty() || channelInfo.name.endsWith(" - Topic")) {
+                    val searchAlbums = getAlbumsForArtist(channelInfo.name, fetchAllPages)
+                    // Add albums from search that weren't already found via the tab
+                    albums.addAll(searchAlbums)
+                    albums = albums.distinctBy { it.url }.toMutableList()
+                }
+
+                // 3. Get popular songs for all music channels.
+                var songs = emptyList<StreamInfoItem>()
+                val plainArtistName = channelInfo.name.removeSuffix(" - Topic").trim()
+                if (plainArtistName.isNotBlank()) {
+                    val searchResultPage = search(query = plainArtistName, filter = "music_songs")
+                    val unfilteredSongs = searchResultPage?.items?.filterIsInstance<StreamInfoItem>() ?: emptyList()
+                    songs = unfilteredSongs.filter { streamInfoItem ->
+                        streamInfoItem.uploaderName.equals(plainArtistName, ignoreCase = true)
+                    }
+                }
+
+                val songsNextPage: Page? = null
+                ArtistDetails(channelInfo, songs, albums, songsNextPage, null)
+
             } catch (e: Exception) {
                 e.printStackTrace()
                 null
@@ -229,9 +292,7 @@ class YoutubeRepository @Inject constructor() {
                 val channelInfo = ChannelInfo.getInfo(service, channelUrl)
 
                 val (songs, songsNextPage, songsTabHandler) = getPaginatedArtistSongs(channelInfo)
-                lastArtistSongsTabHandler = songsTabHandler
 
-                // Playlist logic remains unchanged (loads all)
                 var playlists = emptyList<PlaylistInfoItem>()
                 val playlistsTabHandler = channelInfo.tabs.find { it.contentFilters.contains(ChannelTabs.PLAYLISTS) }
                 if (playlistsTabHandler != null) {
@@ -248,7 +309,7 @@ class YoutubeRepository @Inject constructor() {
                     } catch (e: Exception) { e.printStackTrace() }
                 }
 
-                ArtistDetails(channelInfo, songs, playlists, songsNextPage)
+                ArtistDetails(channelInfo, songs, playlists, songsNextPage, songsTabHandler as? ListLinkHandler)
             } catch (e: Exception) {
                 e.printStackTrace()
                 null

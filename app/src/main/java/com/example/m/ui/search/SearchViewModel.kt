@@ -6,9 +6,11 @@ import coil.ImageLoader
 import com.example.m.data.database.Playlist
 import com.example.m.data.database.SongDao
 import com.example.m.data.repository.LibraryRepository
+import com.example.m.data.repository.SearchPage
 import com.example.m.data.repository.YoutubeRepository
 import com.example.m.managers.DownloadStatus
 import com.example.m.managers.DownloadStatusManager
+import com.example.m.managers.PlaybackListManager
 import com.example.m.managers.PlaylistManager
 import com.example.m.playback.MusicServiceConnection
 import com.example.m.ui.common.PlaylistActionHandler
@@ -23,6 +25,7 @@ import org.schabi.newpipe.extractor.InfoItem
 import org.schabi.newpipe.extractor.ListExtractor
 import org.schabi.newpipe.extractor.Page
 import org.schabi.newpipe.extractor.channel.ChannelInfoItem
+import org.schabi.newpipe.extractor.linkhandler.SearchQueryHandler
 import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import javax.inject.Inject
@@ -70,7 +73,15 @@ data class SearchUiState(
 
     val videoStreamsNextPage: Page? = null,
     val videoPlaylistsNextPage: Page? = null,
-    val videoChannelsNextPage: Page? = null
+    val videoChannelsNextPage: Page? = null,
+
+    // Handlers for pagination
+    val songsHandler: SearchQueryHandler? = null,
+    val albumsHandler: SearchQueryHandler? = null,
+    val artistsHandler: SearchQueryHandler? = null,
+    val videoStreamsHandler: SearchQueryHandler? = null,
+    val videoPlaylistsHandler: SearchQueryHandler? = null,
+    val videoChannelsHandler: SearchQueryHandler? = null
 )
 
 @HiltViewModel
@@ -81,7 +92,8 @@ class SearchViewModel @Inject constructor(
     private val playlistManager: PlaylistManager,
     private val libraryRepository: LibraryRepository,
     private val songDao: SongDao,
-    private val downloadStatusManager: DownloadStatusManager
+    private val downloadStatusManager: DownloadStatusManager,
+    private val playbackListManager: PlaybackListManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SearchUiState())
@@ -132,9 +144,21 @@ class SearchViewModel @Inject constructor(
 
         viewModelScope.launch {
             if (uiState.value.selectedFilter == "music_songs") {
-                // Perform three separate searches concurrently for a richer "music" tab
-                val songsDeferred = async(Dispatchers.IO) { youtubeRepository.search(query, "music_songs") }
-                val albumsDeferred = async(Dispatchers.IO) { youtubeRepository.search(query, "playlists") }
+                // Perform concurrent searches for a rich "music" tab
+                val songsDeferred = async(Dispatchers.IO) {
+                    val musicSongsDeferred = async { youtubeRepository.search(query, "music_songs") }
+                    val allVideosDeferred = async { youtubeRepository.search(query, "all") }
+
+                    val musicSongsResult = musicSongsDeferred.await()
+                    val allVideosResult = allVideosDeferred.await()
+
+                    val musicSongItems = musicSongsResult?.items?.filterIsInstance<StreamInfoItem>() ?: emptyList()
+                    val allVideoItems = allVideosResult?.items?.filterIsInstance<StreamInfoItem>() ?: emptyList()
+
+                    val combinedItems = (musicSongItems + allVideoItems).distinctBy { it.url }
+                    SearchPage(combinedItems, musicSongsResult?.nextPage, musicSongsResult?.queryHandler)
+                }
+                val albumsDeferred = async(Dispatchers.IO) { youtubeRepository.search(query, "music_albums") }
                 val artistsDeferred = async(Dispatchers.IO) { youtubeRepository.search(query, "channels") }
 
                 val songsResult = songsDeferred.await()
@@ -142,16 +166,19 @@ class SearchViewModel @Inject constructor(
                 val artistsResult = artistsDeferred.await()
 
                 updateMusicSearchResults(
-                    songItems = songsResult?.items ?: emptyList(),
+                    songItems = songsResult.items,
                     albumItems = albumsResult?.items ?: emptyList(),
                     artistItems = artistsResult?.items ?: emptyList()
                 )
 
                 _uiState.update {
                     it.copy(
-                        songsNextPage = songsResult?.nextPage,
+                        songsNextPage = songsResult.nextPage,
                         albumsNextPage = albumsResult?.nextPage,
                         artistsNextPage = artistsResult?.nextPage,
+                        songsHandler = songsResult.queryHandler,
+                        albumsHandler = albumsResult?.queryHandler,
+                        artistsHandler = artistsResult?.queryHandler,
                         isLoading = false
                     )
                 }
@@ -176,6 +203,9 @@ class SearchViewModel @Inject constructor(
                         videoStreamsNextPage = videosResult?.nextPage,
                         videoPlaylistsNextPage = playlistsResult?.nextPage,
                         videoChannelsNextPage = channelsResult?.nextPage,
+                        videoStreamsHandler = videosResult?.queryHandler,
+                        videoPlaylistsHandler = playlistsResult?.queryHandler,
+                        videoChannelsHandler = channelsResult?.queryHandler,
                         isLoading = false
                     )
                 }
@@ -187,19 +217,26 @@ class SearchViewModel @Inject constructor(
         val currentState = uiState.value
         if (currentState.isLoadingMore || currentState.detailedViewCategory == null) return
 
-        val pageToLoad = when (currentState.detailedViewCategory) {
-            SearchCategory.SONGS -> currentState.songsNextPage
-            SearchCategory.ALBUMS -> if (currentState.selectedFilter == "music_songs") currentState.albumsNextPage else currentState.videoPlaylistsNextPage
-            SearchCategory.ARTISTS -> if (currentState.selectedFilter == "music_songs") currentState.artistsNextPage else currentState.videoChannelsNextPage
-            SearchCategory.VIDEOS -> currentState.videoStreamsNextPage
-            SearchCategory.CHANNELS -> currentState.videoChannelsNextPage
+        val pageAndHandler: Pair<Page?, SearchQueryHandler?> = when (currentState.detailedViewCategory) {
+            SearchCategory.SONGS -> currentState.songsNextPage to currentState.songsHandler
+            SearchCategory.ALBUMS -> if (currentState.selectedFilter == "music_songs") {
+                currentState.albumsNextPage to currentState.albumsHandler
+            } else {
+                currentState.videoPlaylistsNextPage to currentState.videoPlaylistsHandler
+            }
+            SearchCategory.ARTISTS -> currentState.artistsNextPage to currentState.artistsHandler
+            SearchCategory.VIDEOS -> currentState.videoStreamsNextPage to currentState.videoStreamsHandler
+            SearchCategory.CHANNELS -> currentState.videoChannelsNextPage to currentState.videoChannelsHandler
         }
 
-        if (pageToLoad == null) return
+        val pageToLoad = pageAndHandler.first
+        val handler = pageAndHandler.second
+
+        if (pageToLoad == null || handler == null) return
         _uiState.update { it.copy(isLoadingMore = true) }
 
         viewModelScope.launch {
-            val resultPage = youtubeRepository.getMoreSearchResults(pageToLoad)
+            val resultPage = youtubeRepository.getMoreSearchResults(handler, pageToLoad)
             if (resultPage != null) {
                 appendSearchResults(currentState.detailedViewCategory!!, resultPage.items)
                 val newNextPage = resultPage.nextPage
@@ -207,7 +244,7 @@ class SearchViewModel @Inject constructor(
                     when (currentState.detailedViewCategory) {
                         SearchCategory.SONGS -> it.copy(songsNextPage = newNextPage)
                         SearchCategory.ALBUMS -> if (currentState.selectedFilter == "music_songs") it.copy(albumsNextPage = newNextPage) else it.copy(videoPlaylistsNextPage = newNextPage)
-                        SearchCategory.ARTISTS -> if (currentState.selectedFilter == "music_songs") it.copy(artistsNextPage = newNextPage) else it.copy(videoChannelsNextPage = newNextPage)
+                        SearchCategory.ARTISTS -> it.copy(artistsNextPage = newNextPage)
                         SearchCategory.VIDEOS -> it.copy(videoStreamsNextPage = newNextPage)
                         SearchCategory.CHANNELS -> it.copy(videoChannelsNextPage = newNextPage)
                     }
@@ -225,12 +262,13 @@ class SearchViewModel @Inject constructor(
             when (category) {
                 SearchCategory.SONGS, SearchCategory.VIDEOS -> {
                     val songs = newItems.filterIsInstance<StreamInfoItem>().map {
-                        val url = it.url ?: ""
+                        val rawUrl = it.url ?: ""
+                        val normalizedUrl = rawUrl.replace("music.youtube.com", "www.youtube.com")
                         async {
                             SearchResult(
                                 streamInfo = it,
-                                isInLibrary = librarySongs.containsKey(url),
-                                isDownloaded = downloadedSongs.containsKey(url)
+                                isInLibrary = librarySongs.containsKey(normalizedUrl),
+                                isDownloaded = downloadedSongs.containsKey(normalizedUrl)
                             )
                         }
                     }.awaitAll()
@@ -266,12 +304,13 @@ class SearchViewModel @Inject constructor(
             val librarySongs = songDao.getLibrarySongsSortedByArtist().first().associateBy { it.youtubeUrl }
 
             val songs = songItems.filterIsInstance<StreamInfoItem>().map {
-                val url = it.url ?: ""
+                val rawUrl = it.url ?: ""
+                val normalizedUrl = rawUrl.replace("music.youtube.com", "www.youtube.com")
                 async {
                     SearchResult(
                         streamInfo = it,
-                        isInLibrary = librarySongs.containsKey(url),
-                        isDownloaded = downloadedSongs.containsKey(url)
+                        isInLibrary = librarySongs.containsKey(normalizedUrl),
+                        isDownloaded = downloadedSongs.containsKey(normalizedUrl)
                     )
                 }
             }.awaitAll()
@@ -296,12 +335,13 @@ class SearchViewModel @Inject constructor(
             val librarySongs = songDao.getLibrarySongsSortedByArtist().first().associateBy { it.youtubeUrl }
 
             val videos = videoItems.filterIsInstance<StreamInfoItem>().map {
-                val url = it.url ?: ""
+                val rawUrl = it.url ?: ""
+                val normalizedUrl = rawUrl.replace("music.youtube.com", "www.youtube.com")
                 async {
                     SearchResult(
                         streamInfo = it,
-                        isInLibrary = librarySongs.containsKey(url),
-                        isDownloaded = downloadedSongs.containsKey(url)
+                        isInLibrary = librarySongs.containsKey(normalizedUrl),
+                        isDownloaded = downloadedSongs.containsKey(normalizedUrl)
                     )
                 }
             }.awaitAll()
@@ -331,6 +371,19 @@ class SearchViewModel @Inject constructor(
 
         if (fullListToPlay.isNotEmpty()) {
             viewModelScope.launch {
+                val currentState = uiState.value
+                val sourceHandler = if (currentState.selectedFilter == "music_songs") {
+                    currentState.songsHandler
+                } else {
+                    currentState.videoStreamsHandler
+                }
+                val nextPage = if (currentState.selectedFilter == "music_songs") {
+                    currentState.songsNextPage
+                } else {
+                    currentState.videoStreamsNextPage
+                }
+
+                playbackListManager.setCurrentListContext(sourceHandler, nextPage)
                 musicServiceConnection.playSongList(fullListToPlay, selectedIndex)
             }
         }
