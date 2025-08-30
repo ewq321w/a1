@@ -19,7 +19,9 @@ import com.example.m.ui.library.HistoryScreen
 import com.example.m.ui.library.LibraryScreen
 import com.example.m.ui.library.details.ArtistDetailScreen
 import com.example.m.ui.library.details.ArtistGroupDetailScreen
+import com.example.m.ui.library.details.ArtistSongGroupDetailScreen
 import com.example.m.ui.library.details.PlaylistDetailScreen
+import com.example.m.ui.library.edit.EditArtistSongGroupScreen
 import com.example.m.ui.library.edit.EditArtistSongsScreen
 import com.example.m.ui.library.edit.EditPlaylistScreen
 import com.example.m.ui.search.SearchScreen
@@ -38,8 +40,10 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
     object ArtistDetail : Screen("artist_detail/{artistId}", "Artist", Icons.Default.LibraryMusic)
     object EditPlaylist : Screen("edit_playlist/{playlistId}", "Edit Playlist", Icons.Default.Edit)
     object EditArtistSongs : Screen("edit_artist_songs/{artistId}", "Edit Artist Songs", Icons.Default.Edit)
+    object EditArtistSongGroup : Screen("edit_artist_song_group/{groupId}", "Edit Group", Icons.Default.Edit)
     object HiddenArtists : Screen("hidden_artists", "Hidden Artists", Icons.Default.Visibility)
     object ArtistGroupDetail : Screen("artist_group_detail/{groupId}", "Artist Group", Icons.Default.Folder)
+    object ArtistSongGroupDetail : Screen("artist_song_group_detail/{groupId}", "Group", Icons.Default.Folder)
     object SearchedArtistDetail : Screen("searched_artist_detail/{searchType}/{channelUrl}", "Artist Details", Icons.Default.Person)
     object AlbumDetail : Screen("album_detail/{searchType}/{albumUrl}", "Album Details", Icons.Default.Album)
     object ArtistSongsDetail : Screen("artist_songs/{searchType}/{channelUrl}", "Artist Songs", Icons.Default.MusicNote)
@@ -123,6 +127,12 @@ fun AppNavHost(
                 },
                 onArtistClick = { artistId ->
                     navController.navigate("artist_detail/$artistId")
+                },
+                onGroupClick = { groupId ->
+                    navController.navigate("artist_song_group_detail/$groupId")
+                },
+                onEditGroup = { groupId ->
+                    navController.navigate("edit_artist_song_group/$groupId")
                 }
             )
         }
@@ -139,6 +149,13 @@ fun AppNavHost(
             arguments = listOf(navArgument("artistId") { type = NavType.LongType })
         ) {
             EditArtistSongsScreen(onBack = { navController.popBackStack() })
+        }
+
+        composable(
+            route = Screen.EditArtistSongGroup.route,
+            arguments = listOf(navArgument("groupId") { type = NavType.LongType })
+        ) {
+            EditArtistSongGroupScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Screen.HiddenArtists.route) {
@@ -165,6 +182,21 @@ fun AppNavHost(
                 },
                 onEditArtistSongs = { artistId ->
                     navController.navigate("edit_artist_songs/$artistId")
+                }
+            )
+        }
+
+        composable(
+            route = Screen.ArtistSongGroupDetail.route,
+            arguments = listOf(navArgument("groupId") { type = NavType.LongType })
+        ) {
+            ArtistSongGroupDetailScreen(
+                onBack = { navController.popBackStack() },
+                onArtistClick = { artistId ->
+                    navController.navigate("artist_detail/$artistId")
+                },
+                onEditGroup = { groupId ->
+                    navController.navigate("edit_artist_song_group/$groupId")
                 }
             )
         }

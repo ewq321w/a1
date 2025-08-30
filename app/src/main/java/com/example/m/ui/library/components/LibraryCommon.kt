@@ -1,8 +1,10 @@
 package com.example.m.ui.library.components
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -15,7 +17,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.m.R
 import com.example.m.data.database.Song
@@ -42,6 +43,7 @@ internal fun formatPlayCount(count: Int): String {
     return "${DecimalFormat("0.#").format(thousands)}K plays"
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SongItem(
     song: Song,
@@ -57,59 +59,76 @@ fun SongItem(
     onAddToLibraryClick: (() -> Unit)? = null,
     onDownloadClick: (() -> Unit)? = null,
     onDeleteFromHistoryClick: (() -> Unit)? = null,
+    onAddToGroupClick: (() -> Unit)? = null,
+    onRemoveFromGroupClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
     val isDownloading = downloadStatus is DownloadStatus.Downloading || downloadStatus is DownloadStatus.Queued
 
+    val displayTitle = remember(song.title) {
+        song.title.replace(" (Remastered)", "")
+    }
+
     ListItem(
-        headlineContent = { Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        headlineContent = {
+            Text(
+                displayTitle,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        },
         supportingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier.width(20.dp), // Provides consistent spacing
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    val iconSize = 16.dp
-                    when (downloadStatus) {
-                        is DownloadStatus.Downloading -> {
-                            CircularProgressIndicator(
-                                progress = { downloadStatus.progress / 100f },
-                                modifier = Modifier.size(iconSize),
-                                strokeWidth = 1.5.dp
-                            )
-                        }
-                        is DownloadStatus.Queued -> {
-                            Icon(
-                                imageVector = Icons.Default.HourglassTop,
-                                contentDescription = "Queued",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(iconSize)
-                            )
-                        }
-                        is DownloadStatus.Failed -> {
-                            Icon(
-                                imageVector = Icons.Default.ErrorOutline,
-                                contentDescription = "Failed",
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(iconSize)
-                            )
-                        }
-                        null -> {
-                            if (song.localFilePath != null) {
+                val showStatusIcon = downloadStatus != null || song.localFilePath != null || song.isInLibrary
+
+                if (showStatusIcon) {
+                    Box(
+                        modifier = Modifier.width(20.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        val iconSize = 16.dp
+                        when (downloadStatus) {
+                            is DownloadStatus.Downloading -> {
+                                CircularProgressIndicator(
+                                    progress = { downloadStatus.progress / 100f },
+                                    modifier = Modifier.size(iconSize),
+                                    strokeWidth = 1.5.dp
+                                )
+                            }
+                            is DownloadStatus.Queued -> {
                                 Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = "Downloaded",
+                                    imageVector = Icons.Default.HourglassTop,
+                                    contentDescription = "Queued",
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(iconSize)
                                 )
-                            } else if (song.isInLibrary) {
+                            }
+                            is DownloadStatus.Failed -> {
                                 Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = "In Library",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    imageVector = Icons.Default.ErrorOutline,
+                                    contentDescription = "Failed",
+                                    tint = MaterialTheme.colorScheme.error,
                                     modifier = Modifier.size(iconSize)
                                 )
+                            }
+                            null -> {
+                                if (song.localFilePath != null) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = "Downloaded",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(iconSize)
+                                    )
+                                } else if (song.isInLibrary) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "In Library",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(iconSize)
+                                    )
+                                }
                             }
                         }
                     }
@@ -122,14 +141,21 @@ fun SongItem(
                 if (song.playCount > 0) {
                     supportText += " • ${formatPlayCount(song.playCount)}"
                 }
-                Text(supportText, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
+                Text(
+                    supportText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
         },
         leadingContent = {
             AsyncImage(
                 model = song.thumbnailUrl,
                 contentDescription = "Album art for ${song.title}",
-                modifier = Modifier.size(50.dp),
+                modifier = Modifier
+                    .size(54.dp)
+                    .clip(RoundedCornerShape(3.dp)),
                 contentScale = ContentScale.Crop,
                 error = painterResource(id = R.drawable.placeholder_gray),
                 placeholder = painterResource(id = R.drawable.placeholder_gray)
@@ -166,8 +192,14 @@ fun SongItem(
                         )
                     }
                     DropdownMenuItem(text = { Text("Add to playlist") }, onClick = { onAddToPlaylistClick(); showMenu = false })
+                    onAddToGroupClick?.let {
+                        DropdownMenuItem(text = { Text("Add to group") }, onClick = { it(); showMenu = false })
+                    }
                     onRemoveFromPlaylistClick?.let {
                         DropdownMenuItem(text = { Text("Remove from playlist") }, onClick = { it(); showMenu = false })
+                    }
+                    onRemoveFromGroupClick?.let {
+                        DropdownMenuItem(text = { Text("Remove from group") }, onClick = { it(); showMenu = false })
                     }
                     onDeleteFromHistoryClick?.let {
                         DropdownMenuItem(text = { Text("Delete from history") }, onClick = { it(); showMenu = false })
@@ -185,7 +217,9 @@ fun SongItem(
             supportingColor = MaterialTheme.colorScheme.onSurfaceVariant,
             trailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
         ),
-        modifier = modifier.clickable(onClick = onClick)
+        modifier = modifier
+            .clickable(onClick = onClick)
+            .defaultMinSize(minHeight = 72.dp)
     )
 }
 
@@ -278,63 +312,5 @@ fun CompositeThumbnailImage(
                 )
             }
         }
-    }
-}
-
-@Composable
-fun FolderWithThumbnails(
-    urls: List<String>,
-    modifier: Modifier = Modifier
-) {
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        Icon(
-            imageVector = Icons.Default.Folder,
-            contentDescription = "Artist Group",
-            modifier = Modifier.fillMaxSize(),
-            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-        )
-
-        val gridModifier = Modifier
-            .fillMaxSize(0.65f)
-            .padding(top = 4.dp)
-
-        if (urls.isNotEmpty()) {
-            Column(
-                modifier = gridModifier,
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    ThumbnailCell(url = urls.getOrNull(0), modifier = Modifier.weight(1f))
-                    ThumbnailCell(url = urls.getOrNull(1), modifier = Modifier.weight(1f))
-                }
-                Row(
-                    modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    ThumbnailCell(url = urls.getOrNull(2), modifier = Modifier.weight(1f))
-                    ThumbnailCell(url = urls.getOrNull(3), modifier = Modifier.weight(1f))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ThumbnailCell(url: String?, modifier: Modifier) {
-    if (url != null) {
-        AsyncImage(
-            model = url,
-            contentDescription = null,
-            modifier = modifier
-                .fillMaxSize()
-                .clip(CircleShape),
-            contentScale = ContentScale.Crop,
-            error = painterResource(id = R.drawable.placeholder_gray)
-        )
-    } else {
-        Spacer(modifier = modifier.fillMaxSize())
     }
 }

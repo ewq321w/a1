@@ -1,18 +1,24 @@
 package com.example.m.ui.library.tabs
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.m.data.database.Artist
 import com.example.m.data.database.ArtistGroup
@@ -22,7 +28,6 @@ import com.example.m.ui.library.LibraryArtistItem
 import com.example.m.ui.library.LibraryViewModel
 import com.example.m.ui.library.components.CompositeThumbnailImage
 import com.example.m.ui.library.components.EmptyStateMessage
-import com.example.m.ui.library.components.FolderWithThumbnails
 
 @Composable
 fun ArtistsTabContent(
@@ -73,7 +78,9 @@ fun ArtistsTabContent(
                             onPlayClick = { viewModel.playArtistGroup(group) },
                             onShuffleClick = { viewModel.shuffleArtistGroup(group) },
                             onRenameClick = { viewModel.prepareToRenameGroup(group) },
-                            onDeleteClick = { viewModel.itemPendingDeletion.value = DeletableItem.DeletableArtistGroup(group) }
+                            onDeleteClick = { viewModel.itemPendingDeletion.value = DeletableItem.DeletableArtistGroup(group) },
+                            // FIX: Pass the thumbnail processor function to the GroupItem
+                            processUrls = viewModel::processThumbnails
                         )
                     }
                 }
@@ -82,6 +89,7 @@ fun ArtistsTabContent(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ArtistItem(
     artistWithSongs: ArtistWithSongs,
@@ -100,7 +108,13 @@ fun ArtistItem(
     val librarySongs = artistWithSongs.songs.filter { it.isInLibrary }
 
     ListItem(
-        headlineContent = { Text(artist.name) },
+        headlineContent = {
+            Text(
+                artist.name,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
         supportingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (artist.downloadAutomatically) {
@@ -120,7 +134,9 @@ fun ArtistItem(
                 urls = librarySongs.map { it.thumbnailUrl },
                 contentDescription = "Thumbnail for ${artist.name}",
                 processUrls = processUrls,
-                modifier = Modifier.size(50.dp)
+                modifier = Modifier
+                    .size(54.dp)
+                    .clip(RoundedCornerShape(3.dp))
             )
         },
         trailingContent = {
@@ -156,10 +172,13 @@ fun ArtistItem(
             containerColor = Color.Transparent,
             headlineColor = MaterialTheme.colorScheme.onSurface
         ),
-        modifier = modifier.clickable(onClick = onClick)
+        modifier = modifier
+            .clickable(onClick = onClick)
+            .height(72.dp)
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun GroupItem(
     group: ArtistGroup,
@@ -170,20 +189,46 @@ fun GroupItem(
     onShuffleClick: () -> Unit,
     onRenameClick: () -> Unit,
     onDeleteClick: () -> Unit,
+    processUrls: suspend (List<String>) -> List<String>,
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
     ListItem(
-        headlineContent = { Text(group.name, fontWeight = FontWeight.Bold) },
+        headlineContent = {
+            Text(
+                group.name,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
         supportingContent = {
             Text("$artistCount artists")
         },
         leadingContent = {
-            FolderWithThumbnails(
-                urls = thumbnailUrls,
-                modifier = Modifier.size(50.dp)
-            )
+            // FIX: Replaced FolderWithThumbnails with a Box containing the Folder icon
+            // and the more robust CompositeThumbnailImage.
+            Box(
+                modifier = Modifier.size(54.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Folder,
+                    contentDescription = "Artist Group",
+                    modifier = Modifier.fillMaxSize(),
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
+                )
+                CompositeThumbnailImage(
+                    urls = thumbnailUrls,
+                    contentDescription = "Thumbnails for ${group.name}",
+                    processUrls = processUrls,
+                    modifier = Modifier
+                        .fillMaxSize(0.65f)
+                        .padding(top = 4.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                )
+            }
         },
         trailingContent = {
             Box {
@@ -212,6 +257,8 @@ fun GroupItem(
             }
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = modifier.clickable(onClick = onClick)
+        modifier = modifier
+            .clickable(onClick = onClick)
+            .height(72.dp)
     )
 }

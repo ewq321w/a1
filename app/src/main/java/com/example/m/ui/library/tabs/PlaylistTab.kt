@@ -1,9 +1,12 @@
 package com.example.m.ui.library.tabs
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.MoreVert
@@ -11,8 +14,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.m.data.database.PlaylistWithSongs
 import com.example.m.ui.library.DeletableItem
@@ -75,6 +80,7 @@ fun PlaylistTabContent(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PlaylistItem(
     playlistWithSongs: PlaylistWithSongs,
@@ -85,12 +91,20 @@ fun PlaylistItem(
     onRemoveDownloads: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
-    viewModel: LibraryViewModel
+    viewModel: LibraryViewModel,
+    modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
     ListItem(
-        headlineContent = { Text(playlistWithSongs.playlist.name, fontWeight = FontWeight.Bold) },
+        headlineContent = {
+            Text(
+                playlistWithSongs.playlist.name,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
         supportingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (playlistWithSongs.playlist.downloadAutomatically) {
@@ -111,7 +125,9 @@ fun PlaylistItem(
                 urls = playlistWithSongs.songs.map { it.thumbnailUrl },
                 contentDescription = "Playlist thumbnail for ${playlistWithSongs.playlist.name}",
                 processUrls = viewModel::processThumbnails,
-                modifier = Modifier.size(50.dp)
+                modifier = Modifier
+                    .size(54.dp)
+                    .clip(RoundedCornerShape(3.dp))
             )
         },
         trailingContent = {
@@ -137,6 +153,6 @@ fun PlaylistItem(
             supportingColor = MaterialTheme.colorScheme.onSurfaceVariant,
             trailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
         ),
-        modifier = Modifier.clickable(onClick = onClick)
+        modifier = modifier.clickable(onClick = onClick).height(72.dp)
     )
 }

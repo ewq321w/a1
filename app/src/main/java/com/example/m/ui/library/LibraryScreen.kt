@@ -11,6 +11,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.m.data.database.Artist
+import com.example.m.data.database.LibraryGroup
 import com.example.m.data.database.Song
 import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.library.components.*
@@ -43,6 +44,10 @@ fun LibraryScreen(
     val selectedView by viewModel.selectedView.collectAsState()
     val sortOrder by viewModel.sortOrder.collectAsState()
     val libraryViews = listOf("Playlists", "Artists", "Songs")
+
+    // FIX: Get library groups state from view model
+    val libraryGroups by viewModel.libraryGroups.collectAsState()
+    val activeLibraryGroupId by viewModel.activeLibraryGroupId.collectAsState()
 
     val showCreatePlaylistDialog by remember { derivedStateOf { viewModel.showCreatePlaylistDialog } }
     val showCreateArtistGroupDialog by remember { derivedStateOf { viewModel.showCreateArtistGroupDialog } }
@@ -178,6 +183,14 @@ fun LibraryScreen(
             TopAppBar(
                 title = { Text("Library") },
                 actions = {
+                    // FIX: Add the new Library Group selector menu
+                    LibraryGroupSelectorMenu(
+                        groups = libraryGroups,
+                        activeGroupId = activeLibraryGroupId,
+                        onGroupSelected = { viewModel.setActiveLibraryGroup(it) },
+                        onManageGroups = { /* TODO: Implement in a future step */ }
+                    )
+
                     IconButton(onClick = onGoToHistory) {
                         Icon(Icons.Default.History, contentDescription = "History")
                     }
@@ -276,6 +289,58 @@ fun LibraryScreen(
                     onDownloadClick = viewModel::downloadSong
                 )
             }
+        }
+    }
+}
+
+// FIX: New composable for the Library Group dropdown selector
+@Composable
+private fun LibraryGroupSelectorMenu(
+    groups: List<LibraryGroup>,
+    activeGroupId: Long,
+    onGroupSelected: (Long) -> Unit,
+    onManageGroups: () -> Unit
+) {
+    var showMenu by remember { mutableStateOf(false) }
+    val activeGroupName =
+        if (activeGroupId == 0L) "All Music"
+        else groups.find { it.groupId == activeGroupId }?.name ?: "All Music"
+
+    Box {
+        TextButton(onClick = { showMenu = true }) {
+            Text(activeGroupName)
+            Icon(Icons.Default.ArrowDropDown, contentDescription = "Select Library Group")
+        }
+
+        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            DropdownMenuItem(
+                text = { Text("All Music") },
+                onClick = {
+                    onGroupSelected(0L)
+                    showMenu = false
+                },
+                trailingIcon = { if (activeGroupId == 0L) Icon(Icons.Default.Check, "Selected") }
+            )
+            groups.forEach { group ->
+                DropdownMenuItem(
+                    text = { Text(group.name) },
+                    onClick = {
+                        onGroupSelected(group.groupId)
+                        showMenu = false
+                    },
+                    trailingIcon = { if (activeGroupId == group.groupId) Icon(Icons.Default.Check, "Selected") }
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+            DropdownMenuItem(
+                text = { Text("Manage groups") },
+                onClick = {
+                    onManageGroups()
+                    showMenu = false
+                },
+                // TODO: Enable this in the next step
+                enabled = false
+            )
         }
     }
 }

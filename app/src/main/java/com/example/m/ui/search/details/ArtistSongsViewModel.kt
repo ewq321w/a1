@@ -12,6 +12,7 @@ import com.example.m.data.database.Song
 import com.example.m.data.database.SongDao
 import com.example.m.data.repository.LibraryRepository
 import com.example.m.data.repository.YoutubeRepository
+import com.example.m.managers.DownloadStatus
 import com.example.m.managers.DownloadStatusManager
 import com.example.m.managers.PlaybackListManager
 import com.example.m.managers.PlaylistManager
@@ -51,7 +52,7 @@ class ArtistSongsViewModel @Inject constructor(
     private val musicServiceConnection: MusicServiceConnection,
     private val songDao: SongDao,
     private val playlistManager: PlaylistManager,
-    libraryRepository: LibraryRepository,
+    private val libraryRepository: LibraryRepository,
     private val downloadStatusManager: DownloadStatusManager,
     private val playbackListManager: PlaybackListManager,
     val imageLoader: ImageLoader
@@ -64,6 +65,9 @@ class ArtistSongsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ArtistSongsUiState())
     val uiState: StateFlow<ArtistSongsUiState> = _uiState.asStateFlow()
 
+    private val allLocalSongs: StateFlow<List<Song>> = songDao.getAllSongs()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val allPlaylists: StateFlow<List<Playlist>> = libraryRepository.getAllPlaylists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -75,6 +79,47 @@ class ArtistSongsViewModel @Inject constructor(
 
     init {
         loadContent()
+        viewModelScope.launch {
+            allLocalSongs.drop(1).collect {
+                refreshSongStatuses()
+            }
+        }
+        viewModelScope.launch {
+            downloadStatusManager.statuses.collect { statuses ->
+                refreshDownloadStatuses(statuses)
+            }
+        }
+    }
+
+    private fun refreshDownloadStatuses(statuses: Map<String, DownloadStatus>) {
+        val currentState = _uiState.value
+        if (currentState.songs.isEmpty()) return
+
+        val updatedSongs = currentState.songs.map { searchResultForList ->
+            val normalizedUrl = searchResultForList.result.streamInfo.url?.replace("music.youtube.com", "www.youtube.com")
+            searchResultForList.copy(downloadStatus = statuses[normalizedUrl])
+        }
+        _uiState.update { it.copy(songs = updatedSongs) }
+    }
+
+    private fun refreshSongStatuses() {
+        val currentState = _uiState.value
+        if (currentState.songs.isEmpty()) return
+
+        val localSongsByUrl = allLocalSongs.value.associateBy { it.youtubeUrl }
+
+        val updatedSongs = currentState.songs.map { searchResultForList ->
+            val result = searchResultForList.result
+            val normalizedUrl = result.streamInfo.url?.replace("music.youtube.com", "www.youtube.com") ?: ""
+            val localSong = localSongsByUrl[normalizedUrl]
+            searchResultForList.copy(
+                result = result.copy(
+                    isInLibrary = localSong?.isInLibrary ?: false,
+                    isDownloaded = localSong?.localFilePath != null
+                )
+            )
+        }
+        _uiState.update { it.copy(songs = updatedSongs) }
     }
 
     override fun onCleared() {
@@ -87,7 +132,6 @@ class ArtistSongsViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = true, searchType = this@ArtistSongsViewModel.searchType) }
             try {
                 if (searchType == "music") {
-                    // For music artists, use the search-based method for popular songs
                     val channelInfo = withContext(Dispatchers.IO) {
                         ChannelInfo.getInfo(ServiceList.YouTube, channelUrl)
                     }
@@ -103,7 +147,7 @@ class ArtistSongsViewModel @Inject constructor(
                         val unfilteredSongs = searchPage.items.filterIsInstance<StreamInfoItem>()
                         val filteredSongs = unfilteredSongs.filter {
                             it.uploaderName.equals(plainArtistName, ignoreCase = true)
-                        }
+                        }.distinctBy { "${it.name?.lowercase()?.trim()}::${it.uploaderName?.lowercase()?.trim()}" }
                         updateSongsInState(filteredSongs)
                         _uiState.update {
                             it.copy(
@@ -111,7 +155,7 @@ class ArtistSongsViewModel @Inject constructor(
                                 channelInfo = channelInfo,
                                 nextPage = searchPage.nextPage,
                                 searchHandler = searchPage.queryHandler,
-                                songsTabHandler = null // Ensure tab handler is cleared
+                                songsTabHandler = null
                             )
                         }
                     } else {
@@ -128,7 +172,7 @@ class ArtistSongsViewModel @Inject constructor(
                                 channelInfo = artistDetails.channelInfo,
                                 nextPage = artistDetails.songsNextPage,
                                 songsTabHandler = artistDetails.songsTabHandler,
-                                searchHandler = null // Ensure search handler is cleared
+                                searchHandler = null
                             )
                         }
                     } else {
@@ -149,7 +193,6 @@ class ArtistSongsViewModel @Inject constructor(
 
             _uiState.update { it.copy(isLoadingMore = true) }
 
-            // Determine which pagination handler to use based on what was saved in the state
             val resultPage = if (currentState.searchHandler != null) {
                 youtubeRepository.getMoreSearchResults(currentState.searchHandler, currentState.nextPage)
             } else if (currentState.songsTabHandler != null) {
@@ -162,13 +205,23 @@ class ArtistSongsViewModel @Inject constructor(
                 val newItems = resultPage.items.filterIsInstance<StreamInfoItem>()
                 val plainArtistName = artistName?.removeSuffix(" - Topic")?.trim()
 
-                // Only filter the results if we are in a search context (i.e., searchHandler is not null)
-                val filteredNewItems = if (currentState.searchHandler != null && !plainArtistName.isNullOrBlank()) {
+                val uniqueNewItems = if (currentState.searchHandler != null && !plainArtistName.isNullOrBlank()) {
                     newItems.filter { it.uploaderName.equals(plainArtistName, ignoreCase = true) }
                 } else {
                     newItems
+                }.distinctBy { "${it.name?.lowercase()?.trim()}::${it.uploaderName?.lowercase()?.trim()}" }
+
+                val existingKeys = currentState.songs.map {
+                    val s = it.result.streamInfo
+                    "${s.name?.lowercase()?.trim()}::${s.uploaderName?.lowercase()?.trim()}"
+                }.toSet()
+
+                val trulyNewItems = uniqueNewItems.filter {
+                    val key = "${it.name?.lowercase()?.trim()}::${it.uploaderName?.lowercase()?.trim()}"
+                    !existingKeys.contains(key)
                 }
-                updateSongsInState(filteredNewItems, append = true)
+
+                updateSongsInState(trulyNewItems, append = true)
                 _uiState.update { it.copy(nextPage = resultPage.nextPage) }
             }
 
@@ -178,18 +231,18 @@ class ArtistSongsViewModel @Inject constructor(
 
 
     private suspend fun updateSongsInState(songs: List<StreamInfoItem>, append: Boolean = false) {
-        val librarySongs = songDao.getLibrarySongsSortedByArtist().first().associateBy { it.youtubeUrl }
-        val downloadedSongs = songDao.getAllDownloadedSongsOnce().associateBy { it.youtubeUrl }
+        val librarySongs = allLocalSongs.value.associateBy { it.youtubeUrl }
         val statuses = downloadStatusManager.statuses.value
 
         val songResults = songs.map { streamInfo ->
             val rawUrl = streamInfo.url ?: ""
             val normalizedUrl = rawUrl.replace("music.youtube.com", "www.youtube.com")
 
+            val localSong = librarySongs[normalizedUrl]
             val searchResult = SearchResult(
                 streamInfo,
-                isInLibrary = librarySongs.containsKey(normalizedUrl),
-                isDownloaded = downloadedSongs.containsKey(normalizedUrl)
+                isInLibrary = localSong?.isInLibrary ?: false,
+                isDownloaded = localSong?.localFilePath != null
             )
             SearchResultForList(searchResult, statuses[normalizedUrl])
         }
@@ -215,16 +268,40 @@ class ArtistSongsViewModel @Inject constructor(
     }
 
     fun addSongToLibrary(result: SearchResult) {
-        viewModelScope.launch {
-            playlistManager.getSongForItem(result.streamInfo)
+        viewModelScope.launch(Dispatchers.IO) {
+            val song = playlistManager.getSongForItem(result.streamInfo)
+            if (!song.isInLibrary) {
+                val updatedSong = song.copy(
+                    isInLibrary = true,
+                    dateAddedTimestamp = System.currentTimeMillis()
+                )
+                songDao.updateSong(updatedSong)
+                libraryRepository.linkSongToArtist(updatedSong)
+            }
         }
     }
 
     fun downloadSong(result: SearchResult) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val song = playlistManager.getSongForItem(result.streamInfo)
+            if (!song.isInLibrary) {
+                val updatedSong = song.copy(
+                    isInLibrary = true,
+                    dateAddedTimestamp = System.currentTimeMillis()
+                )
+                songDao.updateSong(updatedSong)
+                libraryRepository.linkSongToArtist(updatedSong)
+            }
             playlistManager.startDownload(song)
         }
+    }
+
+    fun onPlayNext(result: SearchResult) {
+        musicServiceConnection.playNext(result.streamInfo)
+    }
+
+    fun onAddToQueue(result: SearchResult) {
+        musicServiceConnection.addToQueue(result.streamInfo)
     }
 
     fun selectItemForPlaylist(item: Any) {

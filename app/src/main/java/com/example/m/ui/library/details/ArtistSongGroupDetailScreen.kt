@@ -1,7 +1,8 @@
-package com.example.m.ui.library
+package com.example.m.ui.library.details
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -14,29 +15,29 @@ import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.m.data.database.Song
 import com.example.m.ui.common.getHighQualityThumbnailUrl
-import com.example.m.ui.library.components.AddToPlaylistSheet
-import com.example.m.ui.library.components.ConfirmDeleteDialog
-import com.example.m.ui.library.components.CreatePlaylistDialog
-import com.example.m.ui.library.components.EmptyStateMessage
-import com.example.m.ui.library.components.SongItem
+import com.example.m.ui.library.components.*
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
-private enum class ClearAction { ALL, KEEP_50, KEEP_100 }
-
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun HistoryScreen(
+fun ArtistSongGroupDetailScreen(
     onBack: () -> Unit,
     onArtistClick: (Long) -> Unit,
-    viewModel: HistoryViewModel = hiltViewModel()
+    onEditGroup: (Long) -> Unit,
+    viewModel: ArtistSongGroupDetailViewModel = hiltViewModel()
 ) {
-    val history by viewModel.history.collectAsState()
+    val songs by viewModel.songs.collectAsState()
+    val groupWithSongs by viewModel.groupWithSongs.collectAsState()
     val allPlaylists by viewModel.allPlaylists.collectAsState()
-    val sheetState = rememberModalBottomSheetState()
+    val groupName = groupWithSongs?.group?.name ?: "Group"
+    var showMenu by remember { mutableStateOf(false) }
 
     val showCreatePlaylistDialog by remember { derivedStateOf { viewModel.showCreatePlaylistDialog } }
     val itemToAddToPlaylist by remember { derivedStateOf { viewModel.itemToAddToPlaylist } }
-    var clearActionPending by remember { mutableStateOf<ClearAction?>(null) }
+    val groupToRename by remember { derivedStateOf { viewModel.groupToRename } }
+    val groupToDelete by remember { derivedStateOf { viewModel.groupToDelete } }
+    val songPendingRemoval by remember { derivedStateOf { viewModel.songPendingRemoval } }
+    val sheetState = rememberModalBottomSheetState()
 
     LaunchedEffect(Unit) {
         viewModel.navigateToArtist.collect { artistId ->
@@ -48,28 +49,6 @@ fun HistoryScreen(
         CreatePlaylistDialog(
             onDismiss = { viewModel.dismissCreatePlaylistDialog() },
             onCreate = { name -> viewModel.createPlaylistAndAddPendingItem(name) }
-        )
-    }
-
-    clearActionPending?.let { action ->
-        val (itemType, itemName) = when (action) {
-            ClearAction.ALL -> "history" to "all of your listening history"
-            ClearAction.KEEP_50 -> "history" to "all but the last 50 plays"
-            ClearAction.KEEP_100 -> "history" to "all but the last 100 plays"
-        }
-        ConfirmDeleteDialog(
-            itemType = itemType,
-            itemName = itemName,
-            onDismiss = { clearActionPending = null },
-            onConfirm = {
-                val keepCount = when (action) {
-                    ClearAction.ALL -> 0
-                    ClearAction.KEEP_50 -> 50
-                    ClearAction.KEEP_100 -> 100
-                }
-                viewModel.clearHistory(keepCount)
-                clearActionPending = null
-            }
         )
     }
 
@@ -98,74 +77,93 @@ fun HistoryScreen(
         }
     }
 
+    groupToRename?.let { group ->
+        RenameArtistSongGroupDialog(
+            initialName = group.name,
+            onDismiss = { viewModel.cancelRenameGroup() },
+            onConfirm = { newName -> viewModel.confirmRenameGroup(newName) }
+        )
+    }
+
+    groupToDelete?.let { group ->
+        ConfirmDeleteDialog(
+            itemType = "group",
+            itemName = group.name,
+            onDismiss = { viewModel.cancelDeleteGroup() },
+            onConfirm = {
+                viewModel.confirmDeleteGroup()
+                onBack()
+            }
+        )
+    }
+
+    songPendingRemoval?.let { song ->
+        ConfirmRemoveDialog(
+            itemType = "song",
+            itemName = song.title,
+            containerType = "group",
+            onDismiss = { viewModel.cancelRemoveSongFromGroup() },
+            onConfirm = { viewModel.confirmRemoveSongFromGroup() }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("History") },
+                title = { Text(groupName, maxLines = 1, modifier = Modifier.basicMarquee()) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    var showMenu by remember { mutableStateOf(false) }
                     Box {
                         IconButton(onClick = { showMenu = true }) {
                             Icon(Icons.Default.MoreVert, contentDescription = "More options")
                         }
                         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                             DropdownMenuItem(
-                                text = { Text("Keep last 50 plays") },
+                                text = { Text("Shuffle") },
                                 onClick = {
-                                    clearActionPending = ClearAction.KEEP_50
+                                    viewModel.shuffleGroup()
                                     showMenu = false
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("Keep last 100 plays") },
+                                text = { Text("Edit group") },
                                 onClick = {
-                                    clearActionPending = ClearAction.KEEP_100
+                                    groupWithSongs?.group?.groupId?.let { onEditGroup(it) }
                                     showMenu = false
                                 }
                             )
-                            HorizontalDivider()
                             DropdownMenuItem(
-                                text = { Text("Clear all history") },
+                                text = { Text("Delete group") },
                                 onClick = {
-                                    clearActionPending = ClearAction.ALL
+                                    viewModel.prepareToDeleteGroup()
                                     showMenu = false
                                 }
                             )
                         }
                     }
-                },
-                windowInsets = TopAppBarDefaults.windowInsets
+                }
             )
-        },
-        containerColor = MaterialTheme.colorScheme.background
-    ) { innerScaffoldPadding ->
-        if (history.isEmpty()) {
-            EmptyStateMessage(message = "Your listening history will appear here.")
+        }
+    ) { paddingValues ->
+        if (songs.isEmpty()) {
+            EmptyStateMessage(message = "This group is empty.")
         } else {
-            LazyColumn(
-                modifier = Modifier
-                    .padding(innerScaffoldPadding)
-                    .navigationBarsPadding()
-            ) {
-                itemsIndexed(history, key = { _, item -> item.entry.logId }) { index, item ->
-                    val song = item.entry.song
+            LazyColumn(modifier = Modifier.padding(paddingValues)) {
+                itemsIndexed(songs, key = { _, item -> item.song.songId }) { index, item ->
                     SongItem(
-                        song = song,
+                        song = item.song,
                         downloadStatus = item.downloadStatus,
                         onClick = { viewModel.onSongSelected(index) },
-                        onAddToPlaylistClick = { viewModel.selectItemForPlaylist(song) },
-                        onPlayNextClick = { viewModel.onPlaySongNext(song) },
-                        onAddToQueueClick = { viewModel.onAddToQueue(song) },
-                        onGoToArtistClick = { viewModel.onGoToArtist(song) },
-                        onShuffleClick = { viewModel.onShuffleSong(song) },
-                        onAddToLibraryClick = { viewModel.addToLibrary(song) },
-                        onDownloadClick = { viewModel.download(song) },
-                        onDeleteFromHistoryClick = { viewModel.deleteFromHistory(item.entry) }
+                        onAddToPlaylistClick = { viewModel.selectItemForPlaylist(item.song) },
+                        onPlayNextClick = { viewModel.onPlayNext(item.song) },
+                        onAddToQueueClick = { viewModel.onAddToQueue(item.song) },
+                        onGoToArtistClick = { viewModel.onGoToArtist(item.song) },
+                        onShuffleClick = { viewModel.onShuffleSong(item.song) },
+                        onRemoveFromGroupClick = { viewModel.prepareToRemoveSongFromGroup(item.song) }
                     )
                 }
             }

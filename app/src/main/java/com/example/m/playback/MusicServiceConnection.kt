@@ -2,8 +2,6 @@ package com.example.m.playback
 
 import android.content.ComponentName
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.util.Log
 import androidx.core.net.toUri
@@ -14,11 +12,11 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaBrowser
 import androidx.media3.session.SessionToken
 import coil.ImageLoader
-import coil.request.ImageRequest
 import com.example.m.data.database.*
 import com.example.m.data.repository.YoutubeRepository
 import com.example.m.managers.PlaybackListManager
 import com.example.m.managers.PlaylistManager
+import com.example.m.managers.ThumbnailProcessor
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -26,12 +24,9 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
-import org.schabi.newpipe.extractor.stream.StreamType
-import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.math.min
 
 private const val TAG = "MusicServiceConnection"
 
@@ -42,16 +37,15 @@ class MusicServiceConnection @Inject constructor(
     private val songDao: SongDao,
     private val listeningHistoryDao: ListeningHistoryDao,
     private val playbackStateDao: PlaybackStateDao,
-    private val imageLoader: ImageLoader,
+    private val imageLoader: ImageLoader, // Retain for potential future use if direct bitmap needed
     private val playlistManager: PlaylistManager,
-    private val playbackListManager: PlaybackListManager
+    private val playbackListManager: PlaybackListManager,
+    private val thumbnailProcessor: ThumbnailProcessor // Inject ThumbnailProcessor
 ) {
     private val serviceComponent = ComponentName(context, MusicService::class.java)
-    private var mediaBrowserFuture: ListenableFuture<MediaBrowser> =
-        MediaBrowser.Builder(context, SessionToken(context, serviceComponent)).buildAsync()
+    private var mediaBrowserFuture: ListenableFuture<MediaBrowser>
 
-    private val mediaBrowser: MediaBrowser?
-        get() = if (mediaBrowserFuture.isDone) mediaBrowserFuture.get() else null
+    private var mediaBrowser: MediaBrowser? = null
 
     private val _nowPlaying = MutableStateFlow<MediaMetadata?>(null)
     val nowPlaying: StateFlow<MediaMetadata?> = _nowPlaying
@@ -67,248 +61,228 @@ class MusicServiceConnection @Inject constructor(
 
     private var currentSongId: Long? = null
     private var isCurrentSongLogged = false
-    private var isRestored = false
-    private var restoreJob: Job? = null
     private val isFetchingNextPage = AtomicBoolean(false)
+    private var hasCheckedForRestoredSession = false
 
     init {
+        mediaBrowserFuture = MediaBrowser.Builder(context, SessionToken(context, serviceComponent)).buildAsync()
         mediaBrowserFuture.addListener({
-            val browser = this.mediaBrowser ?: return@addListener
-
-            if (!isRestored) {
-                restoreJob = coroutineScope.launch {
-                    restoreQueue()
-                    isRestored = true
-                }
+            try {
+                val browser = mediaBrowserFuture.get()
+                this.mediaBrowser = browser
+                browser.addListener(playerListener)
+                _nowPlaying.value = browser.mediaMetadata
+                _isPlaying.value = browser.isPlaying
+                if (browser.isPlaying) startProgressUpdates()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to connect to MediaBrowser", e)
             }
-
-            browser.addListener(object : Player.Listener {
-                override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
-                    _nowPlaying.value = mediaMetadata
-                }
-
-                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                    super.onMediaItemTransition(mediaItem, reason)
-                    val mediaId = mediaItem?.mediaId ?: return
-                    Log.d(TAG, "Media item changed. Media ID from player: '$mediaId'")
-
-                    isCurrentSongLogged = false
-                    prefetchNextTrackStream()
-                    savePlaybackState()
-
-                    coroutineScope.launch(Dispatchers.IO) {
-                        val song = if (mediaId.startsWith("http")) songDao.getSongByUrl(mediaId) else songDao.getSongByFilePath(mediaId)
-                        currentSongId = song?.songId
-                    }
-
-                    if (mediaItem != null && mediaItem.mediaMetadata.artworkData == null) {
-                        coroutineScope.launch {
-                            updateArtworkData(mediaItem)
-                        }
-                    }
-
-                    val currentQueueSize = browser.mediaItemCount
-                    val currentIndex = browser.currentMediaItemIndex
-                    if (currentQueueSize > 0 && currentIndex >= currentQueueSize - 3) {
-                        coroutineScope.launch {
-                            if (isFetchingNextPage.compareAndSet(false, true)) {
-                                val newStreamItems = playbackListManager.fetchNextPageStreamInfoItems()
-                                if (!newStreamItems.isNullOrEmpty()) {
-                                    val newMediaItems = newStreamItems.mapNotNull { createMediaItemForItem(it) }
-                                    withContext(Dispatchers.Main) {
-                                        browser.addMediaItems(newMediaItems)
-                                        Log.d(TAG, "Added ${newMediaItems.size} prefetched items to the queue.")
-                                    }
-                                }
-                                isFetchingNextPage.set(false)
-                            }
-                        }
-                    }
-                }
-
-                override fun onIsPlayingChanged(isPlaying: Boolean) {
-                    _isPlaying.value = isPlaying
-                    if (isPlaying) {
-                        startProgressUpdates()
-                        prefetchNextTrackStream()
-                    } else {
-                        stopProgressUpdates()
-                        savePlaybackState()
-                    }
-                }
-            })
         }, MoreExecutors.directExecutor())
     }
 
-    private suspend fun updateArtworkData(mediaItem: MediaItem) {
-        val browser = this.mediaBrowser ?: return
-        val itemIndex = browser.currentMediaItemIndex
-        if (itemIndex == C.INDEX_UNSET) return
+    private fun runPlayerCommand(command: (browser: MediaBrowser) -> Unit) {
+        val browser = this.mediaBrowser
+        if (browser != null && browser.isConnected) {
+            command(browser)
+        } else {
+            mediaBrowserFuture.addListener({
+                try {
+                    val connectedBrowser = mediaBrowserFuture.get()
+                    command(connectedBrowser)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to execute command; MediaBrowser connection failed", e)
+                }
+            }, MoreExecutors.directExecutor())
+        }
+    }
 
-        if (browser.getMediaItemAt(itemIndex).mediaId != mediaItem.mediaId) return
+    private val playerListener = object : Player.Listener {
+        override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
+            _nowPlaying.value = mediaMetadata
+        }
 
-        val artworkUri = mediaItem.mediaMetadata.artworkUri?.toString()
-        val artworkData = getCroppedSquareBitmap(artworkUri)
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            super.onMediaItemTransition(mediaItem, reason)
 
-        if (artworkData != null) {
-            val newMetadata = mediaItem.mediaMetadata.buildUpon()
-                .setArtworkData(artworkData, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
-                .build()
-            val newItem = mediaItem.buildUpon().setMediaMetadata(newMetadata).build()
+            val mediaId = mediaItem?.mediaId ?: return
+            Log.d(TAG, "Media item changed. Media ID from player: '$mediaId'")
 
-            withContext(Dispatchers.Main) {
-                if (browser.currentMediaItemIndex == itemIndex) {
-                    browser.replaceMediaItem(itemIndex, newItem)
-                    Log.d(TAG, "Artwork data updated for notification.")
+            isCurrentSongLogged = false
+            prefetchNextTrackStream()
+            savePlaybackState()
+
+            coroutineScope.launch(Dispatchers.IO) {
+                val song = if (mediaId.startsWith("http")) songDao.getSongByUrl(mediaId) else songDao.getSongByFilePath(mediaId)
+                currentSongId = song?.songId
+            }
+
+            val currentQueueSize = mediaBrowser?.mediaItemCount ?: 0
+            val currentIndex = mediaBrowser?.currentMediaItemIndex ?: 0
+            if (currentQueueSize > 0 && currentIndex >= currentQueueSize - 3) {
+                coroutineScope.launch {
+                    if (isFetchingNextPage.compareAndSet(false, true)) {
+                        val newStreamItems = playbackListManager.fetchNextPageStreamInfoItems()
+                        if (!newStreamItems.isNullOrEmpty()) {
+                            val newMediaItems = newStreamItems.mapNotNull { createMediaItemForItem(it) }
+                            withContext(Dispatchers.Main) {
+                                runPlayerCommand { browser ->
+                                    browser.addMediaItems(newMediaItems)
+                                    Log.d(TAG, "Added ${newMediaItems.size} prefetched items to the queue.")
+                                }
+                            }
+                        }
+                        isFetchingNextPage.set(false)
+                    }
                 }
             }
         }
-    }
 
-    private suspend fun restoreQueue() {
-        yield()
-        val browser = this.mediaBrowser ?: return
-        if (browser.mediaItemCount > 0) return
-
-        val savedState = playbackStateDao.getState() ?: return
-        if (savedState.queue.isEmpty()) {
-            playbackStateDao.clearState()
-            return
-        }
-        Log.d(TAG, "Restoring queue...")
-
-        val startIndex = savedState.currentItemIndex.coerceIn(0, savedState.queue.size - 1)
-        val currentItemUrl = savedState.queue[startIndex]
-        val currentItemObject = songDao.getSongByUrl(currentItemUrl) ?: songDao.getSongByFilePath(currentItemUrl)
-        ?: StreamInfoItem(0, currentItemUrl, currentItemUrl, StreamType.AUDIO_STREAM)
-
-        val currentMediaItem = withContext(Dispatchers.IO) { createMediaItemForItem(currentItemObject) }
-        if (currentMediaItem != null) {
-            browser.setMediaItem(currentMediaItem, savedState.currentPosition)
-            browser.prepare()
-            Log.d(TAG, "Restored current song. Loading rest of queue in background.")
-        } else {
-            Log.e(TAG, "Failed to restore current song, clearing state.")
-            playbackStateDao.clearState()
-            return
-        }
-
-        coroutineScope.launch(Dispatchers.IO) {
-            val itemsBefore = savedState.queue.subList(0, startIndex)
-            val itemsAfter = savedState.queue.subList(startIndex + 1, savedState.queue.size)
-
-            val mediaItemsBefore = itemsBefore.mapNotNull { url ->
-                val item = songDao.getSongByUrl(url) ?: songDao.getSongByFilePath(url)
-                ?: StreamInfoItem(0, url, url, StreamType.AUDIO_STREAM)
-                createMediaItemForItem(item)
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            _isPlaying.value = isPlaying
+            if (isPlaying) {
+                startProgressUpdates()
+                prefetchNextTrackStream()
+            } else {
+                stopProgressUpdates()
+                savePlaybackState()
             }
-
-            val mediaItemsAfter = itemsAfter.mapNotNull { url ->
-                val item = songDao.getSongByUrl(url) ?: songDao.getSongByFilePath(url)
-                ?: StreamInfoItem(0, url, url, StreamType.AUDIO_STREAM)
-                createMediaItemForItem(item)
-            }
-
-            withContext(Dispatchers.Main) {
-                browser.addMediaItems(0, mediaItemsBefore)
-                browser.addMediaItems(mediaItemsAfter)
-                Log.d(TAG, "Finished restoring rest of queue.")
-            }
-            savePlaybackState()
         }
     }
+
 
     private fun savePlaybackState() {
-        val browser = this.mediaBrowser
-        coroutineScope.launch {
-            if (browser == null || browser.mediaItemCount == 0) {
-                withContext(Dispatchers.IO) {
-                    playbackStateDao.clearState()
+        if (MusicService.isRestoring.value) {
+            return
+        }
+
+        runPlayerCommand { browser ->
+            coroutineScope.launch {
+                if (browser.mediaItemCount == 0) {
+                    withContext(Dispatchers.IO) {
+                        playbackStateDao.clearState()
+                    }
+                    return@launch
                 }
-                return@launch
-            }
 
-            val queue = (0 until browser.mediaItemCount).mapNotNull { i ->
-                browser.getMediaItemAt(i).mediaId
-            }
-            val currentIndex = browser.currentMediaItemIndex
-            val currentPosition = browser.currentPosition
-            val playing = browser.isPlaying
+                val queue = (0 until browser.mediaItemCount).mapNotNull { i ->
+                    browser.getMediaItemAt(i).mediaId
+                }
+                val currentIndex = browser.currentMediaItemIndex
+                val currentPosition = if (browser.isPlaying) browser.currentPosition else browser.currentPosition.coerceAtLeast(0)
+                val playing = browser.isPlaying
 
-            if (queue.isNotEmpty()) {
-                withContext(Dispatchers.IO) {
-                    val state = PlaybackStateEntity(
-                        queue = queue,
-                        currentItemIndex = currentIndex,
-                        currentPosition = currentPosition,
-                        isPlaying = playing
-                    )
-                    playbackStateDao.saveState(state)
-                    Log.d(TAG, "Playback state saved.")
+                if (queue.isNotEmpty()) {
+                    withContext(Dispatchers.IO) {
+                        val state = PlaybackStateEntity(
+                            queue = queue,
+                            currentItemIndex = currentIndex,
+                            currentPosition = currentPosition,
+                            isPlaying = playing
+                        )
+                        playbackStateDao.saveState(state)
+                        Log.d(TAG, "Playback state saved.")
+                    }
                 }
             }
         }
     }
 
     private fun prefetchNextTrackStream() {
-        val browser = this.mediaBrowser ?: return
-        if (browser.mediaItemCount <= 1) return
+        runPlayerCommand { browser ->
+            if (browser.mediaItemCount <= 1) return@runPlayerCommand
 
-        val nextIndex = browser.nextMediaItemIndex
-        if (nextIndex == C.INDEX_UNSET || nextIndex == browser.currentMediaItemIndex) return
+            val nextIndex = browser.nextMediaItemIndex
+            if (nextIndex == C.INDEX_UNSET || nextIndex == browser.currentMediaItemIndex) return@runPlayerCommand
 
-        val nextMediaItem = browser.getMediaItemAt(nextIndex)
-        val nextMediaId = nextMediaItem.mediaId
+            val nextMediaItem = browser.getMediaItemAt(nextIndex)
+            val nextMediaId = nextMediaItem.mediaId
 
-        if (nextMediaId.startsWith("http")) {
-            coroutineScope.launch(Dispatchers.IO) {
-                youtubeRepository.getStreamInfo(nextMediaId)
+            if (nextMediaId.startsWith("http")) {
+                coroutineScope.launch(Dispatchers.IO) {
+                    youtubeRepository.getStreamInfo(nextMediaId)
+                }
             }
         }
     }
 
     suspend fun playSingleSong(item: Any) {
         playbackListManager.clearCurrentListContext()
-        if (restoreJob?.isActive == true) {
-            restoreJob?.cancel()
-            Log.d(TAG, "Cancelling restore job due to new playback request.")
-        }
-        val browser = this.mediaBrowser ?: return
         val mediaItem = withContext(Dispatchers.IO) { createMediaItemForItem(item) } ?: return
 
-        browser.setMediaItem(mediaItem)
-        browser.prepare()
-        browser.play()
-        savePlaybackState()
+        hasCheckedForRestoredSession = false // Reset for new playback
+        isCurrentSongLogged = false
+        runPlayerCommand { browser ->
+            browser.setMediaItem(mediaItem)
+            browser.prepare()
+            browser.play()
+            savePlaybackState()
+        }
     }
 
     suspend fun playSongList(items: List<Any>, startIndex: Int) {
-        if (restoreJob?.isActive == true) {
-            restoreJob?.cancel()
-            Log.d(TAG, "Cancelling restore job due to new playback request.")
-        }
-        val browser = this.mediaBrowser ?: return
         if (items.isEmpty()) return
 
         val firstItem = items.getOrNull(startIndex) ?: return
         val firstMediaItem = withContext(Dispatchers.IO) { createMediaItemForItem(firstItem) } ?: return
 
-        browser.setMediaItem(firstMediaItem)
-        browser.prepare()
-        browser.play()
+        hasCheckedForRestoredSession = false // Reset for new playback
+        isCurrentSongLogged = false
 
-        coroutineScope.launch(Dispatchers.IO) {
-            val itemsAfter = items.subList(startIndex + 1, items.size)
-            val itemsBefore = items.subList(0, startIndex)
+        runPlayerCommand { browser ->
+            browser.setMediaItem(firstMediaItem)
+            browser.prepare()
+            browser.play()
 
-            val mediaItemsAfter = itemsAfter.mapNotNull { createMediaItemForItem(it) }
-            val mediaItemsBefore = itemsBefore.mapNotNull { createMediaItemForItem(it) }
+            coroutineScope.launch(Dispatchers.IO) {
+                playbackListManager.clearCurrentListContext()
 
-            withContext(Dispatchers.Main) {
-                browser.addMediaItems(0, mediaItemsBefore)
-                browser.addMediaItems(mediaItemsAfter)
+                val windowSize = 10
+                val chunkSize = 20
+
+                val initialItemsAfter = items.subList(
+                    fromIndex = startIndex + 1,
+                    toIndex = minOf(items.size, startIndex + 1 + windowSize)
+                )
+                val initialItemsBefore = items.subList(
+                    fromIndex = maxOf(0, startIndex - windowSize),
+                    toIndex = startIndex
+                )
+
+                val mediaItemsAfter = initialItemsAfter.mapNotNull { createMediaItemForItem(it) }
+                val mediaItemsBefore = initialItemsBefore.mapNotNull { createMediaItemForItem(it) }
+
+                withContext(Dispatchers.Main) {
+                    browser.addMediaItems(0, mediaItemsBefore)
+                    browser.addMediaItems(mediaItemsAfter)
+                }
+                savePlaybackState()
+
+                val remainingItemsAfter = items.subList(
+                    fromIndex = minOf(items.size, startIndex + 1 + windowSize),
+                    toIndex = items.size
+                )
+                val remainingItemsBefore = items.subList(
+                    fromIndex = 0,
+                    toIndex = maxOf(0, startIndex - windowSize)
+                )
+
+                remainingItemsAfter.chunked(chunkSize).forEach { chunk ->
+                    val mediaItemsChunk = chunk.mapNotNull { createMediaItemForItem(it) }
+                    if (mediaItemsChunk.isNotEmpty()) {
+                        withContext(Dispatchers.Main) { browser.addMediaItems(mediaItemsChunk) }
+                    }
+                    delay(200)
+                }
+
+                remainingItemsBefore.chunked(chunkSize).reversed().forEach { chunk ->
+                    val mediaItemsChunk = chunk.mapNotNull { createMediaItemForItem(it) }
+                    if (mediaItemsChunk.isNotEmpty()) {
+                        withContext(Dispatchers.Main) { browser.addMediaItems(0, mediaItemsChunk) }
+                    }
+                    delay(200)
+                }
+                savePlaybackState()
             }
-            savePlaybackState()
         }
     }
 
@@ -324,21 +298,23 @@ class MusicServiceConnection @Inject constructor(
     }
 
     fun playNext(item: Any) {
-        val browser = this.mediaBrowser ?: return
         coroutineScope.launch {
             val mediaItem = createMediaItemForItem(item) ?: return@launch
-            val nextIndex = if (browser.mediaItemCount == 0) 0 else browser.currentMediaItemIndex + 1
-            browser.addMediaItem(nextIndex, mediaItem)
-            Log.d(TAG, "Added to play next: ${mediaItem.mediaMetadata.title}")
+            runPlayerCommand { browser ->
+                val nextIndex = if (browser.mediaItemCount == 0) 0 else browser.currentMediaItemIndex + 1
+                browser.addMediaItem(nextIndex, mediaItem)
+                Log.d(TAG, "Added to play next: ${mediaItem.mediaMetadata.title}")
+            }
         }
     }
 
     fun addToQueue(item: Any) {
-        val browser = this.mediaBrowser ?: return
         coroutineScope.launch {
             val mediaItem = createMediaItemForItem(item) ?: return@launch
-            browser.addMediaItem(mediaItem)
-            Log.d(TAG, "Added to end of queue: ${mediaItem.mediaMetadata.title}")
+            runPlayerCommand { browser ->
+                browser.addMediaItem(mediaItem)
+                Log.d(TAG, "Added to end of queue: ${mediaItem.mediaMetadata.title}")
+            }
         }
     }
 
@@ -365,16 +341,20 @@ class MusicServiceConnection @Inject constructor(
                     return@withContext createLocalMediaItem(song, uri)
                 }
             }
-            // Fallback to streaming if local file path is null or invalid
             return@withContext createStreamingMediaItem(song)
         }
     }
 
-    private fun createMediaMetadata(song: Song): MediaMetadata {
+    private suspend fun createMediaMetadata(song: Song): MediaMetadata {
+        // FIX: Use the ThumbnailProcessor to get a square-cropped thumbnail URI.
+        val squareThumbnailUri = thumbnailProcessor.process(listOf(song.thumbnailUrl)).firstOrNull()?.toUri()
+            ?: song.thumbnailUrl.toUri() // Fallback to original if processing fails
+
         return MediaMetadata.Builder()
             .setTitle(song.title)
             .setArtist(song.artist)
-            .setArtworkUri(song.thumbnailUrl.toUri())
+            // Use the square thumbnail URI for artwork
+            .setArtworkUri(squareThumbnailUri)
             .build()
     }
 
@@ -404,51 +384,37 @@ class MusicServiceConnection @Inject constructor(
         }
     }
 
-    private suspend fun getCroppedSquareBitmap(imageUrl: String?): ByteArray? {
-        if (imageUrl.isNullOrBlank()) return null
-        return try {
-            val request = ImageRequest.Builder(context)
-                .data(imageUrl)
-                .allowHardware(false)
-                .build()
-            val result = (imageLoader.execute(request).drawable as? BitmapDrawable)?.bitmap ?: return null
-            val width = result.width
-            val height = result.height
-            val size = min(width, height)
-            val x = (width - size) / 2
-            val y = (height - size) / 2
-            val squaredBitmap = Bitmap.createBitmap(result, x, y, size, size)
-            val stream = ByteArrayOutputStream()
-            squaredBitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
-            stream.toByteArray()
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
-        }
-    }
-
     fun togglePlayPause() {
-        mediaBrowser?.let {
-            if (it.isPlaying) it.pause() else it.play()
+        runPlayerCommand { browser ->
+            if (browser.isPlaying) browser.pause() else browser.play()
         }
     }
 
     fun skipToNext() {
-        mediaBrowser?.seekToNext()
-        mediaBrowser?.play()
+        runPlayerCommand { it.seekToNext() }
     }
 
     fun skipToPrevious() {
-        mediaBrowser?.seekToPrevious()
-        mediaBrowser?.play()
+        runPlayerCommand { it.seekToPrevious() }
     }
 
     fun seekTo(position: Long) {
-        mediaBrowser?.seekTo(position)
+        runPlayerCommand { it.seekTo(position) }
     }
 
     private fun startProgressUpdates() {
         stopProgressUpdates()
+
+        if (!hasCheckedForRestoredSession) {
+            val browser = mediaBrowser
+            if (browser != null && browser.currentPosition > 1000) {
+                if (browser.currentPosition >= 30000) {
+                    isCurrentSongLogged = true
+                }
+            }
+            hasCheckedForRestoredSession = true
+        }
+
         progressUpdateJob = coroutineScope.launch {
             var saveCounter = 0
             while (true) {

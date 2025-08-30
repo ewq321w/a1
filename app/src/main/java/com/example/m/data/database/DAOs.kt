@@ -5,6 +5,21 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 @Dao
+interface LibraryGroupDao {
+    @Query("SELECT * FROM library_groups ORDER BY customOrderPosition ASC, name ASC")
+    fun getAllGroups(): Flow<List<LibraryGroup>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertGroup(group: LibraryGroup): Long
+
+    @Update
+    suspend fun updateGroup(group: LibraryGroup)
+
+    @Delete
+    suspend fun deleteGroup(group: LibraryGroup)
+}
+
+@Dao
 interface SongDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertSong(song: Song): Long
@@ -27,6 +42,7 @@ interface SongDao {
     @Query("SELECT * FROM songs ORDER BY artist, title ASC")
     fun getAllSongs(): Flow<List<Song>>
 
+    // --- Queries for "All Music" ---
     @Query("""
         SELECT s.* FROM songs AS s
         INNER JOIN artists AS a ON s.artist = a.name
@@ -44,6 +60,26 @@ interface SongDao {
 
     @Query("SELECT * FROM songs WHERE isInLibrary = 1 ORDER BY playCount DESC, title ASC")
     fun getLibrarySongsSortedByPlayCount(): Flow<List<Song>>
+
+    // --- FIX: Add new queries to filter songs by libraryGroupId ---
+    @Query("""
+        SELECT s.* FROM songs AS s
+        INNER JOIN artists AS a ON s.artist = a.name
+        INNER JOIN artist_song_cross_ref AS ascr ON a.artistId = ascr.artistId AND s.songId = ascr.songId
+        WHERE s.isInLibrary = 1 AND s.libraryGroupId = :groupId
+        ORDER BY a.name ASC, ascr.customOrderPosition ASC
+    """)
+    fun getLibrarySongsSortedByArtist(groupId: Long): Flow<List<Song>>
+
+    @Query("SELECT * FROM songs WHERE isInLibrary = 1 AND libraryGroupId = :groupId ORDER BY title ASC")
+    fun getLibrarySongsSortedByTitle(groupId: Long): Flow<List<Song>>
+
+    @Query("SELECT * FROM songs WHERE isInLibrary = 1 AND libraryGroupId = :groupId ORDER BY dateAddedTimestamp ASC")
+    fun getLibrarySongsSortedByDateAdded(groupId: Long): Flow<List<Song>>
+
+    @Query("SELECT * FROM songs WHERE isInLibrary = 1 AND libraryGroupId = :groupId ORDER BY playCount DESC, title ASC")
+    fun getLibrarySongsSortedByPlayCount(groupId: Long): Flow<List<Song>>
+
 
     @Query("""
         SELECT s.* FROM songs s
@@ -90,6 +126,17 @@ interface SongDao {
             updateSong(existingSong)
         } else {
             insertSong(song)
+        }
+    }
+
+    @Transaction
+    suspend fun upsertSong(song: Song): Song {
+        val newId = insertSong(song)
+        return if (newId == -1L) {
+            getSongByUrl(song.youtubeUrl)
+                ?: throw IllegalStateException("Failed to retrieve existing song with URL: ${song.youtubeUrl}")
+        } else {
+            song.copy(songId = newId)
         }
     }
 
@@ -271,19 +318,23 @@ interface ArtistDao {
     @Update
     suspend fun updateArtist(artist: Artist)
 
+    @Query("SELECT * FROM artists WHERE artistId = :artistId")
+    fun getArtistById(artistId: Long): Flow<Artist?>
+
     @Query("SELECT * FROM artists WHERE name = :name LIMIT 1")
     suspend fun getArtistByName(name: String): Artist?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertArtistSongCrossRef(crossRef: ArtistSongCrossRef)
 
-    fun getArtistWithSongs(artistId: Long): Flow<ArtistWithSongs?> {
-        return getArtistWithSongsMapSortedByCustom(artistId).map { artistSongsMap ->
-            artistSongsMap.entries.firstOrNull()?.let { entry ->
-                ArtistWithSongs(
-                    artist = entry.key,
-                    songs = entry.value.filter { it.songId != 0L }
-                )
+    @Transaction
+    @Query("SELECT * FROM artists WHERE artistId = :artistId")
+    fun getArtistWithSongs(artistId: Long): Flow<ArtistWithSongs?>
+
+    fun getArtistWithLibrarySongs(artistId: Long): Flow<ArtistWithSongs?> {
+        return getArtistWithSongsMapSortedByCustom(artistId).map { map ->
+            map.entries.firstOrNull()?.let { (artist, songs) ->
+                ArtistWithSongs(artist, songs.filter { it.songId != 0L })
             }
         }
     }
@@ -320,6 +371,21 @@ interface ArtistDao {
         ORDER BY customOrderPosition ASC
     """)
     fun getAllArtistsSortedByCustom(): Flow<List<ArtistWithSongs>>
+
+    // FIX: Add a new query to filter artists by libraryGroupId
+    @Transaction
+    @Query("""
+        SELECT * FROM artists
+        WHERE isHidden = 0 AND parentGroupId IS NULL
+        AND artistId IN (
+            SELECT DISTINCT ascr.artistId
+            FROM artist_song_cross_ref AS ascr
+            INNER JOIN songs AS s ON ascr.songId = s.songId
+            WHERE s.isInLibrary = 1 AND s.libraryGroupId = :groupId
+        )
+        ORDER BY customOrderPosition ASC
+    """)
+    fun getAllArtistsSortedByCustom(groupId: Long): Flow<List<ArtistWithSongs>>
 
     @Query("UPDATE artists SET customOrderPosition = :position WHERE artistId = :artistId")
     suspend fun updateArtistPosition(artistId: Long, position: Long)
@@ -376,6 +442,58 @@ interface ArtistDao {
 
     @Query("SELECT IFNULL(MAX(customOrderPosition), -1) FROM artist_song_cross_ref WHERE artistId = :artistId")
     suspend fun getMaxArtistSongPosition(artistId: Long): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertArtistSongGroup(group: ArtistSongGroup): Long
+
+    @Update
+    suspend fun updateArtistSongGroup(group: ArtistSongGroup)
+
+    @Query("DELETE FROM artist_song_groups WHERE groupId = :groupId")
+    suspend fun deleteArtistSongGroup(groupId: Long)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSongIntoArtistSongGroup(crossRef: ArtistSongGroupSongCrossRef)
+
+    @Query("DELETE FROM artist_song_group_songs WHERE groupId = :groupId AND songId = :songId")
+    suspend fun deleteSongFromArtistSongGroup(groupId: Long, songId: Long)
+
+    @Query("SELECT IFNULL(MAX(customOrderPosition), -1) FROM artist_song_group_songs WHERE groupId = :groupId")
+    suspend fun getMaxSongPositionInGroup(groupId: Long): Int
+
+    @Transaction
+    @SuppressWarnings(RoomWarnings.QUERY_MISMATCH)
+    @Query("""
+        SELECT G.*, S.* FROM artist_song_groups AS G
+        LEFT JOIN artist_song_group_songs AS GS_CR ON G.groupId = GS_CR.groupId
+        LEFT JOIN songs AS S ON GS_CR.songId = S.songId
+        WHERE G.artistId = :artistId
+        ORDER BY G.customOrderPosition ASC, GS_CR.customOrderPosition ASC
+    """)
+    fun getAllArtistSongGroupsWithSongsOrdered(artistId: Long): Flow<Map<ArtistSongGroup, List<Song>>>
+
+
+    @Transaction
+    @SuppressWarnings(RoomWarnings.QUERY_MISMATCH)
+    @Query("""
+        SELECT G.*, S.* FROM artist_song_groups AS G
+        LEFT JOIN artist_song_group_songs AS GS_CR ON G.groupId = GS_CR.groupId
+        LEFT JOIN songs AS S ON GS_CR.songId = S.songId
+        WHERE G.groupId = :groupId
+        ORDER BY GS_CR.customOrderPosition ASC
+    """)
+    fun getArtistSongGroupWithSongsOrdered(groupId: Long): Flow<Map<ArtistSongGroup, List<Song>>>
+
+
+    @Query("UPDATE artist_song_group_songs SET customOrderPosition = :position WHERE groupId = :groupId AND songId = :songId")
+    suspend fun updateSongPositionInGroup(groupId: Long, songId: Long, position: Int)
+
+    @Transaction
+    suspend fun updateGroupSongOrder(groupId: Long, songs: List<Song>) {
+        songs.forEachIndexed { index, song ->
+            updateSongPositionInGroup(groupId, song.songId, index)
+        }
+    }
 }
 
 @Dao

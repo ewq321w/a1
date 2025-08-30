@@ -112,7 +112,7 @@ class HistoryViewModel @Inject constructor(
         musicServiceConnection.playNext(song)
     }
 
-    fun onAddSongToQueue(song: Song) {
+    fun onAddToQueue(song: Song) {
         musicServiceConnection.addToQueue(song)
     }
 

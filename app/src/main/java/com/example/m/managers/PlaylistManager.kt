@@ -70,10 +70,7 @@ class PlaylistManager @Inject constructor(
             is StreamInfoItem -> {
                 val normalizedUrl = item.url?.replace("music.youtube.com", "www.youtube.com")
                     ?: item.url ?: ""
-                val existingSong = songDao.getSongByUrl(normalizedUrl)
-                if (existingSong != null) {
-                    existingSong
-                } else {
+                songDao.getSongByUrl(normalizedUrl) ?: run {
                     val videoId = item.url?.substringAfter("v=")?.substringBefore('&')
                     val newSong = Song(
                         videoId = videoId,
@@ -84,8 +81,7 @@ class PlaylistManager @Inject constructor(
                         thumbnailUrl = getHighQualityThumbnailUrl(videoId),
                         localFilePath = null
                     )
-                    val newId = songDao.insertSong(newSong)
-                    val finalSong = newSong.copy(songId = newId)
+                    val finalSong = songDao.upsertSong(newSong)
                     libraryRepository.linkSongToArtist(finalSong)
                     finalSong
                 }
@@ -97,26 +93,22 @@ class PlaylistManager @Inject constructor(
     suspend fun cacheAndGetSong(item: StreamInfoItem): Song {
         val normalizedUrl = item.url?.replace("music.youtube.com", "www.youtube.com")
             ?: item.url ?: ""
-        val existingSong = songDao.getSongByUrl(normalizedUrl)
-        if (existingSong != null) {
-            return existingSong
+        return songDao.getSongByUrl(normalizedUrl) ?: run {
+            val videoId = item.url?.substringAfter("v=")?.substringBefore('&')
+            val newSong = Song(
+                videoId = videoId,
+                youtubeUrl = normalizedUrl,
+                title = item.name ?: "Unknown Title",
+                artist = item.uploaderName ?: "Unknown Artist",
+                duration = item.duration,
+                thumbnailUrl = getHighQualityThumbnailUrl(videoId),
+                localFilePath = null,
+                isInLibrary = false
+            )
+            val finalSong = songDao.upsertSong(newSong)
+            libraryRepository.linkSongToArtist(finalSong)
+            finalSong
         }
-
-        val videoId = item.url?.substringAfter("v=")?.substringBefore('&')
-        val newSong = Song(
-            videoId = videoId,
-            youtubeUrl = normalizedUrl,
-            title = item.name ?: "Unknown Title",
-            artist = item.uploaderName ?: "Unknown Artist",
-            duration = item.duration,
-            thumbnailUrl = getHighQualityThumbnailUrl(videoId),
-            localFilePath = null,
-            isInLibrary = false
-        )
-        val newId = songDao.insertSong(newSong)
-        val finalSong = newSong.copy(songId = newId)
-        libraryRepository.linkSongToArtist(finalSong)
-        return finalSong
     }
 
     fun startDownload(song: Song) {

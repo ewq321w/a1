@@ -1,5 +1,7 @@
 package com.example.m.ui.library.edit
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,7 +24,7 @@ import org.burnoutcrew.reorderable.ReorderableItem
 import org.burnoutcrew.reorderable.rememberReorderableLazyListState
 import org.burnoutcrew.reorderable.reorderable
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun EditArtistSongsScreen(
     onBack: () -> Unit,
@@ -98,7 +100,9 @@ fun EditArtistSongsScreen(
                         Spacer(Modifier.height(16.dp))
                         Text(
                             text = artistWithSongs?.artist?.name ?: "",
-                            style = MaterialTheme.typography.headlineSmall
+                            style = MaterialTheme.typography.headlineSmall,
+                            maxLines = 1,
+                            modifier = Modifier.basicMarquee()
                         )
                         Spacer(Modifier.height(16.dp))
                     }

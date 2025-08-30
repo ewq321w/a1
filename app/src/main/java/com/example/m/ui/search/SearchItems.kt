@@ -1,15 +1,18 @@
 package com.example.m.ui.search
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.CircularProgressIndicator
@@ -40,11 +43,13 @@ import com.example.m.ui.common.getThumbnail
 import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
 import java.text.DecimalFormat
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AlbumItem(
     album: PlaylistInfoItem,
     imageLoader: ImageLoader,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    showArtist: Boolean = true
 ) {
     Column(
         modifier = Modifier
@@ -56,7 +61,9 @@ fun AlbumItem(
             model = album.getThumbnail(),
             imageLoader = imageLoader,
             contentDescription = album.name,
-            modifier = Modifier.size(180.dp),
+            modifier = Modifier
+                .size(180.dp)
+                .clip(RoundedCornerShape(3.dp)),
             contentScale = ContentScale.Crop,
             error = painterResource(id = R.drawable.placeholder_gray),
             placeholder = painterResource(id = R.drawable.placeholder_gray)
@@ -65,19 +72,26 @@ fun AlbumItem(
             text = album.name ?: "Unknown Album",
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 4.dp)
+            modifier = Modifier
+                .padding(top = 4.dp)
+                .height(36.dp), // Set a fixed height to prevent grid resizing
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
         )
-        Text(
-            text = album.uploaderName ?: "Unknown Artist",
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 1,
-            textAlign = TextAlign.Center,
-            overflow = TextOverflow.Ellipsis,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        if (showArtist) {
+            Text(
+                text = album.uploaderName ?: "Unknown Artist",
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                textAlign = TextAlign.Center,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SearchResultItem(
     result: SearchResult,
@@ -87,7 +101,9 @@ fun SearchResultItem(
     onPlay: () -> Unit,
     onDownload: () -> Unit,
     onAddToLibrary: () -> Unit,
-    onAddToPlaylistClick: () -> Unit
+    onAddToPlaylistClick: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
     val isDownloading = downloadStatus is DownloadStatus.Downloading || downloadStatus is DownloadStatus.Queued
@@ -97,13 +113,18 @@ fun SearchResultItem(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onPlay)
-            .padding(horizontal = 16.dp, vertical = 7.dp),
+            .height(72.dp)
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         val imageModifier = if (isSong) {
-            Modifier.size(50.dp)
+            Modifier
+                .size(54.dp)
+                .clip(RoundedCornerShape(3.dp))
         } else {
-            Modifier.size(90.dp, 50.dp)
+            Modifier
+                .size(90.dp, 54.dp)
+                .clip(RoundedCornerShape(3.dp))
         }
 
         AsyncImage(
@@ -121,7 +142,7 @@ fun SearchResultItem(
             Text(
                 text = result.streamInfo.name ?: "No Title",
                 color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyMedium
             )
@@ -174,7 +195,8 @@ fun SearchResultItem(
                     text = result.streamInfo.uploaderName ?: "Unknown Artist",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
-                    style = MaterialTheme.typography.bodySmall
+                    style = MaterialTheme.typography.bodySmall,
+                    overflow = TextOverflow.Ellipsis
                 )
                 if (result.streamInfo.duration > 0) {
                     Text(
@@ -203,9 +225,16 @@ fun SearchResultItem(
                 onDismissRequest = { showMenu = false }
             ) {
                 DropdownMenuItem(
-                    text = { Text("Play") },
+                    text = { Text("Play next") },
                     onClick = {
-                        onPlay()
+                        onPlayNext()
+                        showMenu = false
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Add to queue") },
+                    onClick = {
+                        onAddToQueue()
                         showMenu = false
                     }
                 )

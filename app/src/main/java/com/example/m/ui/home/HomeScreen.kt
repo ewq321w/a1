@@ -5,12 +5,14 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -119,7 +121,8 @@ fun RecommendationItem(
             model = highQualityThumbnailUrl,
             contentDescription = item.name,
             modifier = Modifier
-                .size(120.dp),
+                .size(120.dp)
+                .clip(RoundedCornerShape(3.dp)),
             contentScale = ContentScale.Crop,
             error = painterResource(id = R.drawable.placeholder_gray),
             placeholder = painterResource(id = R.drawable.placeholder_gray)

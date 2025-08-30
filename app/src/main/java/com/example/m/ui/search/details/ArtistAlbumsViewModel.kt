@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import coil.ImageLoader
 import com.example.m.data.repository.YoutubeRepository
+import com.example.m.playback.MusicServiceConnection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,6 +17,7 @@ import org.schabi.newpipe.extractor.channel.ChannelInfo
 import org.schabi.newpipe.extractor.exceptions.ExtractionException
 import org.schabi.newpipe.extractor.linkhandler.SearchQueryHandler
 import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
+import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import javax.inject.Inject
 
 data class ArtistAlbumsUiState(
@@ -35,6 +37,7 @@ data class ArtistAlbumsUiState(
 class ArtistAlbumsViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val youtubeRepository: YoutubeRepository,
+    private val musicServiceConnection: MusicServiceConnection,
     val imageLoader: ImageLoader
 ) : ViewModel() {
 
@@ -91,6 +94,16 @@ class ArtistAlbumsViewModel @Inject constructor(
             } catch (e: Exception) {
                 e.printStackTrace()
                 _uiState.update { it.copy(isLoading = false, errorMessage = e.message ?: "An unknown error occurred.") }
+            }
+        }
+    }
+
+    fun onShuffleAlbum(album: PlaylistInfoItem) {
+        viewModelScope.launch {
+            val playlistDetails = youtubeRepository.getPlaylistDetails(album.url!!)
+            playlistDetails?.let {
+                val songs = it.playlistInfo.relatedItems.filterIsInstance<StreamInfoItem>()
+                musicServiceConnection.shuffleSongList(songs, 0)
             }
         }
     }

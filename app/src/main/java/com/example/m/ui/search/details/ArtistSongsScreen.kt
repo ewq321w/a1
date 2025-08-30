@@ -127,7 +127,9 @@ fun ArtistSongsScreen(
                             onPlay = { viewModel.onSongSelected(index) },
                             onDownload = { viewModel.downloadSong(item.result) },
                             onAddToLibrary = { viewModel.addSongToLibrary(item.result) },
-                            onAddToPlaylistClick = { viewModel.selectItemForPlaylist(item) }
+                            onAddToPlaylistClick = { viewModel.selectItemForPlaylist(item) },
+                            onPlayNext = { viewModel.onPlayNext(item.result) },
+                            onAddToQueue = { viewModel.onAddToQueue(item.result) }
                         )
                     }
 

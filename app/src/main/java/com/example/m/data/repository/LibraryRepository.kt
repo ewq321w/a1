@@ -28,6 +28,24 @@ class LibraryRepository @Inject constructor(
         }
     }
 
+    // FIX: Add a new function to filter playlists by library group ID
+    fun getPlaylistsWithSongs(groupId: Long): Flow<List<PlaylistWithSongs>> {
+        return playlistDao.getPlaylistsWithSongsAndOrderedSongsInternal().map { map ->
+            map.entries
+                .map { PlaylistWithSongs(it.key, it.value) }
+                .mapNotNull { playlistWithSongs ->
+                    // Filter the songs within the playlist first
+                    val songsInGroup = playlistWithSongs.songs.filter { it.libraryGroupId == groupId }
+                    // If the playlist has any songs left after filtering, include it in the result
+                    if (songsInGroup.isNotEmpty()) {
+                        playlistWithSongs.copy(songs = songsInGroup)
+                    } else {
+                        null
+                    }
+                }
+        }
+    }
+
     fun getAllPlaylists(): Flow<List<Playlist>> = playlistDao.getAllPlaylists()
     fun getDownloadedSongs(): Flow<List<Song>> = songDao.getDownloadedSongs()
     fun getAllArtists(): Flow<List<String>> = songDao.getAllArtists()
@@ -130,7 +148,7 @@ class LibraryRepository @Inject constructor(
 
         var artist = artistDao.getArtistByName(song.artist)
         if (artist == null) {
-            val newArtistId = artistDao.insertArtist(Artist(name = song.artist))
+            artistDao.insertArtist(Artist(name = song.artist))
             artist = artistDao.getArtistByName(song.artist)
                 ?: throw IllegalStateException("Failed to create and retrieve artist: ${song.artist}")
         }
@@ -163,4 +181,25 @@ class LibraryRepository @Inject constructor(
     }
 
     suspend fun cleanOrphanedSongs(): Int = songDao.deleteOrphanSongs()
+
+    suspend fun createArtistSongGroup(artistId: Long, name: String) {
+        artistDao.insertArtistSongGroup(ArtistSongGroup(artistId = artistId, name = name))
+    }
+
+    suspend fun renameArtistSongGroup(group: ArtistSongGroup, newName: String) {
+        artistDao.updateArtistSongGroup(group.copy(name = newName))
+    }
+
+    suspend fun deleteArtistSongGroup(groupId: Long) {
+        artistDao.deleteArtistSongGroup(groupId)
+    }
+
+    suspend fun addSongToArtistGroup(groupId: Long, songId: Long) {
+        val maxPos = artistDao.getMaxSongPositionInGroup(groupId)
+        artistDao.insertSongIntoArtistSongGroup(ArtistSongGroupSongCrossRef(groupId, songId, maxPos + 1))
+    }
+
+    suspend fun removeSongFromArtistGroup(groupId: Long, songId: Long) {
+        artistDao.deleteSongFromArtistSongGroup(groupId, songId)
+    }
 }

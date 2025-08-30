@@ -1,8 +1,6 @@
 package com.example.m.ui.library
 
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -11,7 +9,6 @@ import androidx.lifecycle.viewModelScope
 import com.example.m.data.PreferencesManager
 import com.example.m.data.database.*
 import com.example.m.data.repository.LibraryRepository
-import com.example.m.download.DownloadService
 import com.example.m.managers.DownloadStatus
 import com.example.m.managers.DownloadStatusManager
 import com.example.m.managers.PlaylistManager
@@ -61,6 +58,7 @@ class LibraryViewModel @Inject constructor(
     private val songDao: SongDao,
     private val artistDao: ArtistDao,
     private val artistGroupDao: ArtistGroupDao,
+    private val libraryGroupDao: LibraryGroupDao,
     private val playlistManager: PlaylistManager,
     private val thumbnailProcessor: ThumbnailProcessor,
     private val downloadStatusManager: DownloadStatusManager
@@ -92,6 +90,17 @@ class LibraryViewModel @Inject constructor(
     var groupToRename by mutableStateOf<ArtistGroup?>(null)
         private set
 
+    val libraryGroups: StateFlow<List<LibraryGroup>> = libraryGroupDao.getAllGroups()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _activeLibraryGroupId = MutableStateFlow(preferencesManager.activeLibraryGroupId)
+    val activeLibraryGroupId: StateFlow<Long> = _activeLibraryGroupId.asStateFlow()
+
+    fun setActiveLibraryGroup(groupId: Long) {
+        preferencesManager.activeLibraryGroupId = groupId
+        _activeLibraryGroupId.value = groupId
+    }
+
     val allArtistGroups: StateFlow<List<ArtistGroup>> = artistGroupDao.getAllGroups()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -100,16 +109,29 @@ class LibraryViewModel @Inject constructor(
 
     suspend fun processThumbnails(urls: List<String>) = thumbnailProcessor.process(urls)
 
-    val playlists: StateFlow<List<PlaylistWithSongs>> = libraryRepository.getPlaylistsWithSongs()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val playlists: StateFlow<List<PlaylistWithSongs>> = activeLibraryGroupId.flatMapLatest { groupId ->
+        if (groupId == 0L) { // 0L is the ID for "All Music"
+            libraryRepository.getPlaylistsWithSongs()
+        } else {
+            libraryRepository.getPlaylistsWithSongs(groupId)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
 
     val allPlaylists: StateFlow<List<Playlist>> = libraryRepository.getAllPlaylists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val libraryArtistItems: StateFlow<List<LibraryArtistItem>> =
+    val libraryArtistItems: StateFlow<List<LibraryArtistItem>> = activeLibraryGroupId.flatMapLatest { groupId ->
+        val artistsFlow = if (groupId == 0L) {
+            artistDao.getAllArtistsSortedByCustom()
+        } else {
+            artistDao.getAllArtistsSortedByCustom(groupId)
+        }
+
         combine(
-            artistDao.getAllArtistsSortedByCustom(),
+            artistsFlow,
             artistGroupDao.getGroupsWithArtists()
         ) { artists, groups ->
             val artistItems = artists.map { LibraryArtistItem.ArtistItem(it) }
@@ -135,19 +157,33 @@ class LibraryViewModel @Inject constructor(
                     )
                 }
             }
-
             (artistItems + groupItems)
         }
-            .flowOn(Dispatchers.Default)
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val songs: StateFlow<List<SongForList>> = sortOrder.flatMapLatest { order ->
-        val songsFlow = when (order) {
-            SongSortOrder.ARTIST -> songDao.getLibrarySongsSortedByArtist()
-            SongSortOrder.TITLE -> songDao.getLibrarySongsSortedByTitle()
-            SongSortOrder.DATE_ADDED -> songDao.getLibrarySongsSortedByDateAdded()
-            SongSortOrder.PLAY_COUNT -> songDao.getLibrarySongsSortedByPlayCount()
+    val songs: StateFlow<List<SongForList>> = combine(
+        sortOrder,
+        activeLibraryGroupId
+    ) { order, groupId ->
+        order to groupId
+    }.flatMapLatest { (order, groupId) ->
+        val songsFlow = if (groupId == 0L) { // "All Music"
+            when (order) {
+                SongSortOrder.ARTIST -> songDao.getLibrarySongsSortedByArtist()
+                SongSortOrder.TITLE -> songDao.getLibrarySongsSortedByTitle()
+                SongSortOrder.DATE_ADDED -> songDao.getLibrarySongsSortedByDateAdded()
+                SongSortOrder.PLAY_COUNT -> songDao.getLibrarySongsSortedByPlayCount()
+            }
+        } else { // A specific group is selected
+            when (order) {
+                SongSortOrder.ARTIST -> songDao.getLibrarySongsSortedByArtist(groupId)
+                SongSortOrder.TITLE -> songDao.getLibrarySongsSortedByTitle(groupId)
+                SongSortOrder.DATE_ADDED -> songDao.getLibrarySongsSortedByDateAdded(groupId)
+                SongSortOrder.PLAY_COUNT -> songDao.getLibrarySongsSortedByPlayCount(groupId)
+            }
         }
 
         combine(
@@ -322,7 +358,7 @@ class LibraryViewModel @Inject constructor(
             playlist.songs.forEach { song ->
                 if (song.localFilePath != null) {
                     try {
-                        val uri = Uri.parse(song.localFilePath)
+                        val uri = song.localFilePath!!.toUri()
                         if (uri.scheme == "content") {
                             context.contentResolver.delete(uri, null, null)
                         } else {

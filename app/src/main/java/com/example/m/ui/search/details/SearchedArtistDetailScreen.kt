@@ -1,12 +1,15 @@
 package com.example.m.ui.search.details
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
@@ -26,6 +29,7 @@ import coil.compose.AsyncImage
 import com.example.m.R
 import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.library.components.AddToPlaylistSheet
+import com.example.m.ui.library.components.ConfirmAddAllToLibraryDialog
 import com.example.m.ui.library.components.CreatePlaylistDialog
 import com.example.m.ui.search.SearchResultItem
 import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
@@ -50,6 +54,16 @@ fun SearchedArtistDetailScreen(
 
     val showCreatePlaylistDialog by remember { derivedStateOf { viewModel.showCreatePlaylistDialog } }
     val itemToAddToPlaylist by remember { derivedStateOf { viewModel.itemToAddToPlaylist } }
+    val showConfirmDialog by remember { derivedStateOf { viewModel.showConfirmAddAllDialog } }
+
+    if (showConfirmDialog) {
+        val artistName = uiState.channelInfo?.name ?: "this artist"
+        ConfirmAddAllToLibraryDialog(
+            itemName = artistName,
+            onDismiss = { viewModel.dismissConfirmAddAllToLibraryDialog() },
+            onConfirm = { viewModel.confirmAddAllToLibrary() }
+        )
+    }
 
     if (showCreatePlaylistDialog) {
         CreatePlaylistDialog(
@@ -111,27 +125,35 @@ fun SearchedArtistDetailScreen(
 
                     if (uiState.songs.isNotEmpty()) {
                         item {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                val headerText = if (uiState.searchType == "music") "Popular Songs" else "Videos"
-                                Text(
-                                    text = headerText,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                TextButton(onClick = {
-                                    val info = uiState.channelInfo
-                                    if (info?.url != null && info.name != null) {
-                                        onGoToSongs(uiState.searchType, info.url, info.name)
+                            Column {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp)
+                                        .padding(bottom = 4.dp),
+                                    verticalAlignment = Alignment.Bottom,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    val headerText = if (uiState.searchType == "music") "Popular Songs" else "Videos"
+                                    Text(
+                                        text = headerText,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(bottom = 8.dp)
+                                    )
+                                    TextButton(
+                                        onClick = {
+                                            val info = uiState.channelInfo
+                                            if (info?.url != null && info.name != null) {
+                                                onGoToSongs(uiState.searchType, info.url, info.name)
+                                            }
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 12.dp)
+                                    ) {
+                                        Text("More")
                                     }
-                                }) {
-                                    Text("More")
                                 }
+                                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                             }
                         }
                         items(uiState.songs.take(5)) { item ->
@@ -144,45 +166,57 @@ fun SearchedArtistDetailScreen(
                                 onPlay = { viewModel.onSongSelected(index) },
                                 onDownload = { viewModel.downloadSong(item.result.streamInfo) },
                                 onAddToLibrary = { viewModel.addSongToLibrary(item.result.streamInfo) },
-                                onAddToPlaylistClick = { viewModel.selectItemForPlaylist(item.result.streamInfo) }
+                                onAddToPlaylistClick = { viewModel.selectItemForPlaylist(item.result.streamInfo) },
+                                onPlayNext = { viewModel.onPlayNext(item.result.streamInfo) },
+                                onAddToQueue = { viewModel.onAddToQueue(item.result.streamInfo) }
                             )
                         }
                     }
 
                     if (uiState.releases.isNotEmpty()) {
                         item {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                val headerText = if (uiState.searchType == "music") "Releases" else "Playlists"
-                                Text(
-                                    text = headerText,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                TextButton(onClick = {
-                                    val info = uiState.channelInfo
-                                    if (info?.url != null && info.name != null) {
-                                        onGoToReleases(uiState.searchType, info.url, info.name)
+                            Column {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp)
+                                        .padding(bottom = 4.dp),
+                                    verticalAlignment = Alignment.Bottom,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    val headerText = if (uiState.searchType == "music") "Releases" else "Playlists"
+                                    Text(
+                                        text = headerText,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(bottom = 8.dp)
+                                    )
+                                    TextButton(
+                                        onClick = {
+                                            val info = uiState.channelInfo
+                                            if (info?.url != null && info.name != null) {
+                                                onGoToReleases(uiState.searchType, info.url, info.name)
+                                            }
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 12.dp)
+                                    ) {
+                                        Text("More")
                                     }
-                                }) {
-                                    Text("More")
                                 }
+                                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                             }
-
+                        }
+                        item {
                             LazyRow(
-                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                contentPadding = PaddingValues(16.dp),
                                 horizontalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
                                 items(uiState.releases.take(10)) { release ->
                                     AlbumItem(
                                         album = release,
                                         imageLoader = viewModel.imageLoader,
-                                        onClick = { release.url?.let { onAlbumClick(uiState.searchType, it) } }
+                                        onClick = { release.url?.let { onAlbumClick(uiState.searchType, it) } },
+                                        showArtist = false
                                     )
                                 }
                             }
@@ -194,6 +228,7 @@ fun SearchedArtistDetailScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ArtistHeader(
     onBack: () -> Unit,
@@ -214,18 +249,23 @@ private fun ArtistHeader(
                 error = painterResource(id = R.drawable.placeholder_gray),
                 placeholder = painterResource(id = R.drawable.placeholder_gray)
             )
-            IconButton(
-                onClick = onBack,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(12.dp)
-                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Start,
+                verticalAlignment = Alignment.Top
             ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = Color.White
-                )
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier
+                        .padding(12.dp)
+                        .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Color.White
+                    )
+                }
             }
         }
 
@@ -250,8 +290,8 @@ private fun ArtistHeader(
                     text = artistName,
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    maxLines = 1,
+                    modifier = Modifier.basicMarquee()
                 )
                 if (subscriberCount >= 0) {
                     Text(
@@ -265,8 +305,14 @@ private fun ArtistHeader(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AlbumItem(album: PlaylistInfoItem, imageLoader: ImageLoader, onClick: () -> Unit) {
+private fun AlbumItem(
+    album: PlaylistInfoItem,
+    imageLoader: ImageLoader,
+    onClick: () -> Unit,
+    showArtist: Boolean = true
+) {
     Column(
         modifier = Modifier
             .width(130.dp)
@@ -277,7 +323,9 @@ private fun AlbumItem(album: PlaylistInfoItem, imageLoader: ImageLoader, onClick
             model = album.getThumbnail(),
             imageLoader = imageLoader,
             contentDescription = album.name,
-            modifier = Modifier.size(130.dp),
+            modifier = Modifier
+                .size(130.dp)
+                .clip(RoundedCornerShape(3.dp)),
             contentScale = ContentScale.Crop,
             error = painterResource(id = R.drawable.placeholder_gray),
             placeholder = painterResource(id = R.drawable.placeholder_gray)
@@ -286,9 +334,19 @@ private fun AlbumItem(album: PlaylistInfoItem, imageLoader: ImageLoader, onClick
             text = album.name ?: "Unknown Album",
             style = MaterialTheme.typography.bodyMedium,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 4.dp)
+            modifier = Modifier
+                .padding(top = 4.dp)
+                .basicMarquee()
         )
+        if(showArtist) {
+            Text(
+                text = album.uploaderName ?: "Unknown Artist",
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 

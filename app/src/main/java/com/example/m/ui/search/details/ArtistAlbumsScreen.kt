@@ -1,5 +1,7 @@
 package com.example.m.ui.search.details
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -23,12 +25,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.m.ui.search.AlbumItem
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ArtistAlbumsScreen(
     onBack: () -> Unit,
@@ -44,7 +45,7 @@ fun ArtistAlbumsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = { Text(title, maxLines = 1, modifier = Modifier.basicMarquee()) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
@@ -77,7 +78,8 @@ fun ArtistAlbumsScreen(
                         AlbumItem(
                             album = album,
                             imageLoader = viewModel.imageLoader,
-                            onClick = { album.url?.let { onAlbumClick(uiState.searchType, it) } }
+                            onClick = { album.url?.let { onAlbumClick(uiState.searchType, it) } },
+                            showArtist = false
                         )
                     }
                 }

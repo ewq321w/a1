@@ -153,11 +153,11 @@ class YoutubeRepository @Inject constructor() {
         }
     }
 
-    private suspend fun getPaginatedArtistSongs(channelInfo: ChannelInfo): Triple<List<StreamInfoItem>, Page?, Any?> {
+    private suspend fun getPaginatedArtistSongs(channelInfo: ChannelInfo): Triple<List<StreamInfoItem>, Page?, ListLinkHandler?> {
         val service = ServiceList.YouTube
         var songs = emptyList<StreamInfoItem>()
         var songsNextPage: Page? = null
-        var songsTabHandler: Any? = null
+        var songsTabHandler: ListLinkHandler? = null
 
         val tracksTabHandler = channelInfo.tabs.find { it.contentFilters.contains(ChannelTabs.TRACKS) }
         if (tracksTabHandler != null) {
@@ -293,6 +293,7 @@ class YoutubeRepository @Inject constructor() {
 
                 val (songs, songsNextPage, songsTabHandler) = getPaginatedArtistSongs(channelInfo)
 
+                // Playlist logic remains unchanged (loads all)
                 var playlists = emptyList<PlaylistInfoItem>()
                 val playlistsTabHandler = channelInfo.tabs.find { it.contentFilters.contains(ChannelTabs.PLAYLISTS) }
                 if (playlistsTabHandler != null) {
@@ -309,7 +310,7 @@ class YoutubeRepository @Inject constructor() {
                     } catch (e: Exception) { e.printStackTrace() }
                 }
 
-                ArtistDetails(channelInfo, songs, playlists, songsNextPage, songsTabHandler as? ListLinkHandler)
+                ArtistDetails(channelInfo, songs, playlists, songsNextPage, songsTabHandler)
             } catch (e: Exception) {
                 e.printStackTrace()
                 null

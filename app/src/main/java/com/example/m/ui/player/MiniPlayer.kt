@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -12,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -46,27 +48,29 @@ fun MiniPlayer(
             .clickable(onClick = onContainerClicked)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 15.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Thumbnail
             AsyncImage(
                 model = artworkUri,
                 contentDescription = "Album Art",
-                modifier = Modifier.size(48.dp),
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(3.dp)),
                 contentScale = ContentScale.Crop,
                 error = painterResource(id = R.drawable.placeholder_gray),
                 placeholder = painterResource(id = R.drawable.placeholder_gray)
             )
 
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(16.dp))
 
             // Title and Artist
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = songTitle,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
                     modifier = Modifier.basicMarquee()
                 )
@@ -84,7 +88,7 @@ fun MiniPlayer(
                 Icon(
                     imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                     contentDescription = "Play/Pause",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.size(25.dp)
                 )
             }

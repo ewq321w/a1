@@ -20,17 +20,17 @@ import org.burnoutcrew.reorderable.reorderable
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EditPlaylistScreen(
+fun EditArtistSongGroupScreen(
     onBack: () -> Unit,
-    viewModel: EditPlaylistViewModel = hiltViewModel()
+    viewModel: EditArtistSongGroupViewModel = hiltViewModel()
 ) {
-    val playlistWithSongs by viewModel.playlistWithSongs.collectAsState()
-    var playlistName by remember(playlistWithSongs) {
-        mutableStateOf(playlistWithSongs?.playlist?.name ?: "")
+    val groupWithSongs by viewModel.groupWithSongs.collectAsState()
+    var groupName by remember(groupWithSongs) {
+        mutableStateOf(groupWithSongs?.group?.name ?: "")
     }
     val songPendingRemoval by remember { derivedStateOf { viewModel.songPendingRemoval } }
 
-    val songs = playlistWithSongs?.songs ?: emptyList()
+    val songs = groupWithSongs?.songs ?: emptyList()
 
     val state = rememberReorderableLazyListState(onMove = { from, to ->
         val adjustedFrom = from.index - 1
@@ -45,7 +45,7 @@ fun EditPlaylistScreen(
         ConfirmRemoveDialog(
             itemType = "song",
             itemName = songToRemove.title,
-            containerType = "playlist",
+            containerType = "group",
             onDismiss = { viewModel.cancelSongRemoval() },
             onConfirm = { viewModel.confirmSongRemoval() }
         )
@@ -54,7 +54,7 @@ fun EditPlaylistScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Edit Playlist") },
+                title = { Text("Edit Group") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
@@ -62,22 +62,17 @@ fun EditPlaylistScreen(
                 },
                 actions = {
                     TextButton(onClick = {
-                        viewModel.saveChanges(playlistName)
+                        viewModel.saveChanges(groupName)
                         onBack()
                     }) {
                         Text("Save")
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface
-                )
+                }
             )
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { paddingValues ->
-        if (playlistWithSongs == null) {
+        if (groupWithSongs == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
@@ -96,15 +91,15 @@ fun EditPlaylistScreen(
                     ) {
                         CompositeThumbnailImage(
                             urls = songs.map { it.thumbnailUrl },
-                            contentDescription = "Playlist thumbnail",
+                            contentDescription = "Group thumbnail",
                             processUrls = viewModel::processThumbnails,
                             modifier = Modifier.size(150.dp)
                         )
                         Spacer(Modifier.height(16.dp))
                         OutlinedTextField(
-                            value = playlistName,
-                            onValueChange = { playlistName = it },
-                            label = { Text("Playlist Name") },
+                            value = groupName,
+                            onValueChange = { groupName = it },
+                            label = { Text("Group Name") },
                             modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(Modifier.height(16.dp))
@@ -113,8 +108,7 @@ fun EditPlaylistScreen(
 
                 items(
                     items = songs,
-                    key = { song: Song -> song.songId },
-                    contentType = { "EditableSongItem" }
+                    key = { song: Song -> song.songId }
                 ) { song ->
                     ReorderableItem(state, key = song.songId) { isDragging ->
                         val onRemoveClickRemembered = remember(song) { { viewModel.onRemoveSongClicked(song) } }

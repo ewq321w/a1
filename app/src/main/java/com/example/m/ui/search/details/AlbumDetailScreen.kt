@@ -1,40 +1,20 @@
 package com.example.m.ui.search.details
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -46,11 +26,12 @@ import com.example.m.R
 import com.example.m.data.database.Song
 import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.library.components.AddToPlaylistSheet
+import com.example.m.ui.library.components.ConfirmAddAllToLibraryDialog
 import com.example.m.ui.library.components.CreatePlaylistDialog
 import com.example.m.ui.search.SearchResultItem
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun AlbumDetailScreen(
     onBack: () -> Unit,
@@ -63,6 +44,16 @@ fun AlbumDetailScreen(
 
     val showCreatePlaylistDialog by remember { derivedStateOf { viewModel.showCreatePlaylistDialog } }
     val itemToAddToPlaylist by remember { derivedStateOf { viewModel.itemToAddToPlaylist } }
+    val showConfirmDialog by remember { derivedStateOf { viewModel.showConfirmAddAllDialog } }
+
+    if (showConfirmDialog) {
+        val albumName = uiState.albumInfo?.name ?: "this album"
+        ConfirmAddAllToLibraryDialog(
+            itemName = albumName,
+            onDismiss = { viewModel.dismissConfirmAddAllToLibraryDialog() },
+            onConfirm = { viewModel.confirmAddAllToLibrary() }
+        )
+    }
 
     if (showCreatePlaylistDialog) {
         CreatePlaylistDialog(
@@ -117,11 +108,41 @@ fun AlbumDetailScreen(
 
     Scaffold(
         topBar = {
+            var showMenu by remember { mutableStateOf(false) }
             TopAppBar(
-                title = { Text(uiState.albumInfo?.name ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = {
+                    Text(
+                        uiState.albumInfo?.name ?: "",
+                        maxLines = 1,
+                        modifier = Modifier.basicMarquee()
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                    }
+                },
+                actions = {
+                    Box {
+                        IconButton(onClick = { showMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                        }
+                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Shuffle") },
+                                onClick = {
+                                    viewModel.shuffle()
+                                    showMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Add all to library") },
+                                onClick = {
+                                    viewModel.onAddAllToLibraryClicked()
+                                    showMenu = false
+                                }
+                            )
+                        }
                     }
                 },
                 windowInsets = TopAppBarDefaults.windowInsets
@@ -167,7 +188,9 @@ fun AlbumDetailScreen(
                             onPlay = { viewModel.onSongSelected(index) },
                             onDownload = { viewModel.downloadSong(item.result) },
                             onAddToLibrary = { viewModel.addSongToLibrary(item.result) },
-                            onAddToPlaylistClick = { viewModel.selectItemForPlaylist(item) }
+                            onAddToPlaylistClick = { viewModel.selectItemForPlaylist(item) },
+                            onPlayNext = { viewModel.onPlayNext(item.result) },
+                            onAddToQueue = { viewModel.onAddToQueue(item.result) }
                         )
                     }
 
@@ -202,6 +225,7 @@ fun AlbumDetailScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AlbumHeader(thumbnailUrl: String?, albumName: String, artistName: String) {
     Row(
@@ -211,7 +235,9 @@ private fun AlbumHeader(thumbnailUrl: String?, albumName: String, artistName: St
         AsyncImage(
             model = thumbnailUrl,
             contentDescription = "Album Thumbnail",
-            modifier = Modifier.size(120.dp),
+            modifier = Modifier
+                .size(120.dp)
+                .clip(RoundedCornerShape(3.dp)),
             contentScale = ContentScale.Crop,
             error = painterResource(id = R.drawable.placeholder_gray),
             placeholder = painterResource(id = R.drawable.placeholder_gray)
@@ -224,8 +250,8 @@ private fun AlbumHeader(thumbnailUrl: String?, albumName: String, artistName: St
                 text = albumName,
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
+                maxLines = 1,
+                modifier = Modifier.basicMarquee()
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(

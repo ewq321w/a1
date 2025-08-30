@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import com.example.m.data.database.Song
@@ -24,8 +25,11 @@ fun SongsTabContent(
     onGoToArtistClick: (Song) -> Unit,
     onDownloadClick: (Song) -> Unit
 ) {
+    val listState = rememberLazyListState()
+
     Column(Modifier.fillMaxSize()) {
         LazyColumn(
+            state = listState,
             modifier = Modifier.weight(1f)
         ) {
             itemsIndexed(

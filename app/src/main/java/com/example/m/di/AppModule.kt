@@ -1,8 +1,8 @@
 package com.example.m.di
 
+import android.app.PendingIntent
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
+import android.content.Intent
 import androidx.annotation.OptIn
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
@@ -11,8 +11,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import coil.ImageLoader
 import coil.disk.DiskCache
-import coil.intercept.Interceptor
-import coil.request.CachePolicy
+import com.example.m.MainActivity
 import com.example.m.data.database.*
 import dagger.Module
 import dagger.Provides
@@ -20,7 +19,9 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import okhttp3.OkHttpClient
+import javax.inject.Inject
 import javax.inject.Named
+import javax.inject.Provider
 import javax.inject.Singleton
 
 @UnstableApi
@@ -29,29 +30,28 @@ private class CustomPlayer(player: Player) : ForwardingPlayer(player) {
         private const val SEEK_TO_PREVIOUS_THRESHOLD_MS = 5000L // 5 seconds
     }
 
+    override fun seekToNext() {
+        val wasPaused = !playWhenReady
+        super.seekToNext()
+        if (wasPaused) {
+            play()
+        }
+    }
+
     override fun seekToPrevious() {
+        val wasPaused = !playWhenReady
         if (currentPosition > SEEK_TO_PREVIOUS_THRESHOLD_MS || !hasPreviousMediaItem()) {
             seekTo(0)
         } else {
             super.seekToPreviousMediaItem()
         }
+        if (wasPaused) {
+            play()
+        }
     }
 
     override fun seekToPreviousMediaItem() {
         seekToPrevious()
-    }
-}
-
-private fun isNetworkAvailable(context: Context): Boolean {
-    val connectivityManager =
-        context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-    val network = connectivityManager.activeNetwork ?: return false
-    val activeNetwork = connectivityManager.getNetworkCapabilities(network) ?: return false
-    return when {
-        activeNetwork.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> true
-        activeNetwork.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> true
-        activeNetwork.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> true
-        else -> false
     }
 }
 
@@ -61,8 +61,19 @@ object AppModule {
 
     @Singleton
     @Provides
-    fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
-        return AppDatabase.getDatabase(context)
+    fun provideAppDatabaseCallback(
+        database: Provider<AppDatabase>
+    ): AppDatabase.AppDatabaseCallback {
+        return AppDatabase.AppDatabaseCallback(database)
+    }
+
+    @Singleton
+    @Provides
+    fun provideAppDatabase(
+        @ApplicationContext context: Context,
+        callback: AppDatabase.AppDatabaseCallback
+    ): AppDatabase {
+        return AppDatabase.getDatabase(context, callback)
     }
 
     @Singleton
@@ -72,6 +83,11 @@ object AppModule {
     @Singleton
     @Provides
     fun providePlaylistDao(database: AppDatabase): PlaylistDao = database.playlistDao()
+
+    // FIX: Add provider for the new DAO
+    @Singleton
+    @Provides
+    fun provideLibraryGroupDao(database: AppDatabase): LibraryGroupDao = database.libraryGroupDao()
 
     @Singleton
     @Provides
@@ -106,14 +122,27 @@ object AppModule {
     @Provides
     fun provideMediaSession(@ApplicationContext context: Context, player: ExoPlayer): MediaSession {
         val customPlayer = CustomPlayer(player)
-        return MediaSession.Builder(context, customPlayer).build()
+
+        val sessionActivityPendingIntent =
+            PendingIntent.getActivity(
+                context,
+                0,
+                Intent(context, MainActivity::class.java),
+                PendingIntent.FLAG_IMMUTABLE
+            )
+
+        return MediaSession.Builder(context, customPlayer)
+            .setSessionActivity(sessionActivityPendingIntent)
+            .build()
     }
 
     @Singleton
     @Provides
     @Named("Coil")
     fun provideCoilOkHttpClient(): OkHttpClient {
-        return OkHttpClient.Builder().build()
+        return OkHttpClient.Builder()
+            .retryOnConnectionFailure(true)
+            .build()
     }
 
     @Singleton
@@ -124,27 +153,15 @@ object AppModule {
     ): ImageLoader {
         return ImageLoader.Builder(context)
             .okHttpClient(okHttpClient)
+            .allowRgb565(true)
             .diskCache {
                 DiskCache.Builder()
                     .directory(context.cacheDir.resolve("image_cache_coil"))
-                    .maxSizePercent(0.1) // Use 10% of app space for cache
+                    .maxSizePercent(0.1)
                     .build()
             }
             .crossfade(true)
-            .components {
-                add(Interceptor { chain ->
-                    val request = chain.request
-                    if (!isNetworkAvailable(context)) {
-                        val newRequest = request.newBuilder()
-                            .diskCachePolicy(CachePolicy.ENABLED)
-                            .networkCachePolicy(CachePolicy.DISABLED)
-                            .build()
-                        chain.proceed(newRequest)
-                    } else {
-                        chain.proceed(request)
-                    }
-                })
-            }
+            .respectCacheHeaders(false)
             .build()
     }
 }

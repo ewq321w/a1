@@ -1,11 +1,14 @@
 package com.example.m.ui.search
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -19,6 +22,7 @@ import coil.ImageLoader
 import coil.compose.AsyncImage
 import com.example.m.ui.common.getThumbnail
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MusicSearchLayout(
     uiState: SearchUiState,
@@ -30,7 +34,10 @@ fun MusicSearchLayout(
     onShowMore: (SearchCategory) -> Unit,
     onDownloadSong: (SearchResult) -> Unit,
     onAddToLibrary: (SearchResult) -> Unit,
-    onAddToPlaylist: (SearchResult) -> Unit
+    onAddToPlaylist: (SearchResult) -> Unit,
+    onPlayNext: (SearchResult) -> Unit,
+    onAddToQueue: (SearchResult) -> Unit,
+    onShuffleAlbum: (AlbumResult) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -53,7 +60,9 @@ fun MusicSearchLayout(
                     onPlay = { onSongClicked(index) },
                     onDownload = { onDownloadSong(item.result) },
                     onAddToLibrary = { onAddToLibrary(item.result) },
-                    onAddToPlaylistClick = { onAddToPlaylist(item.result) }
+                    onAddToPlaylistClick = { onAddToPlaylist(item.result) },
+                    onPlayNext = { onPlayNext(item.result) },
+                    onAddToQueue = { onAddToQueue(item.result) }
                 )
             }
         }
@@ -66,7 +75,13 @@ fun MusicSearchLayout(
                     onMoreClicked = { onShowMore(SearchCategory.ARTISTS) }
                 )
             }
-            items(uiState.artists.take(1), key = { it.artistInfo.url!! }) { item ->
+            val artistsToShow = if (uiState.artists.size >= 2
+                && uiState.artists[1].artistInfo.name?.endsWith(" - Topic") == true) {
+                uiState.artists.take(2)
+            } else {
+                uiState.artists.take(1)
+            }
+            items(artistsToShow, key = { it.artistInfo.url!! }) { item ->
                 ArtistListItem(
                     artistResult = item,
                     imageLoader = imageLoader,
@@ -88,21 +103,73 @@ fun MusicSearchLayout(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onAlbumClicked(item) }
-                        .padding(horizontal = 16.dp, vertical = 7.dp),
+                        .height(72.dp)
+                        .padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     AsyncImage(
                         model = item.albumInfo.getThumbnail(),
                         imageLoader = imageLoader,
                         contentDescription = item.albumInfo.name,
-                        modifier = Modifier.size(50.dp),
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(3.dp)),
                         contentScale = ContentScale.Crop
                     )
                     Spacer(modifier = Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = item.albumInfo.name ?: "",
-                            maxLines = 1,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (item.albumInfo.uploaderName != null) {
+                            Text(
+                                text = item.albumInfo.uploaderName!!,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (uiState.playlists.isNotEmpty()) {
+            item {
+                SectionHeader(
+                    title = "Playlists",
+                    showMoreButton = uiState.playlists.size > 3,
+                    onMoreClicked = { onShowMore(SearchCategory.PLAYLISTS) }
+                )
+            }
+            itemsIndexed(uiState.playlists.take(3), key = { index, item -> (item.albumInfo.url ?: "") + index }) { _, item ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onAlbumClicked(item) }
+                        .height(72.dp)
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    AsyncImage(
+                        model = item.albumInfo.getThumbnail(),
+                        imageLoader = imageLoader,
+                        contentDescription = item.albumInfo.name,
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = item.albumInfo.name ?: "",
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface
@@ -129,20 +196,33 @@ private fun SectionHeader(
     showMoreButton: Boolean,
     onMoreClicked: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        if (showMoreButton) {
-            TextButton(onClick = onMoreClicked) { Text("More") }
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 4.dp),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            if (showMoreButton) {
+                TextButton(
+                    onClick = onMoreClicked,
+                    contentPadding = PaddingValues(horizontal = 12.dp)
+                ) { Text("More") }
+            }
         }
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ArtistListItem(
     artistResult: ArtistResult,
@@ -153,7 +233,8 @@ private fun ArtistListItem(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onArtistClicked(artistResult) }
-            .padding(horizontal = 16.dp, vertical = 7.dp),
+            .height(72.dp)
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         AsyncImage(
@@ -161,14 +242,14 @@ private fun ArtistListItem(
             imageLoader = imageLoader,
             contentDescription = artistResult.artistInfo.name,
             modifier = Modifier
-                .size(50.dp)
+                .size(54.dp)
                 .clip(CircleShape)
         )
         Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = artistResult.artistInfo.name ?: "",
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface

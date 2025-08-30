@@ -16,9 +16,30 @@ enum class SourceType {
     LOCAL_ONLY
 }
 
+// FIX: Add the new LibraryGroup entity for top-level library organization
+@Entity(tableName = "library_groups")
+data class LibraryGroup(
+    @PrimaryKey(autoGenerate = true)
+    val groupId: Long = 0,
+    val name: String,
+    val customOrderPosition: Int = 0
+)
+
 @Entity(
     tableName = "songs",
-    indices = [Index(value = ["youtubeUrl"], unique = true)]
+    indices = [
+        Index(value = ["youtubeUrl"], unique = true),
+        Index(value = ["libraryGroupId"]) // Index for the new column
+    ],
+    foreignKeys = [
+        // FIX: Add a foreign key to link songs to a library group
+        ForeignKey(
+            entity = LibraryGroup::class,
+            parentColumns = ["groupId"],
+            childColumns = ["libraryGroupId"],
+            onDelete = ForeignKey.SET_NULL // If a group is deleted, songs become "ungrouped"
+        )
+    ]
 )
 data class Song(
     @PrimaryKey(autoGenerate = true)
@@ -33,7 +54,9 @@ data class Song(
     val sourceType: SourceType = SourceType.STANDARD,
     val dateAddedTimestamp: Long = System.currentTimeMillis(),
     val isInLibrary: Boolean = false,
-    val playCount: Int = 0
+    val playCount: Int = 0,
+    // FIX: Add the column to link a song to a specific library group
+    val libraryGroupId: Long? = null
 )
 
 @Entity(tableName = "playlists")
@@ -191,4 +214,63 @@ data class ArtistGroupWithArtists(
         entityColumn = "parentGroupId"
     )
     val artists: List<Artist>
+)
+
+@Entity(
+    tableName = "artist_song_groups",
+    foreignKeys = [
+        ForeignKey(
+            entity = Artist::class,
+            parentColumns = ["artistId"],
+            childColumns = ["artistId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [Index(value = ["artistId"])]
+)
+data class ArtistSongGroup(
+    @PrimaryKey(autoGenerate = true)
+    val groupId: Long = 0,
+    val artistId: Long,
+    val name: String,
+    val customOrderPosition: Int = 0
+)
+
+@Entity(
+    tableName = "artist_song_group_songs",
+    primaryKeys = ["groupId", "songId"],
+    foreignKeys = [
+        ForeignKey(
+            entity = ArtistSongGroup::class,
+            parentColumns = ["groupId"],
+            childColumns = ["groupId"],
+            onDelete = ForeignKey.CASCADE
+        ),
+        ForeignKey(
+            entity = Song::class,
+            parentColumns = ["songId"],
+            childColumns = ["songId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [Index(value = ["songId"])]
+)
+data class ArtistSongGroupSongCrossRef(
+    val groupId: Long,
+    val songId: Long,
+    val customOrderPosition: Int
+)
+
+data class ArtistSongGroupWithSongs(
+    @Embedded val group: ArtistSongGroup,
+    @Relation(
+        parentColumn = "groupId",
+        entityColumn = "songId",
+        associateBy = Junction(
+            value = ArtistSongGroupSongCrossRef::class,
+            parentColumn = "groupId",
+            entityColumn = "songId"
+        )
+    )
+    val songs: List<Song>
 )

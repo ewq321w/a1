@@ -1,5 +1,7 @@
 package com.example.m.ui.library.edit
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -23,6 +25,7 @@ import com.example.m.data.database.Song
 import org.burnoutcrew.reorderable.ReorderableLazyListState
 import org.burnoutcrew.reorderable.detectReorder
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun EditSongItem(
     song: Song,
@@ -32,7 +35,7 @@ fun EditSongItem(
 ) {
     ListItem(
         modifier = modifier,
-        headlineContent = { Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        headlineContent = { Text(song.title, maxLines = 1, modifier = Modifier.basicMarquee()) },
         supportingContent = { Text(song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         leadingContent = {
             AsyncImage(

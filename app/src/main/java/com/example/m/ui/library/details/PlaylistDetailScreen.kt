@@ -1,5 +1,7 @@
 package com.example.m.ui.library.details
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -12,7 +14,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.m.data.database.Playlist
@@ -140,7 +141,7 @@ fun PlaylistDetailScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun PlaylistDetailContent(
     playlist: Playlist,
@@ -157,7 +158,7 @@ private fun PlaylistDetailContent(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = { Text(playlist.name, maxLines = 1, modifier = Modifier.basicMarquee()) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")

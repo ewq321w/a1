@@ -1,13 +1,13 @@
 package com.example.m.data
 
 import android.content.Context
+import androidx.core.content.edit
+import com.example.m.ui.library.SongSortOrder
 import com.example.m.ui.library.details.ArtistSortOrder
 import com.example.m.ui.library.details.PlaylistSortOrder
-import com.example.m.ui.library.SongSortOrder
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
-import androidx.core.content.edit
 
 @Singleton
 class PreferencesManager @Inject constructor(@ApplicationContext context: Context) {
@@ -17,13 +17,17 @@ class PreferencesManager @Inject constructor(@ApplicationContext context: Contex
         get() = prefs.getString("last_library_view", "Playlists") ?: "Playlists"
         set(value) = prefs.edit { putString("last_library_view", value) }
 
+    // FIX: Add property to store the active library group ID. 0L represents "All Music".
+    var activeLibraryGroupId: Long
+        get() = prefs.getLong("active_library_group_id", 0L)
+        set(value) = prefs.edit { putLong("active_library_group_id", value) }
+
     var songsSortOrder: SongSortOrder
         get() {
             val orderName = prefs.getString("songs_sort_order", SongSortOrder.ARTIST.name)
             return try {
                 SongSortOrder.valueOf(orderName ?: SongSortOrder.ARTIST.name)
             } catch (e: IllegalArgumentException) {
-                // If the stored value is invalid, return a safe default to prevent a crash.
                 SongSortOrder.ARTIST
             }
         }

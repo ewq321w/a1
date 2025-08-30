@@ -127,7 +127,7 @@ class DownloadService : Service() {
                 val contentLength = getContentLength(audioStream.url.toString())
                 if (contentLength <= 0) throw IOException("Could not get content length.")
 
-                val segments = 16
+                val segments = 32
                 val segmentSize = contentLength / segments
 
                 RandomAccessFile(tempFile, "rw").use { randomAccessFile ->

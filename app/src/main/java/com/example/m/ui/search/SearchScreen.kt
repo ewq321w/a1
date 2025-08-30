@@ -138,7 +138,10 @@ fun SearchScreen(
                             onShowMore = viewModel::showDetailedView,
                             onDownloadSong = viewModel::downloadSong,
                             onAddToLibrary = viewModel::addSongToLibrary,
-                            onAddToPlaylist = { result -> viewModel.playlistActionHandler.selectItemForPlaylist(result) }
+                            onAddToPlaylist = { result -> viewModel.playlistActionHandler.selectItemForPlaylist(result) },
+                            onPlayNext = viewModel::onPlayNext,
+                            onAddToQueue = viewModel::onAddToQueue,
+                            onShuffleAlbum = viewModel::onShuffleAlbum
                         )
                     } else {
                         VideoSearchLayout(
@@ -157,7 +160,9 @@ fun SearchScreen(
                             onShowMore = viewModel::showDetailedView,
                             onDownloadSong = viewModel::downloadSong,
                             onAddToLibrary = viewModel::addSongToLibrary,
-                            onAddToPlaylist = { result -> viewModel.playlistActionHandler.selectItemForPlaylist(result) }
+                            onAddToPlaylist = { result -> viewModel.playlistActionHandler.selectItemForPlaylist(result) },
+                            onPlayNext = viewModel::onPlayNext,
+                            onAddToQueue = viewModel::onAddToQueue
                         )
                     }
                 }
@@ -185,7 +190,9 @@ fun SearchScreen(
                 },
                 onDownloadSong = viewModel::downloadSong,
                 onAddToLibrary = viewModel::addSongToLibrary,
-                onAddToPlaylist = { result -> viewModel.playlistActionHandler.selectItemForPlaylist(result) }
+                onAddToPlaylist = { result -> viewModel.playlistActionHandler.selectItemForPlaylist(result) },
+                onPlayNext = viewModel::onPlayNext,
+                onAddToQueue = viewModel::onAddToQueue
             )
         }
     }
@@ -206,7 +213,9 @@ private fun DetailedView(
     onArtistClicked: (ArtistResult) -> Unit,
     onDownloadSong: (SearchResult) -> Unit,
     onAddToLibrary: (SearchResult) -> Unit,
-    onAddToPlaylist: (SearchResult) -> Unit
+    onAddToPlaylist: (SearchResult) -> Unit,
+    onPlayNext: (SearchResult) -> Unit,
+    onAddToQueue: (SearchResult) -> Unit
 ) {
     val listState = rememberLazyListState()
 
@@ -215,7 +224,8 @@ private fun DetailedView(
             TopAppBar(
                 title = {
                     val titleText = when (category) {
-                        SearchCategory.ALBUMS -> if (uiState.selectedFilter == "music_songs") "Albums" else "Playlists"
+                        SearchCategory.ALBUMS -> "Albums"
+                        SearchCategory.PLAYLISTS -> "Playlists"
                         SearchCategory.ARTISTS -> "Artists"
                         SearchCategory.CHANNELS -> "Channels"
                         else -> category.name.lowercase().replaceFirstChar { it.titlecase() }
@@ -231,12 +241,6 @@ private fun DetailedView(
             )
         }
     ) { paddingValues ->
-        val itemsToShow = when (category) {
-            SearchCategory.SONGS -> songsWithStatus
-            SearchCategory.VIDEOS -> videoStreamsWithStatus
-            else -> emptyList()
-        }
-
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -246,6 +250,7 @@ private fun DetailedView(
         ) {
             when (category) {
                 SearchCategory.SONGS, SearchCategory.VIDEOS -> {
+                    val itemsToShow = if (category == SearchCategory.SONGS) songsWithStatus else videoStreamsWithStatus
                     itemsIndexed(itemsToShow, key = { index, item -> (item.result.streamInfo.url ?: "") + index }) { index, item ->
                         SearchResultItem(
                             result = item.result,
@@ -255,32 +260,37 @@ private fun DetailedView(
                             onPlay = { onSongClicked(index) },
                             onDownload = { onDownloadSong(item.result) },
                             onAddToLibrary = { onAddToLibrary(item.result) },
-                            onAddToPlaylistClick = { onAddToPlaylist(item.result) }
+                            onAddToPlaylistClick = { onAddToPlaylist(item.result) },
+                            onPlayNext = { onPlayNext(item.result) },
+                            onAddToQueue = { onAddToQueue(item.result) }
                         )
                     }
                 }
-                SearchCategory.ALBUMS -> {
-                    val items = if (uiState.selectedFilter == "music_songs") uiState.albums else uiState.videoPlaylists
+                SearchCategory.ALBUMS, SearchCategory.PLAYLISTS -> {
+                    val items = if (category == SearchCategory.ALBUMS) uiState.albums else uiState.playlists
                     itemsIndexed(items, key = { index, item -> (item.albumInfo.url ?: "") + index }) { _, item ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { onAlbumClicked(item) }
-                                .padding(horizontal = 16.dp, vertical = 7.dp),
+                                .height(72.dp)
+                                .padding(horizontal = 16.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             AsyncImage(
                                 model = item.albumInfo.getThumbnail(),
                                 imageLoader = imageLoader,
                                 contentDescription = item.albumInfo.name,
-                                modifier = Modifier.size(50.dp),
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .aspectRatio(1f),
                                 contentScale = ContentScale.Crop
                             )
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = item.albumInfo.name ?: "",
-                                    maxLines = 1,
+                                    maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurface
@@ -305,7 +315,8 @@ private fun DetailedView(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { onArtistClicked(item) }
-                                .padding(horizontal = 16.dp, vertical = 7.dp),
+                                .height(72.dp)
+                                .padding(horizontal = 16.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             AsyncImage(
@@ -313,14 +324,14 @@ private fun DetailedView(
                                 imageLoader = imageLoader,
                                 contentDescription = item.artistInfo.name,
                                 modifier = Modifier
-                                    .size(50.dp)
+                                    .size(54.dp)
                                     .clip(CircleShape)
                             )
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = item.artistInfo.name ?: "",
-                                    maxLines = 1,
+                                    maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurface
