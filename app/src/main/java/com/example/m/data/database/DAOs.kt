@@ -1,3 +1,4 @@
+// file: com/example/m/data/database/DAOs.kt
 package com.example.m.data.database
 
 import androidx.room.*
@@ -9,6 +10,9 @@ interface LibraryGroupDao {
     @Query("SELECT * FROM library_groups ORDER BY customOrderPosition ASC, name ASC")
     fun getAllGroups(): Flow<List<LibraryGroup>>
 
+    @Query("SELECT * FROM library_groups WHERE groupId = :groupId LIMIT 1")
+    suspend fun getGroup(groupId: Long): LibraryGroup?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertGroup(group: LibraryGroup): Long
 
@@ -17,6 +21,9 @@ interface LibraryGroupDao {
 
     @Delete
     suspend fun deleteGroup(group: LibraryGroup)
+
+    @Query("DELETE FROM library_groups WHERE groupId = :groupId")
+    suspend fun deleteGroupById(groupId: Long)
 }
 
 @Dao
@@ -61,7 +68,7 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE isInLibrary = 1 ORDER BY playCount DESC, title ASC")
     fun getLibrarySongsSortedByPlayCount(): Flow<List<Song>>
 
-    // --- FIX: Add new queries to filter songs by libraryGroupId ---
+    // --- Queries to filter songs by libraryGroupId ---
     @Query("""
         SELECT s.* FROM songs AS s
         INNER JOIN artists AS a ON s.artist = a.name
@@ -79,6 +86,15 @@ interface SongDao {
 
     @Query("SELECT * FROM songs WHERE isInLibrary = 1 AND libraryGroupId = :groupId ORDER BY playCount DESC, title ASC")
     fun getLibrarySongsSortedByPlayCount(groupId: Long): Flow<List<Song>>
+
+    @Query("SELECT * FROM songs WHERE artist = :artistName AND isInLibrary = 1 LIMIT 1")
+    suspend fun getArtistLibrarySong(artistName: String): Song?
+
+    @Query("UPDATE songs SET libraryGroupId = :groupId WHERE artist = :artistName AND isInLibrary = 1")
+    suspend fun moveArtistToLibraryGroup(artistName: String, groupId: Long)
+
+    @Query("SELECT songId FROM songs WHERE libraryGroupId = :groupId")
+    suspend fun getSongIdsInLibraryGroup(groupId: Long): List<Long>
 
 
     @Query("""
@@ -206,6 +222,9 @@ interface PlaylistDao {
     @Query("SELECT * FROM playlists ORDER BY name ASC")
     fun getAllPlaylists(): Flow<List<Playlist>>
 
+    @Query("SELECT * FROM playlists WHERE libraryGroupId = :groupId ORDER BY name ASC")
+    fun getPlaylistsByGroupId(groupId: Long): Flow<List<Playlist>>
+
     @Query("SELECT * FROM playlist_songs WHERE playlistId = :playlistId ORDER BY customOrderPosition ASC")
     suspend fun getPlaylistSongCrossRefs(playlistId: Long): List<PlaylistSongCrossRef>
 
@@ -224,6 +243,13 @@ interface PlaylistDao {
 
     @Query("SELECT COUNT(*) FROM playlist_songs WHERE songId = :songId")
     suspend fun getPlaylistCountForSong(songId: Long): Int
+
+    @Query("""
+        SELECT P.* FROM playlists AS P
+        INNER JOIN playlist_songs AS PS ON P.playlistId = PS.playlistId
+        WHERE PS.songId = :songId AND P.downloadAutomatically = 1
+        """)
+    suspend fun getAutoDownloadPlaylistsForSong(songId: Long): List<Playlist>
 }
 
 data class RecentPlay(
@@ -372,7 +398,6 @@ interface ArtistDao {
     """)
     fun getAllArtistsSortedByCustom(): Flow<List<ArtistWithSongs>>
 
-    // FIX: Add a new query to filter artists by libraryGroupId
     @Transaction
     @Query("""
         SELECT * FROM artists
@@ -494,6 +519,9 @@ interface ArtistDao {
             updateSongPositionInGroup(groupId, song.songId, index)
         }
     }
+
+    @Query("SELECT DISTINCT songId FROM artist_song_group_songs")
+    fun getAllSongIdsInGroups(): Flow<List<Long>>
 }
 
 @Dao

@@ -1,10 +1,13 @@
+// file: com/example/m/ui/main/MainScreen.kt
 package com.example.m.ui.main
 
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -45,18 +48,21 @@ fun MainScreen() {
         snackbarHost = { SnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
-            Column {
+            Column(Modifier.navigationBarsPadding()) {
                 nowPlaying?.let { metadata ->
-                    MiniPlayer(
-                        artworkUri = metadata.artworkUri?.toString() ?: "",
-                        songTitle = metadata.title?.toString() ?: "Unknown Title",
-                        artistName = metadata.artist?.toString() ?: "Unknown Artist",
-                        isPlaying = isPlaying,
-                        currentPosition = playbackState.currentPosition,
-                        totalDuration = playbackState.totalDuration,
-                        onPlayPauseClicked = mainViewModel::togglePlayPause,
-                        onContainerClicked = mainViewModel::showPlayerScreen
-                    )
+                    // Only show the MiniPlayer if there's a valid title.
+                    if (!metadata.title.isNullOrBlank()) {
+                        MiniPlayer(
+                            artworkUri = metadata.artworkUri?.toString() ?: "",
+                            songTitle = metadata.title.toString(),
+                            artistName = metadata.artist?.toString() ?: "Unknown Artist",
+                            isPlaying = isPlaying,
+                            currentPosition = playbackState.currentPosition,
+                            totalDuration = playbackState.totalDuration,
+                            onPlayPauseClicked = mainViewModel::togglePlayPause,
+                            onContainerClicked = mainViewModel::showPlayerScreen
+                        )
+                    }
                 }
 
                 NavigationBar(
@@ -103,7 +109,10 @@ fun MainScreen() {
         }
     ) { innerPadding ->
         Box(modifier = Modifier.padding(innerPadding)) {
-            AppNavHost(navController = navController)
+            AppNavHost(
+                navController = navController,
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
 

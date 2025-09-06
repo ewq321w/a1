@@ -1,3 +1,4 @@
+// file: com/example/m/ui/search/SearchScreen.kt
 package com.example.m.ui.search
 
 import androidx.activity.compose.BackHandler
@@ -32,8 +33,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import coil.ImageLoader
 import coil.compose.AsyncImage
+import com.example.m.data.database.LibraryGroup
 import com.example.m.ui.common.PlaylistActionUI
 import com.example.m.ui.common.getThumbnail
+import com.example.m.ui.library.components.ArtistGroupConflictDialog
+import com.example.m.ui.library.components.CreateLibraryGroupDialog
+import com.example.m.ui.library.components.SelectLibraryGroupDialog
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
@@ -45,8 +50,13 @@ fun SearchScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val allPlaylists by viewModel.allPlaylists.collectAsState()
+    val libraryGroups by viewModel.libraryGroups.collectAsState()
     val songsWithStatus by viewModel.songsWithStatus.collectAsState()
     val videoStreamsWithStatus by viewModel.videoStreamsWithStatus.collectAsState()
+    val conflictDialogState by remember { derivedStateOf { viewModel.conflictDialogState } }
+    val showCreateGroupDialog by remember { derivedStateOf { viewModel.showCreateGroupDialog } }
+    val showSelectGroupDialog by remember { derivedStateOf { viewModel.showSelectGroupDialog } }
+
 
     if (uiState.detailedViewCategory != null) {
         BackHandler {
@@ -54,9 +64,39 @@ fun SearchScreen(
         }
     }
 
+    if (showCreateGroupDialog) {
+        CreateLibraryGroupDialog(
+            onDismiss = { viewModel.dismissCreateGroupDialog() },
+            onCreate = { name -> viewModel.createGroupAndProceed(name) },
+            isFirstGroup = libraryGroups.isEmpty()
+        )
+    }
+
+    if (showSelectGroupDialog) {
+        SelectLibraryGroupDialog(
+            groups = libraryGroups,
+            onDismiss = { viewModel.dismissSelectGroupDialog() },
+            onGroupSelected = { groupId -> viewModel.onGroupSelectedForAddition(groupId) },
+            onCreateNewGroup = viewModel::prepareToCreateGroup
+        )
+    }
+
+    conflictDialogState?.let { state ->
+        ArtistGroupConflictDialog(
+            artistName = state.song.artist,
+            conflictingGroupName = state.conflict.conflictingGroupName,
+            targetGroupName = state.targetGroupName,
+            onDismiss = { viewModel.dismissConflictDialog() },
+            onMoveArtistToTargetGroup = { viewModel.resolveConflictByMoving() }
+        )
+    }
+
     PlaylistActionUI(
         handler = viewModel.playlistActionHandler,
-        allPlaylists = allPlaylists
+        allPlaylists = allPlaylists,
+        onCreatePlaylist = { name ->
+            viewModel.handlePlaylistCreation(name)
+        }
     )
 
     Scaffold(
@@ -136,9 +176,7 @@ fun SearchScreen(
                                 navController.navigate("searched_artist_detail/music/$encodedUrl")
                             },
                             onShowMore = viewModel::showDetailedView,
-                            onDownloadSong = viewModel::downloadSong,
                             onAddToLibrary = viewModel::addSongToLibrary,
-                            onAddToPlaylist = { result -> viewModel.playlistActionHandler.selectItemForPlaylist(result) },
                             onPlayNext = viewModel::onPlayNext,
                             onAddToQueue = viewModel::onAddToQueue,
                             onShuffleAlbum = viewModel::onShuffleAlbum
@@ -158,9 +196,7 @@ fun SearchScreen(
                                 navController.navigate("searched_artist_detail/video/$encodedUrl")
                             },
                             onShowMore = viewModel::showDetailedView,
-                            onDownloadSong = viewModel::downloadSong,
                             onAddToLibrary = viewModel::addSongToLibrary,
-                            onAddToPlaylist = { result -> viewModel.playlistActionHandler.selectItemForPlaylist(result) },
                             onPlayNext = viewModel::onPlayNext,
                             onAddToQueue = viewModel::onAddToQueue
                         )
@@ -168,7 +204,6 @@ fun SearchScreen(
                 }
             }
         } else {
-            // Full-screen detailed view is now drawn directly, not inside the padded Column
             DetailedView(
                 category = uiState.detailedViewCategory!!,
                 uiState = uiState,
@@ -188,9 +223,7 @@ fun SearchScreen(
                     val searchType = if (uiState.selectedFilter == "music_songs") "music" else "video"
                     navController.navigate("searched_artist_detail/$searchType/$encodedUrl")
                 },
-                onDownloadSong = viewModel::downloadSong,
                 onAddToLibrary = viewModel::addSongToLibrary,
-                onAddToPlaylist = { result -> viewModel.playlistActionHandler.selectItemForPlaylist(result) },
                 onPlayNext = viewModel::onPlayNext,
                 onAddToQueue = viewModel::onAddToQueue
             )
@@ -211,9 +244,7 @@ private fun DetailedView(
     onLoadMore: () -> Unit,
     onAlbumClicked: (AlbumResult) -> Unit,
     onArtistClicked: (ArtistResult) -> Unit,
-    onDownloadSong: (SearchResult) -> Unit,
     onAddToLibrary: (SearchResult) -> Unit,
-    onAddToPlaylist: (SearchResult) -> Unit,
     onPlayNext: (SearchResult) -> Unit,
     onAddToQueue: (SearchResult) -> Unit
 ) {
@@ -246,7 +277,6 @@ private fun DetailedView(
             modifier = Modifier
                 .padding(paddingValues)
                 .fillMaxSize()
-                .navigationBarsPadding()
         ) {
             when (category) {
                 SearchCategory.SONGS, SearchCategory.VIDEOS -> {
@@ -258,9 +288,7 @@ private fun DetailedView(
                             isSong = category == SearchCategory.SONGS,
                             imageLoader = imageLoader,
                             onPlay = { onSongClicked(index) },
-                            onDownload = { onDownloadSong(item.result) },
                             onAddToLibrary = { onAddToLibrary(item.result) },
-                            onAddToPlaylistClick = { onAddToPlaylist(item.result) },
                             onPlayNext = { onPlayNext(item.result) },
                             onAddToQueue = { onAddToQueue(item.result) }
                         )

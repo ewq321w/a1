@@ -1,3 +1,4 @@
+// file: com/example/m/di/AppModule.kt
 package com.example.m.di
 
 import android.app.PendingIntent
@@ -11,6 +12,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import coil.ImageLoader
 import coil.disk.DiskCache
+import coil.request.CachePolicy
 import com.example.m.MainActivity
 import com.example.m.data.database.*
 import dagger.Module
@@ -18,7 +20,9 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import okhttp3.Cache
 import okhttp3.OkHttpClient
+import java.io.File
 import javax.inject.Inject
 import javax.inject.Named
 import javax.inject.Provider
@@ -84,7 +88,7 @@ object AppModule {
     @Provides
     fun providePlaylistDao(database: AppDatabase): PlaylistDao = database.playlistDao()
 
-    // FIX: Add provider for the new DAO
+    // FIX: Add the missing provider for the new LibraryGroupDao
     @Singleton
     @Provides
     fun provideLibraryGroupDao(database: AppDatabase): LibraryGroupDao = database.libraryGroupDao()
@@ -139,8 +143,13 @@ object AppModule {
     @Singleton
     @Provides
     @Named("Coil")
-    fun provideCoilOkHttpClient(): OkHttpClient {
+    fun provideCoilOkHttpClient(
+        @ApplicationContext context: Context
+    ): OkHttpClient {
+        val cacheSize = 100L * 1024 * 1024 // 100 MB
+        val cache = Cache(File(context.cacheDir, "coil_okhttp_cache"), cacheSize)
         return OkHttpClient.Builder()
+            .cache(cache)
             .retryOnConnectionFailure(true)
             .build()
     }
@@ -160,6 +169,8 @@ object AppModule {
                     .maxSizePercent(0.1)
                     .build()
             }
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .networkCachePolicy(CachePolicy.ENABLED)
             .crossfade(true)
             .respectCacheHeaders(false)
             .build()

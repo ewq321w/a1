@@ -27,22 +27,22 @@ class PlaylistManager @Inject constructor(
 
     fun addItemToPlaylist(playlistId: Long, item: Any) {
         scope.launch {
-            val song = getSongForItem(item)
+            val song = getSongForItem(item, null)
             addSongToPlaylistInternal(song, playlistId)
         }
     }
 
-    fun createPlaylistAndAddItem(playlistName: String, item: Any) {
+    fun createPlaylistAndAddItem(playlistName: String, item: Any, groupId: Long) {
         scope.launch {
-            val newPlaylistId = playlistDao.insertPlaylist(Playlist(name = playlistName.trim()))
-            val song = getSongForItem(item)
+            val newPlaylistId = playlistDao.insertPlaylist(Playlist(name = playlistName.trim(), libraryGroupId = groupId))
+            val song = getSongForItem(item, groupId)
             addSongToPlaylistInternal(song, newPlaylistId)
         }
     }
 
-    fun createEmptyPlaylist(playlistName: String) {
+    fun createEmptyPlaylist(playlistName: String, groupId: Long) {
         scope.launch {
-            playlistDao.insertPlaylist(Playlist(name = playlistName.trim()))
+            playlistDao.insertPlaylist(Playlist(name = playlistName.trim(), libraryGroupId = groupId))
         }
     }
 
@@ -64,7 +64,7 @@ class PlaylistManager @Inject constructor(
         }
     }
 
-    suspend fun getSongForItem(item: Any): Song {
+    suspend fun getSongForItem(item: Any, libraryGroupId: Long?): Song {
         return when (item) {
             is Song -> item
             is StreamInfoItem -> {
@@ -79,7 +79,8 @@ class PlaylistManager @Inject constructor(
                         artist = item.uploaderName ?: "Unknown Artist",
                         duration = item.duration,
                         thumbnailUrl = getHighQualityThumbnailUrl(videoId),
-                        localFilePath = null
+                        localFilePath = null,
+                        libraryGroupId = libraryGroupId
                     )
                     val finalSong = songDao.upsertSong(newSong)
                     libraryRepository.linkSongToArtist(finalSong)

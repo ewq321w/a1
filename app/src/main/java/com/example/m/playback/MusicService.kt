@@ -1,9 +1,8 @@
+// file: com/example/m/playback/MusicService.kt
 package com.example.m.playback
 
 import android.app.Service
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.drawable.BitmapDrawable
 import androidx.core.net.toUri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -13,12 +12,11 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
-import coil.ImageLoader
-import coil.request.ImageRequest
 import com.example.m.data.database.PlaybackStateDao
 import com.example.m.data.database.SongDao
 import com.example.m.data.repository.YoutubeRepository
 import com.example.m.managers.PlaylistManager
+import com.example.m.managers.ThumbnailProcessor
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,9 +24,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
 import javax.inject.Inject
-import kotlin.math.min
 
 @AndroidEntryPoint
 class MusicService : MediaSessionService() {
@@ -43,7 +39,7 @@ class MusicService : MediaSessionService() {
     lateinit var mediaSession: MediaSession
 
     @Inject
-    lateinit var imageLoader: ImageLoader
+    lateinit var thumbnailProcessor: ThumbnailProcessor
 
     @Inject
     lateinit var playbackStateDao: PlaybackStateDao
@@ -161,7 +157,7 @@ class MusicService : MediaSessionService() {
             .setArtworkUri(song.thumbnailUrl.toUri())
 
         if (withArtworkData) {
-            val artworkData = getCroppedSquareBitmap(song.thumbnailUrl)
+            val artworkData = thumbnailProcessor.getCroppedSquareBitmap(song.thumbnailUrl)
             if (artworkData != null) {
                 mediaMetadataBuilder.setArtworkData(artworkData, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
             }
@@ -188,55 +184,28 @@ class MusicService : MediaSessionService() {
     }
 
     private fun updateArtworkForCurrentItem() {
-        // This coroutine runs on the IO dispatcher by default (from serviceScope)
         serviceScope.launch {
-            // FIX: Switch to the main thread to safely access the player state
             val mediaItemToUpdate = withContext(Dispatchers.Main) {
                 player.currentMediaItem
             } ?: return@launch
 
             val mediaId = mediaItemToUpdate.mediaId
 
-            // Perform heavy work (DB, network, image processing) on the background thread
             val song = songDao.getSongByUrl(mediaId) ?: songDao.getSongByFilePath(mediaId) ?: return@launch
 
-            val artworkBytes = getCroppedSquareBitmap(song.thumbnailUrl)
+            val artworkBytes = thumbnailProcessor.getCroppedSquareBitmap(song.thumbnailUrl)
             if (artworkBytes != null) {
                 val newMetadata = mediaItemToUpdate.mediaMetadata.buildUpon()
                     .setArtworkData(artworkBytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
                     .build()
                 val newMediaItem = mediaItemToUpdate.buildUpon().setMediaMetadata(newMetadata).build()
 
-                // FIX: Switch back to the main thread to safely update the player
                 withContext(Dispatchers.Main) {
                     if (player.currentMediaItem?.mediaId == mediaId) {
                         player.replaceMediaItem(player.currentMediaItemIndex, newMediaItem)
                     }
                 }
             }
-        }
-    }
-
-    private suspend fun getCroppedSquareBitmap(imageUrl: String?): ByteArray? {
-        if (imageUrl.isNullOrBlank()) return null
-        return try {
-            val request = ImageRequest.Builder(this)
-                .data(imageUrl)
-                .allowHardware(false)
-                .build()
-            val result = (imageLoader.execute(request).drawable as? BitmapDrawable)?.bitmap ?: return null
-            val width = result.width
-            val height = result.height
-            val size = min(width, height)
-            val x = (width - size) / 2
-            val y = (height - size) / 2
-            val squaredBitmap = Bitmap.createBitmap(result, x, y, size, size)
-            val stream = ByteArrayOutputStream()
-            squaredBitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
-            stream.toByteArray()
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
         }
     }
 

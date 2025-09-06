@@ -99,14 +99,11 @@ fun SearchResultItem(
     isSong: Boolean,
     imageLoader: ImageLoader,
     onPlay: () -> Unit,
-    onDownload: () -> Unit,
     onAddToLibrary: () -> Unit,
-    onAddToPlaylistClick: () -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
-    val isDownloading = downloadStatus is DownloadStatus.Downloading || downloadStatus is DownloadStatus.Queued
     val showStatusIcon = downloadStatus != null || result.isDownloaded || result.isInLibrary
 
     Row(
@@ -243,26 +240,6 @@ fun SearchResultItem(
                     enabled = !result.isInLibrary,
                     onClick = {
                         onAddToLibrary()
-                        showMenu = false
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Add to Playlist") },
-                    onClick = {
-                        onAddToPlaylistClick()
-                        showMenu = false
-                    }
-                )
-                val downloadText = when {
-                    isDownloading -> "Downloading..."
-                    result.isDownloaded -> "Downloaded"
-                    else -> "Download"
-                }
-                DropdownMenuItem(
-                    text = { Text(downloadText) },
-                    enabled = !isDownloading && !result.isDownloaded,
-                    onClick = {
-                        onDownload()
                         showMenu = false
                     }
                 )

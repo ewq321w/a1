@@ -1,3 +1,4 @@
+// file: com/example/m/ui/library/details/ArtistDetailScreen.kt
 package com.example.m.ui.library.details
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -24,6 +25,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.m.data.database.Song
 import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.library.components.*
+import kotlinx.coroutines.flow.collectLatest
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -43,6 +45,7 @@ fun ArtistDetailScreen(
     val sortOrder by viewModel.sortOrder.collectAsState()
     val artistName = artist?.name ?: "Artist"
     var showMenu by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
     val itemToAddToPlaylist by remember { derivedStateOf { viewModel.itemToAddToPlaylist } }
     val songToAddToGroup by remember { derivedStateOf { viewModel.songToAddToGroup } }
@@ -56,6 +59,12 @@ fun ArtistDetailScreen(
     LaunchedEffect(Unit) {
         viewModel.navigateToArtist.collect { artistId ->
             onArtistClick(artistId)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.userMessage.collectLatest { message ->
+            snackbarHostState.showSnackbar(message)
         }
     }
 
@@ -149,6 +158,7 @@ fun ArtistDetailScreen(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text(artistName, maxLines = 1, modifier = Modifier.basicMarquee()) },
@@ -211,7 +221,12 @@ fun ArtistDetailScreen(
         } else {
             val listState = rememberLazyListState()
 
-            LazyColumn(state = listState, modifier = Modifier.padding(paddingValues)) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .padding(paddingValues)
+                    .fillMaxSize()
+            ) {
                 items(displayList, key = { item ->
                     when (item) {
                         is ArtistDetailListItem.GroupHeader -> "group-${item.data.group.groupId}"
@@ -222,7 +237,6 @@ fun ArtistDetailScreen(
                         is ArtistDetailListItem.GroupHeader -> {
                             GroupHeaderItem(
                                 data = item.data,
-                                // FIX: Pass the thumbnail processor function from the view model
                                 processUrls = viewModel::processThumbnails,
                                 onPlayClick = { viewModel.playGroup(item.data.group.groupId) },
                                 onShuffleClick = { viewModel.shuffleGroup(item.data.group.groupId) },
@@ -243,6 +257,7 @@ fun ArtistDetailScreen(
                                 onShuffleClick = { viewModel.onShuffleSong(item.songForList.song) },
                                 onGoToArtistClick = { viewModel.onGoToArtist(item.songForList.song) },
                                 onDownloadClick = { viewModel.downloadSong(item.songForList.song) },
+                                onDeleteDownloadClick = { viewModel.deleteSongDownload(item.songForList.song) },
                                 onAddToGroupClick = { viewModel.selectSongToAddToGroup(item.songForList.song) }
                             )
                         }
@@ -256,7 +271,7 @@ fun ArtistDetailScreen(
 @Composable
 fun GroupHeaderItem(
     data: GroupHeaderData,
-    processUrls: suspend (List<String>) -> List<String>, // FIX: Add processUrls parameter
+    processUrls: suspend (List<String>) -> List<String>,
     onPlayClick: () -> Unit,
     onShuffleClick: () -> Unit,
     onClick: () -> Unit,
@@ -274,7 +289,6 @@ fun GroupHeaderItem(
         },
         supportingContent = { Text("${data.songCount} songs") },
         leadingContent = {
-            // FIX: Replaced the deleted 'FolderWithThumbnails' with the correct implementation
             Box(
                 modifier = Modifier.size(54.dp),
                 contentAlignment = Alignment.Center

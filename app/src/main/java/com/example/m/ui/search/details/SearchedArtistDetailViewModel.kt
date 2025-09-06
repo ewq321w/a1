@@ -1,3 +1,4 @@
+// file: com/example/m/ui/search/details/SearchedArtistDetailViewModel.kt
 package com.example.m.ui.search.details
 
 import androidx.compose.runtime.getValue
@@ -7,15 +8,15 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import coil.ImageLoader
-import com.example.m.data.database.Playlist
-import com.example.m.data.database.Song
-import com.example.m.data.database.SongDao
+import com.example.m.data.PreferencesManager
+import com.example.m.data.database.*
 import com.example.m.data.repository.LibraryRepository
 import com.example.m.data.repository.YoutubeRepository
 import com.example.m.managers.DownloadStatus
 import com.example.m.managers.DownloadStatusManager
 import com.example.m.managers.PlaylistManager
 import com.example.m.playback.MusicServiceConnection
+import com.example.m.ui.library.ConflictDialogState
 import com.example.m.ui.search.SearchResult
 import com.example.m.ui.search.SearchResultForList
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -23,6 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.channel.ChannelInfo
 import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
@@ -46,7 +48,9 @@ class SearchedArtistDetailViewModel @Inject constructor(
     private val songDao: SongDao,
     private val libraryRepository: LibraryRepository,
     private val downloadStatusManager: DownloadStatusManager,
-    val imageLoader: ImageLoader
+    val imageLoader: ImageLoader,
+    private val preferencesManager: PreferencesManager,
+    private val libraryGroupDao: LibraryGroupDao
 ) : ViewModel() {
 
     private val channelUrl: String = savedStateHandle["channelUrl"]!!
@@ -58,17 +62,21 @@ class SearchedArtistDetailViewModel @Inject constructor(
     private val localLibrary: StateFlow<List<Song>> = songDao.getAllSongs()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val allPlaylists: StateFlow<List<Playlist>> = libraryRepository.getAllPlaylists()
+    val libraryGroups: StateFlow<List<LibraryGroup>> = libraryGroupDao.getAllGroups()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    var itemToAddToPlaylist by mutableStateOf<Any?>(null)
-        private set
-    var showCreatePlaylistDialog by mutableStateOf(false)
-        private set
-    private var pendingItem: Any? = null
 
     var showConfirmAddAllDialog by mutableStateOf(false)
         private set
+
+    var conflictDialogState by mutableStateOf<ConflictDialogState?>(null)
+        private set
+
+    var showCreateGroupDialog by mutableStateOf(false)
+        private set
+    var showSelectGroupDialog by mutableStateOf(false)
+        private set
+    private var pendingAction by mutableStateOf<PendingAction?>(null)
+
 
     private var songUpdateJob: Job? = null
 
@@ -179,8 +187,7 @@ class SearchedArtistDetailViewModel @Inject constructor(
     fun shuffle() {
         val songsToPlay = uiState.value.songs
         if (songsToPlay.isNotEmpty()) {
-            val (downloaded, remote) = songsToPlay.partition { it.result.isDownloaded }
-            val finalShuffledList = (downloaded.shuffled() + remote.shuffled()).map { it.result.streamInfo }
+            val finalShuffledList = songsToPlay.shuffled().map { it.result.streamInfo }
             viewModelScope.launch {
                 musicServiceConnection.playSongList(finalShuffledList, 0)
             }
@@ -192,7 +199,8 @@ class SearchedArtistDetailViewModel @Inject constructor(
     }
 
     fun confirmAddAllToLibrary() {
-        addAllSongsToLibrary()
+        val songsToAdd = uiState.value.songs.map { it.result.streamInfo }
+        handleLibraryAction(PendingAction.AddAllToLibrary(songsToAdd))
         showConfirmAddAllDialog = false
     }
 
@@ -200,35 +208,118 @@ class SearchedArtistDetailViewModel @Inject constructor(
         showConfirmAddAllDialog = false
     }
 
-    private fun addAllSongsToLibrary() {
+    private suspend fun addSongToLibraryAndLink(song: Song, groupId: Long) {
+        val updatedSong = song.copy(
+            isInLibrary = true,
+            dateAddedTimestamp = System.currentTimeMillis(),
+            libraryGroupId = groupId
+        )
+        songDao.updateSong(updatedSong)
+        libraryRepository.linkSongToArtist(updatedSong)
+    }
+
+    fun addSongToLibrary(streamInfo: StreamInfoItem) {
+        handleLibraryAction(PendingAction.AddToLibrary(streamInfo))
+    }
+
+    private fun handleLibraryAction(action: PendingAction) {
         viewModelScope.launch(Dispatchers.IO) {
-            val songsToAdd = uiState.value.songs.map { it.result.streamInfo }
-            for (streamInfo in songsToAdd) {
-                val song = playlistManager.getSongForItem(streamInfo)
-                if (!song.isInLibrary) {
-                    val updatedSong = song.copy(
-                        isInLibrary = true,
-                        dateAddedTimestamp = System.currentTimeMillis()
-                    )
-                    songDao.updateSong(updatedSong)
-                    libraryRepository.linkSongToArtist(updatedSong)
+            pendingAction = action
+            if (libraryGroups.value.isEmpty()) {
+                withContext(Dispatchers.Main) { showCreateGroupDialog = true }
+                return@launch
+            }
+
+            val activeGroupId = preferencesManager.activeLibraryGroupId
+            if (activeGroupId == 0L) {
+                withContext(Dispatchers.Main) { showSelectGroupDialog = true }
+                return@launch
+            }
+            proceedWithAction(action, activeGroupId)
+        }
+    }
+
+    private suspend fun proceedWithAction(action: PendingAction, groupId: Long) {
+        when (action) {
+            is PendingAction.AddToLibrary -> {
+                val song = playlistManager.getSongForItem(action.item, groupId)
+                if (song.isInLibrary) return
+                proceedWithAddingToLibrary(song, groupId)
+            }
+            is PendingAction.AddAllToLibrary -> {
+                action.items.forEach { streamInfo ->
+                    val song = playlistManager.getSongForItem(streamInfo, groupId)
+                    if (!song.isInLibrary) {
+                        proceedWithAddingToLibrary(song, groupId)
+                    }
                 }
             }
         }
     }
 
-    fun addSongToLibrary(streamInfo: StreamInfoItem) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val song = playlistManager.getSongForItem(streamInfo)
+    private suspend fun proceedWithAddingToLibrary(song: Song, targetGroupId: Long) {
+        val conflict = libraryRepository.checkArtistGroupConflict(song.artist, targetGroupId)
+        if (conflict != null && !song.isInLibrary) {
+            withContext(Dispatchers.Main) {
+                val targetGroup = libraryGroupDao.getGroup(targetGroupId)
+                if (targetGroup != null) {
+                    conflictDialogState = ConflictDialogState(song, targetGroupId, targetGroup.name, conflict)
+                }
+            }
+        } else {
             if (!song.isInLibrary) {
-                val updatedSong = song.copy(
-                    isInLibrary = true,
-                    dateAddedTimestamp = System.currentTimeMillis()
-                )
-                songDao.updateSong(updatedSong)
-                libraryRepository.linkSongToArtist(updatedSong)
+                addSongToLibraryAndLink(song, targetGroupId)
             }
         }
+    }
+
+    fun createGroupAndProceed(groupName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val action = pendingAction ?: return@launch
+            val newGroupId = libraryGroupDao.insertGroup(LibraryGroup(name = groupName.trim()))
+            withContext(Dispatchers.Main) {
+                preferencesManager.activeLibraryGroupId = newGroupId
+            }
+            proceedWithAction(action, newGroupId)
+            pendingAction = null
+        }
+        showCreateGroupDialog = false
+    }
+
+    fun onGroupSelectedForAddition(groupId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val action = pendingAction ?: return@launch
+            withContext(Dispatchers.Main) {
+                preferencesManager.activeLibraryGroupId = groupId
+            }
+            proceedWithAction(action, groupId)
+            pendingAction = null
+        }
+        showSelectGroupDialog = false
+    }
+
+
+    fun dismissCreateGroupDialog() {
+        showCreateGroupDialog = false
+        pendingAction = null
+    }
+
+    fun dismissSelectGroupDialog() {
+        showSelectGroupDialog = false
+        pendingAction = null
+    }
+
+    fun resolveConflictByMoving() {
+        val state = conflictDialogState ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            libraryRepository.moveArtistToLibraryGroup(state.song.artist, state.targetGroupId)
+            addSongToLibraryAndLink(state.song, state.targetGroupId)
+        }
+        dismissConflictDialog()
+    }
+
+    fun dismissConflictDialog() {
+        conflictDialogState = null
     }
 
     fun onPlayNext(streamInfo: StreamInfoItem) {
@@ -239,51 +330,8 @@ class SearchedArtistDetailViewModel @Inject constructor(
         musicServiceConnection.addToQueue(streamInfo)
     }
 
-    fun downloadSong(item: StreamInfoItem) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val song = playlistManager.getSongForItem(item)
-            if (!song.isInLibrary) {
-                val updatedSong = song.copy(
-                    isInLibrary = true,
-                    dateAddedTimestamp = System.currentTimeMillis()
-                )
-                songDao.updateSong(updatedSong)
-                libraryRepository.linkSongToArtist(updatedSong)
-            }
-            playlistManager.startDownload(song)
-        }
-    }
-
-    fun selectItemForPlaylist(item: StreamInfoItem) {
-        itemToAddToPlaylist = item
-    }
-
-    fun dismissAddToPlaylistSheet() {
-        itemToAddToPlaylist = null
-    }
-
-    fun onPlaylistSelectedForAddition(playlistId: Long) {
-        itemToAddToPlaylist?.let { item ->
-            playlistManager.addItemToPlaylist(playlistId, item)
-        }
-        dismissAddToPlaylistSheet()
-    }
-
-    fun prepareToCreatePlaylist() {
-        pendingItem = itemToAddToPlaylist
-        dismissAddToPlaylistSheet()
-        showCreatePlaylistDialog = true
-    }
-
-    fun createPlaylistAndAddPendingItem(name: String) {
-        pendingItem?.let { item ->
-            playlistManager.createPlaylistAndAddItem(name, item)
-            pendingItem = null
-        }
-        dismissCreatePlaylistDialog()
-    }
-
-    fun dismissCreatePlaylistDialog() {
-        showCreatePlaylistDialog = false
+    fun prepareToCreateGroup() {
+        showSelectGroupDialog = false
+        showCreateGroupDialog = true
     }
 }

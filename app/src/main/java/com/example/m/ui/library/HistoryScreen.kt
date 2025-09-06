@@ -1,9 +1,13 @@
+// file: com/example/m/ui/library/HistoryScreen.kt
 package com.example.m.ui.library
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -11,14 +15,13 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.m.data.database.LibraryGroup
 import com.example.m.data.database.Song
 import com.example.m.ui.common.getHighQualityThumbnailUrl
-import com.example.m.ui.library.components.AddToPlaylistSheet
-import com.example.m.ui.library.components.ConfirmDeleteDialog
-import com.example.m.ui.library.components.CreatePlaylistDialog
-import com.example.m.ui.library.components.EmptyStateMessage
-import com.example.m.ui.library.components.SongItem
+import com.example.m.ui.library.components.*
+import kotlinx.coroutines.flow.collectLatest
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
 private enum class ClearAction { ALL, KEEP_50, KEEP_100 }
@@ -32,16 +35,55 @@ fun HistoryScreen(
 ) {
     val history by viewModel.history.collectAsState()
     val allPlaylists by viewModel.allPlaylists.collectAsState()
+    val libraryGroups by viewModel.libraryGroups.collectAsState()
     val sheetState = rememberModalBottomSheetState()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     val showCreatePlaylistDialog by remember { derivedStateOf { viewModel.showCreatePlaylistDialog } }
     val itemToAddToPlaylist by remember { derivedStateOf { viewModel.itemToAddToPlaylist } }
     var clearActionPending by remember { mutableStateOf<ClearAction?>(null) }
+    val conflictDialogState by remember { derivedStateOf { viewModel.conflictDialogState } }
+    val showCreateGroupDialog by remember { derivedStateOf { viewModel.showCreateGroupDialog } }
+    val showSelectGroupDialog by remember { derivedStateOf { viewModel.showSelectGroupDialog } }
+
 
     LaunchedEffect(Unit) {
         viewModel.navigateToArtist.collect { artistId ->
             onArtistClick(artistId)
         }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.userMessage.collectLatest { message ->
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+
+    if (showCreateGroupDialog) {
+        CreateLibraryGroupDialog(
+            onDismiss = { viewModel.dismissCreateGroupDialog() },
+            onCreate = { name -> viewModel.createGroupAndProceed(name) },
+            isFirstGroup = libraryGroups.isEmpty()
+        )
+    }
+
+    if (showSelectGroupDialog) {
+        SelectLibraryGroupDialog(
+            groups = libraryGroups,
+            onDismiss = { viewModel.dismissSelectGroupDialog() },
+            onGroupSelected = { groupId -> viewModel.onGroupSelectedForAddition(groupId) },
+            onCreateNewGroup = viewModel::prepareToCreateGroup
+        )
+    }
+
+    conflictDialogState?.let { state ->
+        ArtistGroupConflictDialog(
+            artistName = state.song.artist,
+            conflictingGroupName = state.conflict.conflictingGroupName,
+            targetGroupName = state.targetGroupName,
+            onDismiss = { viewModel.dismissConflictDialog() },
+            onMoveArtistToTargetGroup = { viewModel.resolveConflictByMoving() }
+        )
     }
 
     if (showCreatePlaylistDialog) {
@@ -99,6 +141,7 @@ fun HistoryScreen(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("History") },
@@ -150,7 +193,7 @@ fun HistoryScreen(
             LazyColumn(
                 modifier = Modifier
                     .padding(innerScaffoldPadding)
-                    .navigationBarsPadding()
+                    .fillMaxSize()
             ) {
                 itemsIndexed(history, key = { _, item -> item.entry.logId }) { index, item ->
                     val song = item.entry.song
@@ -165,6 +208,7 @@ fun HistoryScreen(
                         onShuffleClick = { viewModel.onShuffleSong(song) },
                         onAddToLibraryClick = { viewModel.addToLibrary(song) },
                         onDownloadClick = { viewModel.download(song) },
+                        onDeleteDownloadClick = { viewModel.deleteSongDownload(song) },
                         onDeleteFromHistoryClick = { viewModel.deleteFromHistory(item.entry) }
                     )
                 }

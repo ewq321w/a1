@@ -1,3 +1,4 @@
+// file: com/example/m/ui/library/components/LibraryCommon.kt
 package com.example.m.ui.library.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -58,13 +59,27 @@ fun SongItem(
     onRemoveFromPlaylistClick: (() -> Unit)? = null,
     onAddToLibraryClick: (() -> Unit)? = null,
     onDownloadClick: (() -> Unit)? = null,
+    onDeleteDownloadClick: (() -> Unit)? = null,
     onDeleteFromHistoryClick: (() -> Unit)? = null,
     onAddToGroupClick: (() -> Unit)? = null,
     onRemoveFromGroupClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     val isDownloading = downloadStatus is DownloadStatus.Downloading || downloadStatus is DownloadStatus.Queued
+
+    if (showDeleteConfirmDialog) {
+        ConfirmDeleteDialog(
+            itemType = "download for",
+            itemName = song.title,
+            onDismiss = { showDeleteConfirmDialog = false },
+            onConfirm = {
+                onDeleteDownloadClick?.invoke()
+                showDeleteConfirmDialog = false
+            }
+        )
+    }
 
     val displayTitle = remember(song.title) {
         song.title.replace(" (Remastered)", "")
@@ -179,16 +194,24 @@ fun SongItem(
                             onClick = { it(); showMenu = false }
                         )
                     }
-                    onDownloadClick?.let {
+                    onDownloadClick?.let { downloadAction ->
+                        val isDownloaded = song.localFilePath != null
                         val downloadText = when {
                             isDownloading -> "Downloading..."
-                            song.localFilePath != null -> "Downloaded"
+                            isDownloaded -> "Delete download"
                             else -> "Download"
                         }
                         DropdownMenuItem(
                             text = { Text(downloadText) },
-                            enabled = !isDownloading && song.localFilePath == null,
-                            onClick = { it(); showMenu = false }
+                            enabled = !isDownloading,
+                            onClick = {
+                                if (isDownloaded) {
+                                    showDeleteConfirmDialog = true
+                                } else {
+                                    downloadAction()
+                                }
+                                showMenu = false
+                            }
                         )
                     }
                     DropdownMenuItem(text = { Text("Add to playlist") }, onClick = { onAddToPlaylistClick(); showMenu = false })

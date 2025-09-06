@@ -27,9 +27,9 @@ import javax.inject.Provider
         ArtistGroup::class,
         ArtistSongGroup::class,
         ArtistSongGroupSongCrossRef::class,
-        LibraryGroup::class // FIX: Add the new entity
+        LibraryGroup::class
     ],
-    version = 28, // FIX: Increment the database version
+    version = 30,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -42,19 +42,14 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun playbackStateDao(): PlaybackStateDao
     abstract fun artistDao(): ArtistDao
     abstract fun artistGroupDao(): ArtistGroupDao
-    abstract fun libraryGroupDao(): LibraryGroupDao // FIX: Add the new DAO
+    abstract fun libraryGroupDao(): LibraryGroupDao
 
-    // FIX: Callback to pre-populate the database with a default group
     class AppDatabaseCallback @Inject constructor(
         private val database: Provider<AppDatabase>
     ) : RoomDatabase.Callback() {
         private val applicationScope = CoroutineScope(Dispatchers.IO)
         override fun onCreate(db: SupportSQLiteDatabase) {
             super.onCreate(db)
-            applicationScope.launch {
-                val dao = database.get().libraryGroupDao()
-                dao.insertGroup(LibraryGroup(groupId = 1, name = "My Library"))
-            }
         }
     }
 
@@ -64,12 +59,13 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun getDatabase(
             context: Context,
-            callback: AppDatabaseCallback // FIX: Accept the callback
+            callback: AppDatabase.AppDatabaseCallback
         ): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val dbFile = context.getDatabasePath("music_app_database")
-                if (dbFile.parentFile != null && !dbFile.parentFile.exists()) {
-                    dbFile.parentFile.mkdirs()
+                val parentDir = dbFile.parentFile
+                if (parentDir != null && !parentDir.exists()) {
+                    parentDir.mkdirs()
                 }
                 Log.d("AppDatabase", "Database path determined by system: ${dbFile.absolutePath}")
 
@@ -78,8 +74,8 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "music_app_database"
                 )
-                    .fallbackToDestructiveMigration()
-                    .addCallback(callback) // FIX: Add the callback to the builder
+                    .fallbackToDestructiveMigration(dropAllTables = true)
+                    .addCallback(callback)
                     .build()
                 INSTANCE = instance
                 instance

@@ -32,9 +32,7 @@ fun VideoSearchLayout(
     onPlaylistClick: (AlbumResult) -> Unit,
     onChannelClick: (ArtistResult) -> Unit,
     onShowMore: (SearchCategory) -> Unit,
-    onDownloadSong: (SearchResult) -> Unit,
     onAddToLibrary: (SearchResult) -> Unit,
-    onAddToPlaylist: (SearchResult) -> Unit,
     onPlayNext: (SearchResult) -> Unit,
     onAddToQueue: (SearchResult) -> Unit
 ) {
@@ -76,9 +74,7 @@ fun VideoSearchLayout(
                     isSong = false,
                     imageLoader = imageLoader,
                     onPlay = { onVideoClick(index) },
-                    onDownload = { onDownloadSong(item.result) },
                     onAddToLibrary = { onAddToLibrary(item.result) },
-                    onAddToPlaylistClick = { onAddToPlaylist(item.result) },
                     onPlayNext = { onPlayNext(item.result) },
                     onAddToQueue = { onAddToQueue(item.result) }
                 )

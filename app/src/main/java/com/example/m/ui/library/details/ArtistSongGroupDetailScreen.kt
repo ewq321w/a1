@@ -1,8 +1,10 @@
+// file: com/example/m/ui/library/details/ArtistSongGroupDetailScreen.kt
 package com.example.m.ui.library.details
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -152,7 +154,11 @@ fun ArtistSongGroupDetailScreen(
         if (songs.isEmpty()) {
             EmptyStateMessage(message = "This group is empty.")
         } else {
-            LazyColumn(modifier = Modifier.padding(paddingValues)) {
+            LazyColumn(
+                modifier = Modifier
+                    .padding(paddingValues)
+                    .fillMaxSize()
+            ) {
                 itemsIndexed(songs, key = { _, item -> item.song.songId }) { index, item ->
                     SongItem(
                         song = item.song,

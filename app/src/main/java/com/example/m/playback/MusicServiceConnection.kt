@@ -1,3 +1,4 @@
+// file: com/example/m/playback/MusicServiceConnection.kt
 package com.example.m.playback
 
 import android.content.ComponentName
@@ -11,7 +12,6 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaBrowser
 import androidx.media3.session.SessionToken
-import coil.ImageLoader
 import com.example.m.data.database.*
 import com.example.m.data.repository.YoutubeRepository
 import com.example.m.managers.PlaybackListManager
@@ -37,10 +37,9 @@ class MusicServiceConnection @Inject constructor(
     private val songDao: SongDao,
     private val listeningHistoryDao: ListeningHistoryDao,
     private val playbackStateDao: PlaybackStateDao,
-    private val imageLoader: ImageLoader, // Retain for potential future use if direct bitmap needed
     private val playlistManager: PlaylistManager,
     private val playbackListManager: PlaybackListManager,
-    private val thumbnailProcessor: ThumbnailProcessor // Inject ThumbnailProcessor
+    private val thumbnailProcessor: ThumbnailProcessor
 ) {
     private val serviceComponent = ComponentName(context, MusicService::class.java)
     private var mediaBrowserFuture: ListenableFuture<MediaBrowser>
@@ -346,16 +345,18 @@ class MusicServiceConnection @Inject constructor(
     }
 
     private suspend fun createMediaMetadata(song: Song): MediaMetadata {
-        // FIX: Use the ThumbnailProcessor to get a square-cropped thumbnail URI.
-        val squareThumbnailUri = thumbnailProcessor.process(listOf(song.thumbnailUrl)).firstOrNull()?.toUri()
-            ?: song.thumbnailUrl.toUri() // Fallback to original if processing fails
+        val artworkBytes = thumbnailProcessor.getCroppedSquareBitmap(song.thumbnailUrl)
 
-        return MediaMetadata.Builder()
+        val builder = MediaMetadata.Builder()
             .setTitle(song.title)
             .setArtist(song.artist)
-            // Use the square thumbnail URI for artwork
-            .setArtworkUri(squareThumbnailUri)
-            .build()
+            .setArtworkUri(song.thumbnailUrl.toUri())
+
+        artworkBytes?.let {
+            builder.setArtworkData(it, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+        }
+
+        return builder.build()
     }
 
     private suspend fun createLocalMediaItem(song: Song, uri: Uri): MediaItem {

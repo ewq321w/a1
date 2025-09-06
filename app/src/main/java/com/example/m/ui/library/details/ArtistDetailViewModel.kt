@@ -1,3 +1,4 @@
+// file: com/example/m/ui/library/details/ArtistDetailViewModel.kt
 package com.example.m.ui.library.details
 
 import androidx.compose.runtime.getValue
@@ -8,6 +9,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.m.data.PreferencesManager
 import com.example.m.data.database.*
+import com.example.m.data.repository.AutoDownloadConflict
 import com.example.m.data.repository.LibraryRepository
 import com.example.m.managers.DownloadStatusManager
 import com.example.m.managers.PlaylistManager
@@ -61,7 +63,6 @@ class ArtistDetailViewModel @Inject constructor(
     val artist: StateFlow<Artist?> = artistDao.getArtistById(artistId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    // FIX: Use the new DAO function that fetches only library songs for the artist.
     private val allSongsForArtistFlow: Flow<List<Song>> = artistDao.getArtistWithLibrarySongs(artistId).map { it?.songs ?: emptyList() }
 
     private val songGroupsForArtistFlow: Flow<List<ArtistSongGroupWithSongs>> = artistDao.getAllArtistSongGroupsWithSongsOrdered(artistId)
@@ -134,9 +135,11 @@ class ArtistDetailViewModel @Inject constructor(
     private val _navigateToArtist = MutableSharedFlow<Long>()
     val navigateToArtist: SharedFlow<Long> = _navigateToArtist.asSharedFlow()
 
+    private val _userMessage = MutableSharedFlow<String>()
+    val userMessage: SharedFlow<String> = _userMessage.asSharedFlow()
+
     fun onSongSelected(clickedSong: Song) {
         viewModelScope.launch {
-            // When a song is selected, we only want to play the list of UNGROUPED songs
             val allSongs = allSongsForArtistFlow.first()
             val groups = songGroupsForArtistFlow.first()
             val groupedSongIds = groups.flatMap { it.songs }.map { it.songId }.toSet()
@@ -153,6 +156,23 @@ class ArtistDetailViewModel @Inject constructor(
         playlistManager.startDownload(song)
     }
 
+    fun deleteSongDownload(song: Song) {
+        viewModelScope.launch {
+            val conflict = libraryRepository.checkForAutoDownloadConflict(song)
+            if (conflict != null) {
+                val message = when (conflict) {
+                    is AutoDownloadConflict.Artist ->
+                        "Cannot delete download. Auto-download is enabled for artist '${conflict.name}'."
+                    is AutoDownloadConflict.Playlist ->
+                        "Cannot delete download. Song is in auto-downloading playlist '${conflict.name}'."
+                }
+                _userMessage.emit(message)
+            } else {
+                libraryRepository.deleteDownloadedFileForSong(song)
+            }
+        }
+    }
+
     fun playAll() {
         viewModelScope.launch {
             val flatSongList = displayList.first()
@@ -167,8 +187,7 @@ class ArtistDetailViewModel @Inject constructor(
         viewModelScope.launch {
             val allSongs = allSongsForArtistFlow.first()
             if (allSongs.isNotEmpty()) {
-                val (downloaded, remote) = allSongs.partition { it.localFilePath != null }
-                val finalShuffledList = downloaded.shuffled() + remote.shuffled()
+                val finalShuffledList = allSongs.shuffled()
                 musicServiceConnection.playSongList(finalShuffledList, 0)
             }
         }
@@ -182,8 +201,7 @@ class ArtistDetailViewModel @Inject constructor(
             val ungroupedSongs = allSongs.filter { it.songId !in groupedSongIds }
 
             if (ungroupedSongs.isNotEmpty()) {
-                val (downloaded, remote) = ungroupedSongs.partition { it.localFilePath != null }
-                val finalShuffledList = downloaded.shuffled() + remote.shuffled()
+                val finalShuffledList = ungroupedSongs.shuffled()
                 musicServiceConnection.playSongList(finalShuffledList, 0)
             }
         }
@@ -204,8 +222,7 @@ class ArtistDetailViewModel @Inject constructor(
             val groups = songGroupsForArtistFlow.first()
             val songsInGroup = groups.find { it.group.groupId == groupId }?.songs
             if (!songsInGroup.isNullOrEmpty()) {
-                val (downloaded, remote) = songsInGroup.partition { it.localFilePath != null }
-                val finalShuffledList = downloaded.shuffled() + remote.shuffled()
+                val finalShuffledList = songsInGroup.shuffled()
                 musicServiceConnection.playSongList(finalShuffledList, 0)
             }
         }
@@ -278,15 +295,21 @@ class ArtistDetailViewModel @Inject constructor(
     }
 
     fun createPlaylistAndAddPendingItem(name: String) {
-        pendingItem?.let { item ->
-            playlistManager.createPlaylistAndAddItem(name, item)
-            pendingItem = null
+        val item = pendingItem ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val activeGroupId = artist.value?.let { art ->
+                songDao.getArtistLibrarySong(art.name)?.libraryGroupId
+            }
+            if (activeGroupId != null) {
+                playlistManager.createPlaylistAndAddItem(name, item, activeGroupId)
+            }
         }
         dismissCreatePlaylistDialog()
     }
 
     fun dismissCreatePlaylistDialog() {
         showCreatePlaylistDialog = false
+        pendingItem = null
     }
 
     fun prepareToCreateSongGroup() {

@@ -1,3 +1,4 @@
+// file: com/example/m/ui/library/tabs/PlaylistTab.kt
 package com.example.m.ui.library.tabs
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -31,7 +32,8 @@ fun PlaylistTabContent(
     playlists: List<PlaylistWithSongs>,
     onPlaylistClick: (Long) -> Unit,
     onEditPlaylist: (Long) -> Unit,
-    viewModel: LibraryViewModel
+    viewModel: LibraryViewModel,
+    modifier: Modifier = Modifier
 ) {
     var playlistToRemoveDownloads by remember { mutableStateOf<PlaylistWithSongs?>(null) }
 
@@ -50,7 +52,10 @@ fun PlaylistTabContent(
     if (playlists.isEmpty()) {
         EmptyStateMessage(message = "Create your first playlist using the '+' button.")
     } else {
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = modifier,
+            contentPadding = PaddingValues(bottom = 90.dp)
+        ) {
             items(
                 items = playlists,
                 key = { it.playlist.playlistId },

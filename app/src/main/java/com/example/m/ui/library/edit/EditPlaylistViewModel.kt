@@ -1,3 +1,4 @@
+// file: com/example/m/ui/library/edit/EditPlaylistViewModel.kt
 package com.example.m.ui.library.edit
 
 import androidx.compose.runtime.getValue
@@ -14,6 +15,7 @@ import com.example.m.managers.ThumbnailProcessor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -38,9 +40,7 @@ class EditPlaylistViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            playlistDao.getPlaylistWithSongsById(playlistId).collect {
-                _playlistWithSongs.value = it
-            }
+            _playlistWithSongs.value = playlistDao.getPlaylistWithSongsById(playlistId).first()
         }
     }
 

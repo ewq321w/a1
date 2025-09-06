@@ -1,3 +1,4 @@
+// file: com/example/m/ui/library/details/PlaylistDetailScreen.kt
 package com.example.m.ui.library.details
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -21,6 +22,7 @@ import com.example.m.data.database.Song
 import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.library.SongForList
 import com.example.m.ui.library.components.*
+import kotlinx.coroutines.flow.collectLatest
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -36,6 +38,7 @@ fun PlaylistDetailScreen(
     val allPlaylists by viewModel.allPlaylists.collectAsState()
     val sortOrder by viewModel.sortOrder.collectAsState()
     var showDeleteConfirmation by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
     val showCreatePlaylistDialog by remember { derivedStateOf { viewModel.showCreatePlaylistDialog } }
     val itemToAddToPlaylist by remember { derivedStateOf { viewModel.itemToAddToPlaylist } }
@@ -44,6 +47,12 @@ fun PlaylistDetailScreen(
     LaunchedEffect(Unit) {
         viewModel.navigateToArtist.collect { artistId ->
             onArtistClick(artistId)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.userMessage.collectLatest { message ->
+            snackbarHostState.showSnackbar(message)
         }
     }
 
@@ -111,6 +120,7 @@ fun PlaylistDetailScreen(
             songs = songs,
             viewModel = viewModel,
             sortOrder = sortOrder,
+            snackbarHostState = snackbarHostState,
             onBack = onBack,
             onEdit = { onEditPlaylist(pl.playlistId) },
             onShowDeleteDialog = { showDeleteConfirmation = true },
@@ -148,6 +158,7 @@ private fun PlaylistDetailContent(
     songs: List<SongForList>,
     viewModel: PlaylistDetailViewModel,
     sortOrder: PlaylistSortOrder,
+    snackbarHostState: SnackbarHostState,
     onBack: () -> Unit,
     onEdit: () -> Unit,
     onShowDeleteDialog: () -> Unit,
@@ -156,6 +167,7 @@ private fun PlaylistDetailContent(
     var showMenu by remember { mutableStateOf(false) }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text(playlist.name, maxLines = 1, modifier = Modifier.basicMarquee()) },
@@ -192,7 +204,11 @@ private fun PlaylistDetailContent(
         if (songs.isEmpty()) {
             EmptyStateMessage(message = "This playlist is empty.")
         } else {
-            LazyColumn(modifier = Modifier.padding(paddingValues)) {
+            LazyColumn(
+                modifier = Modifier
+                    .padding(paddingValues)
+                    .fillMaxSize()
+            ) {
                 itemsIndexed(songs, key = { _, item -> item.song.songId }) { index, item ->
                     SongItem(
                         song = item.song,
@@ -204,7 +220,8 @@ private fun PlaylistDetailContent(
                         onAddToQueueClick = { viewModel.onAddSongToQueue(item.song) },
                         onShuffleClick = { viewModel.onShuffleSong(item.song) },
                         onGoToArtistClick = { viewModel.onGoToArtist(item.song) },
-                        onDownloadClick = { viewModel.downloadSong(item.song) }
+                        onDownloadClick = { viewModel.downloadSong(item.song) },
+                        onDeleteDownloadClick = { viewModel.deleteSongDownload(item.song) }
                     )
                 }
             }

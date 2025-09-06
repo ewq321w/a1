@@ -1,3 +1,4 @@
+// file: com/example/m/data/repository/LibraryRepository.kt
 package com.example.m.data.repository
 
 import android.content.Context
@@ -5,13 +6,25 @@ import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.core.net.toUri
+import androidx.room.Transaction
 import com.example.m.data.database.*
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
+
+data class ArtistGroupConflict(
+    val conflictingGroupId: Long,
+    val conflictingGroupName: String
+)
+
+sealed class AutoDownloadConflict {
+    data class Artist(val name: String) : AutoDownloadConflict()
+    data class Playlist(val name: String) : AutoDownloadConflict()
+}
 
 @Singleton
 class LibraryRepository @Inject constructor(
@@ -20,6 +33,7 @@ class LibraryRepository @Inject constructor(
     private val downloadQueueDao: DownloadQueueDao,
     private val artistDao: ArtistDao,
     private val artistGroupDao: ArtistGroupDao,
+    private val libraryGroupDao: LibraryGroupDao,
     @ApplicationContext private val context: Context
 ) {
     fun getPlaylistsWithSongs(): Flow<List<PlaylistWithSongs>> {
@@ -28,25 +42,63 @@ class LibraryRepository @Inject constructor(
         }
     }
 
-    // FIX: Add a new function to filter playlists by library group ID
     fun getPlaylistsWithSongs(groupId: Long): Flow<List<PlaylistWithSongs>> {
         return playlistDao.getPlaylistsWithSongsAndOrderedSongsInternal().map { map ->
             map.entries
                 .map { PlaylistWithSongs(it.key, it.value) }
-                .mapNotNull { playlistWithSongs ->
-                    // Filter the songs within the playlist first
-                    val songsInGroup = playlistWithSongs.songs.filter { it.libraryGroupId == groupId }
-                    // If the playlist has any songs left after filtering, include it in the result
-                    if (songsInGroup.isNotEmpty()) {
-                        playlistWithSongs.copy(songs = songsInGroup)
-                    } else {
-                        null
-                    }
-                }
+                .filter { it.playlist.libraryGroupId == groupId }
         }
     }
 
+    suspend fun checkArtistGroupConflict(artistName: String, targetGroupId: Long): ArtistGroupConflict? {
+        if (targetGroupId == 0L) return null // "All Music" never conflicts
+
+        val existingSong = songDao.getArtistLibrarySong(artistName) ?: return null
+        val existingGroupId = existingSong.libraryGroupId
+
+        return if (existingGroupId != null && existingGroupId != targetGroupId) {
+            val conflictingGroup = libraryGroupDao.getGroup(existingGroupId)
+            conflictingGroup?.let {
+                ArtistGroupConflict(it.groupId, it.name)
+            }
+        } else {
+            null
+        }
+    }
+
+    suspend fun moveArtistToLibraryGroup(artistName: String, groupId: Long) {
+        songDao.moveArtistToLibraryGroup(artistName, groupId)
+    }
+
+    @Transaction
+    suspend fun deleteLibraryGroupAndContents(groupId: Long) {
+        // Step 1: Identify and delete playlists that contain only songs from the deleted group.
+        val allPlaylists = playlistDao.getPlaylistsWithSongsAndOrderedSongsInternal().first().map { PlaylistWithSongs(it.key, it.value) }
+        val songIdsInGroup = songDao.getSongIdsInLibraryGroup(groupId).toSet()
+
+        if (songIdsInGroup.isNotEmpty()) {
+            val playlistsToDelete = allPlaylists.filter { playlist ->
+                val playlistSongIds = playlist.songs.map { it.songId }.toSet()
+                // A playlist is deleted if it's not empty and all of its songs belong to the group being deleted.
+                playlistSongIds.isNotEmpty() && songIdsInGroup.containsAll(playlistSongIds)
+            }
+
+            for (playlist in playlistsToDelete) {
+                playlistDao.deletePlaylistById(playlist.playlist.playlistId)
+            }
+        }
+
+        // Step 2: Delete the library group. The CASCADE rule will automatically delete all its songs.
+        libraryGroupDao.deleteGroupById(groupId)
+
+        // Step 3: Clean up any artists that are now orphaned (have no songs).
+        artistDao.deleteOrphanedArtists()
+    }
+
     fun getAllPlaylists(): Flow<List<Playlist>> = playlistDao.getAllPlaylists()
+
+    fun getPlaylistsByGroupId(groupId: Long): Flow<List<Playlist>> = playlistDao.getPlaylistsByGroupId(groupId)
+
     fun getDownloadedSongs(): Flow<List<Song>> = songDao.getDownloadedSongs()
     fun getAllArtists(): Flow<List<String>> = songDao.getAllArtists()
     fun getPlaylistWithSongsById(playlistId: Long): Flow<PlaylistWithSongs?> = playlistDao.getPlaylistWithSongsById(playlistId)
@@ -80,6 +132,41 @@ class LibraryRepository @Inject constructor(
                 artistDao.deleteArtist(it)
             }
         }
+    }
+
+    suspend fun deleteDownloadedFileForSong(song: Song) {
+        song.localFilePath?.let { path ->
+            try {
+                val uri = path.toUri()
+                val deletedCount = if (uri.scheme == "content") {
+                    context.contentResolver.delete(uri, null, null)
+                } else {
+                    if (File(path).delete()) 1 else 0
+                }
+                if (deletedCount > 0) {
+                    songDao.updateSong(song.copy(localFilePath = null))
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                // If deletion fails (e.g. SecurityException), still unlink from DB
+                // to fix the app's state for the user.
+                songDao.updateSong(song.copy(localFilePath = null))
+            }
+        }
+    }
+
+    suspend fun checkForAutoDownloadConflict(song: Song): AutoDownloadConflict? {
+        val artist = artistDao.getArtistByName(song.artist)
+        if (artist?.downloadAutomatically == true) {
+            return AutoDownloadConflict.Artist(artist.name)
+        }
+
+        val conflictingPlaylists = playlistDao.getAutoDownloadPlaylistsForSong(song.songId)
+        conflictingPlaylists.firstOrNull()?.let {
+            return AutoDownloadConflict.Playlist(it.name)
+        }
+
+        return null
     }
 
     suspend fun verifyLibraryEntries(): Int {

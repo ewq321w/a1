@@ -1,11 +1,15 @@
 package com.example.m.data
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.core.content.edit
 import com.example.m.ui.library.SongSortOrder
 import com.example.m.ui.library.details.ArtistSortOrder
 import com.example.m.ui.library.details.PlaylistSortOrder
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -13,14 +17,28 @@ import javax.inject.Singleton
 class PreferencesManager @Inject constructor(@ApplicationContext context: Context) {
     private val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
 
+    companion object {
+        const val KEY_ACTIVE_LIBRARY_GROUP_ID = "active_library_group_id"
+    }
+
     var lastLibraryView: String
         get() = prefs.getString("last_library_view", "Playlists") ?: "Playlists"
         set(value) = prefs.edit { putString("last_library_view", value) }
 
-    // FIX: Add property to store the active library group ID. 0L represents "All Music".
     var activeLibraryGroupId: Long
-        get() = prefs.getLong("active_library_group_id", 0L)
-        set(value) = prefs.edit { putLong("active_library_group_id", value) }
+        get() = prefs.getLong(KEY_ACTIVE_LIBRARY_GROUP_ID, 0L)
+        set(value) = prefs.edit { putLong(KEY_ACTIVE_LIBRARY_GROUP_ID, value) }
+
+    fun getActiveLibraryGroupIdFlow(): Flow<Long> = callbackFlow {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == KEY_ACTIVE_LIBRARY_GROUP_ID) {
+                trySend(activeLibraryGroupId)
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        trySend(activeLibraryGroupId) // emit the initial value
+        awaitClose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
 
     var songsSortOrder: SongSortOrder
         get() {

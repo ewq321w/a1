@@ -1,3 +1,4 @@
+// file: com/example/m/ui/library/details/ArtistGroupDetailScreen.kt
 package com.example.m.ui.library.details
 
 import androidx.compose.foundation.layout.Box
@@ -107,7 +108,11 @@ fun ArtistGroupDetailScreen(
                 }
             }
         } else {
-            LazyColumn(modifier = Modifier.padding(paddingValues)) {
+            LazyColumn(
+                modifier = Modifier
+                    .padding(paddingValues)
+                    .fillMaxSize()
+            ) {
                 items(artistsInGroup, key = { it.artist.artistId }) { artistWithSongs ->
                     val artist = artistWithSongs.artist
                     ArtistItem(
@@ -115,6 +120,7 @@ fun ArtistGroupDetailScreen(
                         onClick = { onArtistClick(artist.artistId) },
                         onPlay = { viewModel.playArtist(artist) },
                         onShuffle = { viewModel.shuffleArtist(artist) },
+                        onShuffleUngrouped = { viewModel.shuffleUngroupedSongsForArtist(artist) },
                         onEdit = { onEditArtistSongs(artist.artistId) },
                         onToggleAutoDownload = { viewModel.toggleAutoDownloadForArtist(artist) },
                         groupAction = "Remove from group" to { viewModel.removeArtistFromGroup(artist) },

@@ -1,6 +1,8 @@
+// file: com/example/m/managers/ThumbnailProcessor.kt
 package com.example.m.managers
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.drawable.BitmapDrawable
 import android.util.LruCache
 import coil.ImageLoader
@@ -10,9 +12,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.math.min
 
 @Singleton
 class ThumbnailProcessor @Inject constructor(
@@ -61,5 +65,31 @@ class ThumbnailProcessor @Inject constructor(
 
         cache.put(cacheKey, result)
         result
+    }
+
+    suspend fun getCroppedSquareBitmap(imageUrl: String?): ByteArray? {
+        if (imageUrl.isNullOrBlank()) return null
+        return try {
+            val request = ImageRequest.Builder(context)
+                .data(imageUrl)
+                .allowHardware(false) // Important for manipulation
+                .build()
+            val result = (imageLoader.execute(request).drawable as? BitmapDrawable)?.bitmap ?: return null
+
+            // Crop to a square from the center
+            val width = result.width
+            val height = result.height
+            val size = min(width, height)
+            val x = (width - size) / 2
+            val y = (height - size) / 2
+            val squaredBitmap = Bitmap.createBitmap(result, x, y, size, size)
+
+            val stream = ByteArrayOutputStream()
+            squaredBitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+            stream.toByteArray()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
     }
 }

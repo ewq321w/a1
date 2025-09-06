@@ -1,28 +1,211 @@
+// file: com/example/m/ui/library/components/LibraryDialogs.kt
 package com.example.m.ui.library.components
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.example.m.data.database.ArtistGroup
 import com.example.m.data.database.ArtistSongGroup
+import com.example.m.data.database.LibraryGroup
 import com.example.m.data.database.Playlist
+import kotlinx.coroutines.launch
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ManageLibraryGroupsDialog(
+    groups: List<LibraryGroup>,
+    onDismiss: () -> Unit,
+    onAddGroup: (String) -> Unit,
+    onRenameGroup: (LibraryGroup, String) -> Unit,
+    onDeleteGroup: (LibraryGroup) -> Unit
+) {
+    var newGroupName by remember { mutableStateOf("") }
+    var groupToRename by remember { mutableStateOf<LibraryGroup?>(null) }
+    var groupToDelete by remember { mutableStateOf<LibraryGroup?>(null) }
+    val coroutineScope = rememberCoroutineScope()
+
+    groupToRename?.let { group ->
+        RenameLibraryGroupDialog(
+            initialName = group.name,
+            onDismiss = { groupToRename = null },
+            onConfirm = { newName ->
+                onRenameGroup(group, newName)
+                groupToRename = null
+            }
+        )
+    }
+
+    groupToDelete?.let { group ->
+        ConfirmDeleteDialog(
+            itemType = "library group",
+            itemName = group.name,
+            onDismiss = { groupToDelete = null },
+            onConfirm = {
+                onDeleteGroup(group)
+                groupToDelete = null
+            }
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Manage Groups") },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
+                    items(groups, key = { it.groupId }) { group ->
+                        ListItem(
+                            headlineContent = { Text(group.name) },
+                            trailingContent = {
+                                Row {
+                                    IconButton(
+                                        onClick = { groupToRename = group }
+                                    ) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Rename")
+                                    }
+                                    IconButton(
+                                        onClick = { groupToDelete = group }
+                                    ) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete")
+                                    }
+                                }
+                            },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = newGroupName,
+                        onValueChange = { newGroupName = it },
+                        label = { Text("New group name") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            if (newGroupName.isNotBlank()) {
+                                coroutineScope.launch {
+                                    onAddGroup(newGroupName)
+                                    newGroupName = ""
+                                }
+                            }
+                        },
+                        enabled = newGroupName.isNotBlank()
+                    ) {
+                        Text("Add")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Done")
+            }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RenameLibraryGroupDialog(
+    initialName: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var text by remember(initialName) { mutableStateOf(initialName) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename Group") },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                label = { Text("Group name") },
+                singleLine = true
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (text.isNotBlank()) onConfirm(text) },
+                enabled = text.isNotBlank()
+            ) {
+                Text("Rename")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CreateLibraryGroupDialog(
+    onDismiss: () -> Unit,
+    onCreate: (String) -> Unit,
+    isFirstGroup: Boolean = false
+) {
+    var text by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("New Library Group") },
+        text = {
+            Column {
+                if (isFirstGroup) {
+                    Text(
+                        "To start your library, please create a group to add songs to.",
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text("Group name") },
+                    singleLine = true
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (text.isNotBlank()) onCreate(text) },
+                enabled = text.isNotBlank()
+            ) {
+                Text("Create")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,6 +241,50 @@ fun CreatePlaylistDialog(
         }
     )
 }
+
+@Composable
+fun ArtistGroupConflictDialog(
+    artistName: String,
+    conflictingGroupName: String,
+    targetGroupName: String,
+    onDismiss: () -> Unit,
+    onMoveArtistToTargetGroup: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Artist in Another Group") },
+        text = {
+            Text(
+                buildAnnotatedString {
+                    append("The artist ")
+                    withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                        append(artistName)
+                    }
+                    append(" already belongs to the ")
+                    withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                        append(conflictingGroupName)
+                    }
+                    append(" group.\n\nTo add this song, you must move the artist and all their songs to the \"")
+                    withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                        append(targetGroupName)
+                    }
+                    append("\" group.")
+                }
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onMoveArtistToTargetGroup) {
+                Text("Move Artist")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -423,4 +650,40 @@ fun MoveToGroupSheet(
             }
         }
     }
+}
+
+@Composable
+fun SelectLibraryGroupDialog(
+    groups: List<LibraryGroup>,
+    onDismiss: () -> Unit,
+    onGroupSelected: (Long) -> Unit,
+    onCreateNewGroup: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Select a Group") },
+        text = {
+            LazyColumn {
+                item {
+                    ListItem(
+                        headlineContent = { Text("Create new group") },
+                        leadingContent = { Icon(Icons.Default.Add, contentDescription = "Create new group") },
+                        modifier = Modifier.clickable { onCreateNewGroup() },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                    )
+                    HorizontalDivider()
+                }
+                items(groups, key = { it.groupId }) { group ->
+                    ListItem(
+                        headlineContent = { Text(group.name) },
+                        modifier = Modifier.clickable { onGroupSelected(group.groupId) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }

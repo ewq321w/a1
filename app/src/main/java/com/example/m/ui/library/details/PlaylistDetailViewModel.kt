@@ -1,15 +1,18 @@
+// file: com/example/m/ui/library/details/PlaylistDetailViewModel.kt
 package com.example.m.ui.library.details
 
 import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.core.net.toUri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.m.data.PreferencesManager
 import com.example.m.data.database.*
+import com.example.m.data.repository.AutoDownloadConflict
 import com.example.m.data.repository.LibraryRepository
 import com.example.m.managers.DownloadStatusManager
 import com.example.m.managers.PlaylistManager
@@ -74,9 +77,14 @@ class PlaylistDetailViewModel @Inject constructor(
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    private val activeLibraryGroupId = snapshotFlow { preferencesManager.activeLibraryGroupId }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), preferencesManager.activeLibraryGroupId)
 
-    val allPlaylists: StateFlow<List<Playlist>> = libraryRepository.getAllPlaylists()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val allPlaylists: StateFlow<List<Playlist>> = activeLibraryGroupId.flatMapLatest { groupId ->
+        if (groupId == 0L) libraryRepository.getAllPlaylists() else libraryRepository.getPlaylistsByGroupId(groupId)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
 
     var itemToAddToPlaylist by mutableStateOf<Any?>(null)
         private set
@@ -86,6 +94,9 @@ class PlaylistDetailViewModel @Inject constructor(
 
     private val _navigateToArtist = MutableSharedFlow<Long>()
     val navigateToArtist: SharedFlow<Long> = _navigateToArtist.asSharedFlow()
+
+    private val _userMessage = MutableSharedFlow<String>()
+    val userMessage: SharedFlow<String> = _userMessage.asSharedFlow()
 
     fun onSongSelected(selectedIndex: Int) {
         val currentSongs = songs.value.map { it.song }
@@ -100,6 +111,23 @@ class PlaylistDetailViewModel @Inject constructor(
         playlistManager.startDownload(song)
     }
 
+    fun deleteSongDownload(song: Song) {
+        viewModelScope.launch {
+            val conflict = libraryRepository.checkForAutoDownloadConflict(song)
+            if (conflict != null) {
+                val message = when (conflict) {
+                    is AutoDownloadConflict.Artist ->
+                        "Cannot delete download. Auto-download is enabled for artist '${conflict.name}'."
+                    is AutoDownloadConflict.Playlist ->
+                        "Cannot delete download. Song is in auto-downloading playlist '${conflict.name}'."
+                }
+                _userMessage.emit(message)
+            } else {
+                libraryRepository.deleteDownloadedFileForSong(song)
+            }
+        }
+    }
+
     fun setSortOrder(order: PlaylistSortOrder) {
         _sortOrder.value = order
         preferencesManager.playlistSortOrder = order
@@ -108,8 +136,7 @@ class PlaylistDetailViewModel @Inject constructor(
     fun shufflePlaylist() {
         val currentSongs = songs.value.map { it.song }
         if (currentSongs.isNotEmpty()) {
-            val (downloaded, remote) = currentSongs.partition { it.localFilePath != null }
-            val finalShuffledList = downloaded.shuffled() + remote.shuffled()
+            val finalShuffledList = currentSongs.shuffled()
             viewModelScope.launch {
                 musicServiceConnection.playSongList(finalShuffledList, 0)
             }
@@ -200,15 +227,17 @@ class PlaylistDetailViewModel @Inject constructor(
     }
 
     fun createPlaylistAndAddPendingItem(name: String) {
-        pendingItem?.let { item ->
-            playlistManager.createPlaylistAndAddItem(name, item)
-            pendingItem = null
+        val item = pendingItem ?: return
+        val groupId = playlist.value?.libraryGroupId
+        if (groupId != null) {
+            playlistManager.createPlaylistAndAddItem(name, item, groupId)
         }
         dismissCreatePlaylistDialog()
     }
 
     fun dismissCreatePlaylistDialog() {
         showCreatePlaylistDialog = false
+        pendingItem = null
     }
 
     fun onPlaySongNext(song: Song) {

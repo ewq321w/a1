@@ -16,7 +16,6 @@ enum class SourceType {
     LOCAL_ONLY
 }
 
-// FIX: Add the new LibraryGroup entity for top-level library organization
 @Entity(tableName = "library_groups")
 data class LibraryGroup(
     @PrimaryKey(autoGenerate = true)
@@ -29,15 +28,14 @@ data class LibraryGroup(
     tableName = "songs",
     indices = [
         Index(value = ["youtubeUrl"], unique = true),
-        Index(value = ["libraryGroupId"]) // Index for the new column
+        Index(value = ["libraryGroupId"])
     ],
     foreignKeys = [
-        // FIX: Add a foreign key to link songs to a library group
         ForeignKey(
             entity = LibraryGroup::class,
             parentColumns = ["groupId"],
             childColumns = ["libraryGroupId"],
-            onDelete = ForeignKey.SET_NULL // If a group is deleted, songs become "ungrouped"
+            onDelete = ForeignKey.CASCADE
         )
     ]
 )
@@ -55,17 +53,28 @@ data class Song(
     val dateAddedTimestamp: Long = System.currentTimeMillis(),
     val isInLibrary: Boolean = false,
     val playCount: Int = 0,
-    // FIX: Add the column to link a song to a specific library group
     val libraryGroupId: Long? = null
 )
 
-@Entity(tableName = "playlists")
+@Entity(
+    tableName = "playlists",
+    indices = [Index(value = ["libraryGroupId"])],
+    foreignKeys = [
+        ForeignKey(
+            entity = LibraryGroup::class,
+            parentColumns = ["groupId"],
+            childColumns = ["libraryGroupId"],
+            onDelete = ForeignKey.CASCADE // If a group is deleted, its playlists are deleted too.
+        )
+    ]
+)
 data class Playlist(
     @PrimaryKey(autoGenerate = true)
     val playlistId: Long = 0,
     val name: String,
     val downloadAutomatically: Boolean = false,
-    val defaultSortOrder: String = "customOrderPosition"
+    val defaultSortOrder: String = "customOrderPosition",
+    val libraryGroupId: Long // Each playlist now must belong to a group
 )
 
 @Entity(

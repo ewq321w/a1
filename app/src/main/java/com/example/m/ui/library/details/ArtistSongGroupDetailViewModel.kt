@@ -1,3 +1,4 @@
+// file: com/example/m/ui/library/details/ArtistSongGroupDetailViewModel.kt
 package com.example.m.ui.library.details
 
 import androidx.compose.runtime.getValue
@@ -84,8 +85,7 @@ class ArtistSongGroupDetailViewModel @Inject constructor(
     fun shuffleGroup() {
         val currentSongs = songs.value.map { it.song }
         if (currentSongs.isNotEmpty()) {
-            val (downloaded, remote) = currentSongs.partition { it.localFilePath != null }
-            val finalShuffledList = downloaded.shuffled() + remote.shuffled()
+            val finalShuffledList = currentSongs.shuffled()
             viewModelScope.launch {
                 musicServiceConnection.playSongList(finalShuffledList, 0)
             }
@@ -160,15 +160,17 @@ class ArtistSongGroupDetailViewModel @Inject constructor(
     }
 
     fun createPlaylistAndAddPendingItem(name: String) {
-        pendingItem?.let { item ->
-            playlistManager.createPlaylistAndAddItem(name, item)
-            pendingItem = null
+        val item = pendingItem ?: return
+        val activeGroupId = groupWithSongs.value?.songs?.firstOrNull()?.libraryGroupId
+        if (activeGroupId != null) {
+            playlistManager.createPlaylistAndAddItem(name, item, activeGroupId)
         }
         dismissCreatePlaylistDialog()
     }
 
     fun dismissCreatePlaylistDialog() {
         showCreatePlaylistDialog = false
+        pendingItem = null
     }
 
     fun prepareToRenameGroup() {

@@ -15,16 +15,13 @@ import com.example.m.ui.library.components.CreatePlaylistDialog
 import com.example.m.ui.search.SearchResult
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
-/**
- * A stateful class to handle the logic for adding items to a playlist.
- * This can be instantiated in any ViewModel that needs this functionality.
- */
 class PlaylistActionHandler(private val playlistManager: PlaylistManager) {
     var itemToAddToPlaylist by mutableStateOf<Any?>(null)
         private set
     var showCreatePlaylistDialog by mutableStateOf(false)
         private set
-    private var pendingItem: Any? = null
+    var pendingItem: Any? = null
+        private set
 
     fun selectItemForPlaylist(item: Any) {
         val validItem = when (item) {
@@ -52,35 +49,28 @@ class PlaylistActionHandler(private val playlistManager: PlaylistManager) {
         showCreatePlaylistDialog = true
     }
 
-    fun createPlaylistAndAddPendingItem(name: String) {
-        pendingItem?.let { item ->
-            playlistManager.createPlaylistAndAddItem(name, item)
-            pendingItem = null
-        }
-        dismissCreatePlaylistDialog()
-    }
-
     fun dismissCreatePlaylistDialog() {
         showCreatePlaylistDialog = false
+        pendingItem = null
     }
 }
 
-/**
- * A shared Composable that renders the necessary UI (bottom sheets, dialogs)
- * for the playlist actions, driven by the state in a PlaylistActionHandler.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlaylistActionUI(
     handler: PlaylistActionHandler,
-    allPlaylists: List<Playlist>
+    allPlaylists: List<Playlist>,
+    onCreatePlaylist: (String) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState()
 
     if (handler.showCreatePlaylistDialog) {
         CreatePlaylistDialog(
             onDismiss = { handler.dismissCreatePlaylistDialog() },
-            onCreate = { name -> handler.createPlaylistAndAddPendingItem(name) }
+            onCreate = { name ->
+                handler.dismissCreatePlaylistDialog()
+                onCreatePlaylist(name)
+            }
         )
     }
 

@@ -1,3 +1,4 @@
+// file: com/example/m/ui/search/details/SearchedArtistDetailScreen.kt
 package com.example.m.ui.search.details
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -28,9 +29,7 @@ import coil.ImageLoader
 import coil.compose.AsyncImage
 import com.example.m.R
 import com.example.m.ui.common.getHighQualityThumbnailUrl
-import com.example.m.ui.library.components.AddToPlaylistSheet
-import com.example.m.ui.library.components.ConfirmAddAllToLibraryDialog
-import com.example.m.ui.library.components.CreatePlaylistDialog
+import com.example.m.ui.library.components.*
 import com.example.m.ui.search.SearchResultItem
 import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
@@ -49,12 +48,38 @@ fun SearchedArtistDetailScreen(
     viewModel: SearchedArtistDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val allPlaylists by viewModel.allPlaylists.collectAsState()
-    val sheetState = rememberModalBottomSheetState()
-
-    val showCreatePlaylistDialog by remember { derivedStateOf { viewModel.showCreatePlaylistDialog } }
-    val itemToAddToPlaylist by remember { derivedStateOf { viewModel.itemToAddToPlaylist } }
     val showConfirmDialog by remember { derivedStateOf { viewModel.showConfirmAddAllDialog } }
+    val conflictDialogState by remember { derivedStateOf { viewModel.conflictDialogState } }
+    val showCreateGroupDialog by remember { derivedStateOf { viewModel.showCreateGroupDialog } }
+    val showSelectGroupDialog by remember { derivedStateOf { viewModel.showSelectGroupDialog } }
+    val libraryGroups by viewModel.libraryGroups.collectAsState()
+
+    if (showCreateGroupDialog) {
+        CreateLibraryGroupDialog(
+            onDismiss = { viewModel.dismissCreateGroupDialog() },
+            onCreate = { name -> viewModel.createGroupAndProceed(name) },
+            isFirstGroup = libraryGroups.isEmpty()
+        )
+    }
+
+    if (showSelectGroupDialog) {
+        SelectLibraryGroupDialog(
+            groups = libraryGroups,
+            onDismiss = { viewModel.dismissSelectGroupDialog() },
+            onGroupSelected = { groupId -> viewModel.onGroupSelectedForAddition(groupId) },
+            onCreateNewGroup = viewModel::prepareToCreateGroup
+        )
+    }
+
+    conflictDialogState?.let { state ->
+        ArtistGroupConflictDialog(
+            artistName = state.song.artist,
+            conflictingGroupName = state.conflict.conflictingGroupName,
+            targetGroupName = state.targetGroupName,
+            onDismiss = { viewModel.dismissConflictDialog() },
+            onMoveArtistToTargetGroup = { viewModel.resolveConflictByMoving() }
+        )
+    }
 
     if (showConfirmDialog) {
         val artistName = uiState.channelInfo?.name ?: "this artist"
@@ -63,34 +88,6 @@ fun SearchedArtistDetailScreen(
             onDismiss = { viewModel.dismissConfirmAddAllToLibraryDialog() },
             onConfirm = { viewModel.confirmAddAllToLibrary() }
         )
-    }
-
-    if (showCreatePlaylistDialog) {
-        CreatePlaylistDialog(
-            onDismiss = { viewModel.dismissCreatePlaylistDialog() },
-            onCreate = { name -> viewModel.createPlaylistAndAddPendingItem(name) }
-        )
-    }
-
-    val currentItemToAdd = itemToAddToPlaylist
-    if (currentItemToAdd != null && currentItemToAdd is StreamInfoItem) {
-        ModalBottomSheet(
-            onDismissRequest = { viewModel.dismissAddToPlaylistSheet() },
-            sheetState = sheetState
-        ) {
-            AddToPlaylistSheet(
-                songTitle = currentItemToAdd.name ?: "Unknown",
-                songArtist = currentItemToAdd.uploaderName ?: "Unknown",
-                songThumbnailUrl = currentItemToAdd.getHighQualityThumbnailUrl(),
-                playlists = allPlaylists,
-                onPlaylistSelected = { playlistId ->
-                    viewModel.onPlaylistSelectedForAddition(playlistId)
-                },
-                onCreateNewPlaylist = {
-                    viewModel.prepareToCreatePlaylist()
-                }
-            )
-        }
     }
 
     Scaffold { paddingValues ->
@@ -164,9 +161,7 @@ fun SearchedArtistDetailScreen(
                                 isSong = uiState.searchType == "music",
                                 imageLoader = viewModel.imageLoader,
                                 onPlay = { viewModel.onSongSelected(index) },
-                                onDownload = { viewModel.downloadSong(item.result.streamInfo) },
                                 onAddToLibrary = { viewModel.addSongToLibrary(item.result.streamInfo) },
-                                onAddToPlaylistClick = { viewModel.selectItemForPlaylist(item.result.streamInfo) },
                                 onPlayNext = { viewModel.onPlayNext(item.result.streamInfo) },
                                 onAddToQueue = { viewModel.onAddToQueue(item.result.streamInfo) }
                             )

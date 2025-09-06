@@ -1,3 +1,4 @@
+// file: com/example/m/ui/library/edit/EditArtistSongsViewModel.kt
 package com.example.m.ui.library.edit
 
 import androidx.compose.runtime.getValue
@@ -14,6 +15,7 @@ import com.example.m.managers.ThumbnailProcessor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -38,9 +40,10 @@ class EditArtistSongsViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            artistDao.getArtistWithSongs(artistId).collect {
-                _artistWithSongs.value = it
-            }
+            // FIX: Use getArtistWithLibrarySongs to get the correctly ordered list of songs
+            // that are actually in the library, preventing cached-only songs from appearing
+            // and ensuring the correct custom order is loaded.
+            _artistWithSongs.value = artistDao.getArtistWithLibrarySongs(artistId).first()
         }
     }
 

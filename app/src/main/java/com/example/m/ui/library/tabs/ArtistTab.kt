@@ -1,3 +1,4 @@
+// file: com/example/m/ui/library/tabs/ArtistTab.kt
 package com.example.m.ui.library.tabs
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -11,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,12 +37,16 @@ fun ArtistsTabContent(
     onArtistClick: (Long) -> Unit,
     onGoToArtistGroup: (Long) -> Unit,
     onEditArtistSongs: (Long) -> Unit,
-    viewModel: LibraryViewModel
+    viewModel: LibraryViewModel,
+    modifier: Modifier = Modifier
 ) {
     if (artists.isEmpty()) {
         EmptyStateMessage(message = "Your artists and groups will appear here.")
     } else {
-        LazyColumn(Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = modifier,
+            contentPadding = PaddingValues(bottom = 90.dp)
+        ) {
             items(
                 items = artists,
                 key = { item ->
@@ -61,6 +67,7 @@ fun ArtistsTabContent(
                             onClick = { onArtistClick(artistWithSongs.artist.artistId) },
                             onPlay = { viewModel.playArtist(artistWithSongs.artist) },
                             onShuffle = { viewModel.shuffleArtist(artistWithSongs.artist) },
+                            onShuffleUngrouped = { viewModel.shuffleUngroupedSongsForArtist(artistWithSongs.artist) },
                             onEdit = { onEditArtistSongs(artistWithSongs.artist.artistId) },
                             onToggleAutoDownload = { viewModel.toggleAutoDownloadForArtist(artistWithSongs.artist) },
                             groupAction = "Move to group..." to { viewModel.prepareToMoveArtist(artistWithSongs.artist) },
@@ -79,7 +86,6 @@ fun ArtistsTabContent(
                             onShuffleClick = { viewModel.shuffleArtistGroup(group) },
                             onRenameClick = { viewModel.prepareToRenameGroup(group) },
                             onDeleteClick = { viewModel.itemPendingDeletion.value = DeletableItem.DeletableArtistGroup(group) },
-                            // FIX: Pass the thumbnail processor function to the GroupItem
                             processUrls = viewModel::processThumbnails
                         )
                     }
@@ -96,6 +102,7 @@ fun ArtistItem(
     onClick: () -> Unit,
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
+    onShuffleUngrouped: () -> Unit,
     onEdit: () -> Unit,
     onToggleAutoDownload: () -> Unit,
     processUrls: suspend (List<String>) -> List<String>,
@@ -146,25 +153,25 @@ fun ArtistItem(
                 }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(text = { Text("Play") }, onClick = { onPlay(); showMenu = false })
-                    DropdownMenuItem(text = { Text("Shuffle") }, onClick = { onShuffle(); showMenu = false })
+                    DropdownMenuItem(text = { Text("Shuffle All") }, onClick = { onShuffle(); showMenu = false })
+                    DropdownMenuItem(text = { Text("Shuffle Ungrouped") }, onClick = { onShuffleUngrouped(); showMenu = false })
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                     DropdownMenuItem(text = { Text("Edit song order") }, onClick = { onEdit(); showMenu = false })
-
-                    val toggleText = if (artist.downloadAutomatically) "Disable auto-download" else "Enable auto-download"
-                    DropdownMenuItem(text = { Text(toggleText) }, onClick = { onToggleAutoDownload(); showMenu = false })
-
-                    onHideArtist?.let { hideAction ->
-                        DropdownMenuItem(text = { Text("Hide Artist") }, onClick = {
-                            hideAction()
-                            showMenu = false
-                        })
-                    }
-
                     groupAction?.let { (text, action) ->
                         DropdownMenuItem(text = { Text(text) }, onClick = {
                             action()
                             showMenu = false
                         })
                     }
+                    onHideArtist?.let { hideAction ->
+                        DropdownMenuItem(text = { Text("Hide Artist") }, onClick = {
+                            hideAction()
+                            showMenu = false
+                        })
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    val toggleText = if (artist.downloadAutomatically) "Disable auto-download" else "Enable auto-download"
+                    DropdownMenuItem(text = { Text(toggleText) }, onClick = { onToggleAutoDownload(); showMenu = false })
                 }
             }
         },
@@ -207,8 +214,6 @@ fun GroupItem(
             Text("$artistCount artists")
         },
         leadingContent = {
-            // FIX: Replaced FolderWithThumbnails with a Box containing the Folder icon
-            // and the more robust CompositeThumbnailImage.
             Box(
                 modifier = Modifier.size(54.dp),
                 contentAlignment = Alignment.Center

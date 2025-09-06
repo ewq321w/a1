@@ -1,16 +1,20 @@
+// file: com/example/m/ui/library/LibraryScreen.kt
 package com.example.m.ui.library
 
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.m.data.database.Artist
 import com.example.m.data.database.LibraryGroup
 import com.example.m.data.database.Song
 import com.example.m.ui.common.getHighQualityThumbnailUrl
@@ -19,6 +23,7 @@ import com.example.m.ui.library.tabs.ArtistsTabContent
 import com.example.m.ui.library.tabs.PlaylistTabContent
 import com.example.m.ui.library.tabs.SongsTabContent
 import com.example.m.ui.main.MainViewModel
+import kotlinx.coroutines.launch
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -41,11 +46,11 @@ fun LibraryScreen(
     val songs by viewModel.songs.collectAsState()
     val allPlaylists by viewModel.allPlaylists.collectAsState()
     val downloadFilter by viewModel.downloadFilter.collectAsState()
+    val groupingFilter by viewModel.groupingFilter.collectAsState()
     val selectedView by viewModel.selectedView.collectAsState()
     val sortOrder by viewModel.sortOrder.collectAsState()
     val libraryViews = listOf("Playlists", "Artists", "Songs")
 
-    // FIX: Get library groups state from view model
     val libraryGroups by viewModel.libraryGroups.collectAsState()
     val activeLibraryGroupId by viewModel.activeLibraryGroupId.collectAsState()
 
@@ -58,12 +63,56 @@ fun LibraryScreen(
     val allArtistGroups by viewModel.allArtistGroups.collectAsState()
     val sheetState = rememberModalBottomSheetState()
 
+    val conflictDialogState by remember { derivedStateOf { viewModel.conflictDialogState } }
+    val showManageGroupsDialog by remember { derivedStateOf { viewModel.showManageGroupsDialog } }
+    val showCreateGroupDialog by remember { derivedStateOf { viewModel.showCreateGroupDialog } }
+    val showSelectGroupDialog by remember { derivedStateOf { viewModel.showSelectGroupDialog } }
+
+
     val isDoingMaintenance by mainViewModel.isDoingMaintenance
+    val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         viewModel.navigateToArtist.collect { artistId ->
             onArtistClick(artistId)
         }
+    }
+
+    if (showManageGroupsDialog) {
+        ManageLibraryGroupsDialog(
+            groups = libraryGroups,
+            onDismiss = { viewModel.onManageGroupsDismissed() },
+            onAddGroup = { name -> coroutineScope.launch { viewModel.addLibraryGroup(name) } },
+            onRenameGroup = { group, newName -> coroutineScope.launch { viewModel.renameLibraryGroup(group, newName) } },
+            onDeleteGroup = { group -> coroutineScope.launch { viewModel.deleteLibraryGroup(group) } }
+        )
+    }
+
+    if (showCreateGroupDialog) {
+        CreateLibraryGroupDialog(
+            onDismiss = { viewModel.dismissCreateGroupDialog() },
+            onCreate = { name -> viewModel.createGroupAndProceed(name) },
+            isFirstGroup = libraryGroups.isEmpty()
+        )
+    }
+
+    if (showSelectGroupDialog) {
+        SelectLibraryGroupDialog(
+            groups = libraryGroups,
+            onDismiss = { viewModel.dismissSelectGroupDialog() },
+            onGroupSelected = { groupId -> viewModel.onGroupSelectedForAddition(groupId) },
+            onCreateNewGroup = viewModel::prepareToCreateGroup
+        )
+    }
+
+    conflictDialogState?.let { state ->
+        ArtistGroupConflictDialog(
+            artistName = state.song.artist,
+            conflictingGroupName = state.conflict.conflictingGroupName,
+            targetGroupName = state.targetGroupName,
+            onDismiss = { viewModel.dismissConflictDialog() },
+            onMoveArtistToTargetGroup = { viewModel.resolveConflictByMoving() }
+        )
     }
 
     if (showCreatePlaylistDialog) {
@@ -183,12 +232,11 @@ fun LibraryScreen(
             TopAppBar(
                 title = { Text("Library") },
                 actions = {
-                    // FIX: Add the new Library Group selector menu
                     LibraryGroupSelectorMenu(
                         groups = libraryGroups,
                         activeGroupId = activeLibraryGroupId,
                         onGroupSelected = { viewModel.setActiveLibraryGroup(it) },
-                        onManageGroups = { /* TODO: Implement in a future step */ }
+                        onManageGroups = { viewModel.onManageGroupsClicked() }
                     )
 
                     IconButton(onClick = onGoToHistory) {
@@ -196,9 +244,6 @@ fun LibraryScreen(
                     }
 
                     if (selectedView == "Songs") {
-                        IconButton(onClick = { viewModel.shuffleAllSongs() }) {
-                            Icon(Icons.Default.Shuffle, contentDescription = "Shuffle All")
-                        }
                         SongSortMenu(
                             currentSortOrder = sortOrder,
                             onSortOrderSelected = { viewModel.setSortOrder(it) }
@@ -210,6 +255,7 @@ fun LibraryScreen(
                         mainViewModel = mainViewModel,
                         libraryViewModel = viewModel,
                         downloadFilter = downloadFilter,
+                        groupingFilter = groupingFilter,
                         isDoingMaintenance = isDoingMaintenance,
                         onGoToHiddenArtists = onGoToHiddenArtists
                     )
@@ -244,7 +290,7 @@ fun LibraryScreen(
         Column(
             modifier = Modifier
                 .padding(innerPadding)
-                .navigationBarsPadding()
+                .fillMaxSize()
         ) {
             SingleChoiceSegmentedButtonRow(
                 modifier = Modifier
@@ -267,33 +313,37 @@ fun LibraryScreen(
                     playlists = playlists,
                     onPlaylistClick = onPlaylistClick,
                     onEditPlaylist = onEditPlaylist,
-                    viewModel = viewModel
+                    viewModel = viewModel,
+                    modifier = Modifier.weight(1f)
                 )
                 "Artists" -> ArtistsTabContent(
                     artists = libraryArtistItems,
                     onArtistClick = onArtistClick,
                     onGoToArtistGroup = onGoToArtistGroup,
                     onEditArtistSongs = onEditArtistSongs,
-                    viewModel = viewModel
+                    viewModel = viewModel,
+                    modifier = Modifier.weight(1f)
                 )
                 "Songs" -> SongsTabContent(
                     songs = songs,
                     sortOrder = sortOrder,
                     onSongSelected = viewModel::onSongSelected,
-                    onAddToPlaylistClick = { song -> viewModel.selectItemForPlaylist(song) },
+                    onAddToPlaylistClick = { song -> viewModel.prepareToShowPlaylistSheet(song) },
                     onDeleteSongClick = { song -> viewModel.itemPendingDeletion.value = DeletableItem.DeletableSong(song) },
                     onPlayNextClick = { song -> viewModel.onPlaySongNext(song) },
                     onAddToQueueClick = { song -> viewModel.onAddSongToQueue(song) },
                     onShuffleClick = { song -> viewModel.onShuffleSong(song) },
                     onGoToArtistClick = { song -> viewModel.onGoToArtist(song) },
-                    onDownloadClick = viewModel::downloadSong
+                    onDownloadClick = viewModel::downloadSong,
+                    onDeleteDownloadClick = viewModel::deleteSongDownload,
+                    onAddToLibraryClick = { song -> viewModel.addSongToLibrary(song) },
+                    modifier = Modifier.weight(1f)
                 )
             }
         }
     }
 }
 
-// FIX: New composable for the Library Group dropdown selector
 @Composable
 private fun LibraryGroupSelectorMenu(
     groups: List<LibraryGroup>,
@@ -308,8 +358,15 @@ private fun LibraryGroupSelectorMenu(
 
     Box {
         TextButton(onClick = { showMenu = true }) {
-            Text(activeGroupName)
-            Icon(Icons.Default.ArrowDropDown, contentDescription = "Select Library Group")
+            Text(
+                activeGroupName,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Icon(
+                Icons.Default.ArrowDropDown,
+                contentDescription = "Select Library Group",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
 
         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
@@ -321,6 +378,7 @@ private fun LibraryGroupSelectorMenu(
                 },
                 trailingIcon = { if (activeGroupId == 0L) Icon(Icons.Default.Check, "Selected") }
             )
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
             groups.forEach { group ->
                 DropdownMenuItem(
                     text = { Text(group.name) },
@@ -338,8 +396,7 @@ private fun LibraryGroupSelectorMenu(
                     onManageGroups()
                     showMenu = false
                 },
-                // TODO: Enable this in the next step
-                enabled = false
+                enabled = true
             )
         }
     }
@@ -351,6 +408,7 @@ private fun OptionsOverflowMenu(
     mainViewModel: MainViewModel,
     libraryViewModel: LibraryViewModel,
     downloadFilter: DownloadFilter,
+    groupingFilter: GroupingFilter,
     isDoingMaintenance: Boolean,
     onGoToHiddenArtists: () -> Unit
 ) {
@@ -361,6 +419,17 @@ private fun OptionsOverflowMenu(
         }
         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
             if (selectedView == "Songs") {
+                DropdownMenuItem(
+                    text = { Text("Shuffle") },
+                    onClick = {
+                        libraryViewModel.shuffleFilteredSongs()
+                        showMenu = false
+                    },
+                    leadingIcon = {
+                        Icon(Icons.Default.Shuffle, contentDescription = "Shuffle")
+                    }
+                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                 Text("Show Only", modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                 DropdownMenuItem(
                     text = { Text("Downloaded") },
@@ -371,6 +440,18 @@ private fun OptionsOverflowMenu(
                     },
                     leadingIcon = {
                         if (downloadFilter == DownloadFilter.DOWNLOADED) Icon(Icons.Default.Check, contentDescription = "Selected")
+                        else Spacer(Modifier.width(24.dp))
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Ungrouped") },
+                    onClick = {
+                        val newFilter = if (groupingFilter == GroupingFilter.UNGROUPED) GroupingFilter.ALL else GroupingFilter.UNGROUPED
+                        libraryViewModel.setGroupingFilter(newFilter)
+                        showMenu = false
+                    },
+                    leadingIcon = {
+                        if (groupingFilter == GroupingFilter.UNGROUPED) Icon(Icons.Default.Check, contentDescription = "Selected")
                         else Spacer(Modifier.width(24.dp))
                     }
                 )

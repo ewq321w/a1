@@ -1,3 +1,4 @@
+// file: com/example/m/ui/library/edit/EditArtistSongGroupViewModel.kt
 package com.example.m.ui.library.edit
 
 import androidx.compose.runtime.getValue
@@ -32,7 +33,7 @@ class EditArtistSongGroupViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            artistDao.getArtistSongGroupWithSongsOrdered(groupId)
+            _groupWithSongs.value = artistDao.getArtistSongGroupWithSongsOrdered(groupId)
                 .map { map ->
                     map.entries.firstOrNull()?.let { entry ->
                         ArtistSongGroupWithSongs(
@@ -41,9 +42,7 @@ class EditArtistSongGroupViewModel @Inject constructor(
                         )
                     }
                 }
-                .collect {
-                    _groupWithSongs.value = it
-                }
+                .first()
         }
     }
 

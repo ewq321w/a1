@@ -1,11 +1,15 @@
+// file: com/example/m/ui/library/HistoryViewModel.kt
 package com.example.m.ui.library
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.m.data.PreferencesManager
 import com.example.m.data.database.*
+import com.example.m.data.repository.AutoDownloadConflict
 import com.example.m.data.repository.LibraryRepository
 import com.example.m.managers.DownloadStatus
 import com.example.m.managers.DownloadStatusManager
@@ -13,8 +17,10 @@ import com.example.m.managers.PlaylistManager
 import com.example.m.playback.MusicServiceConnection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import javax.inject.Inject
 
@@ -32,7 +38,9 @@ class HistoryViewModel @Inject constructor(
     private val artistDao: ArtistDao,
     private val songDao: SongDao,
     private val playlistDao: PlaylistDao,
-    private val downloadStatusManager: DownloadStatusManager
+    private val downloadStatusManager: DownloadStatusManager,
+    private val preferencesManager: PreferencesManager,
+    private val libraryGroupDao: LibraryGroupDao
 ) : ViewModel() {
 
     val history: StateFlow<List<HistoryEntryForList>> =
@@ -45,18 +53,38 @@ class HistoryViewModel @Inject constructor(
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    private val activeLibraryGroupId = snapshotFlow { preferencesManager.activeLibraryGroupId }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), preferencesManager.activeLibraryGroupId)
 
-    val allPlaylists: StateFlow<List<Playlist>> = libraryRepository.getAllPlaylists()
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val allPlaylists: StateFlow<List<Playlist>> = activeLibraryGroupId.flatMapLatest { groupId ->
+        if (groupId == 0L) libraryRepository.getAllPlaylists() else libraryRepository.getPlaylistsByGroupId(groupId)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+
+    val libraryGroups: StateFlow<List<LibraryGroup>> = libraryGroupDao.getAllGroups()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     var itemToAddToPlaylist by mutableStateOf<Any?>(null)
         private set
     var showCreatePlaylistDialog by mutableStateOf(false)
         private set
-    private var pendingItem: Any? = null
+    private var pendingItemForPlaylist by mutableStateOf<Any?>(null)
+
+    var conflictDialogState by mutableStateOf<ConflictDialogState?>(null)
+        private set
+
+    var showCreateGroupDialog by mutableStateOf(false)
+        private set
+    private var pendingAction by mutableStateOf<PendingAction?>(null)
+    var showSelectGroupDialog by mutableStateOf(false)
+        private set
 
     private val _navigateToArtist = MutableSharedFlow<Long>()
     val navigateToArtist: SharedFlow<Long> = _navigateToArtist.asSharedFlow()
+
+    private val _userMessage = MutableSharedFlow<String>()
+    val userMessage: SharedFlow<String> = _userMessage.asSharedFlow()
 
     fun onSongSelected(selectedIndex: Int) {
         val currentSongs = history.value.map { it.entry.song }
@@ -92,20 +120,54 @@ class HistoryViewModel @Inject constructor(
     }
 
     fun addToLibrary(song: Song) {
-        viewModelScope.launch {
-            if (!song.isInLibrary) {
-                val updatedSong = song.copy(
-                    isInLibrary = true,
-                    dateAddedTimestamp = System.currentTimeMillis()
-                )
-                songDao.updateSong(updatedSong)
-                libraryRepository.linkSongToArtist(updatedSong)
-            }
+        handleAction(PendingAction.AddToLibrary(song))
+    }
+
+    private fun addSongToLibraryAndLink(song: Song, groupId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val updatedSong = song.copy(
+                isInLibrary = true,
+                dateAddedTimestamp = System.currentTimeMillis(),
+                libraryGroupId = groupId
+            )
+            songDao.updateSong(updatedSong)
+            libraryRepository.linkSongToArtist(updatedSong)
         }
+    }
+
+    fun resolveConflictByMoving() {
+        val state = conflictDialogState ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            libraryRepository.moveArtistToLibraryGroup(state.song.artist, state.targetGroupId)
+            addSongToLibraryAndLink(state.song, state.targetGroupId)
+        }
+        dismissConflictDialog()
+    }
+
+    fun dismissConflictDialog() {
+        conflictDialogState = null
+        pendingAction = null
     }
 
     fun download(song: Song) {
         playlistManager.startDownload(song)
+    }
+
+    fun deleteSongDownload(song: Song) {
+        viewModelScope.launch {
+            val conflict = libraryRepository.checkForAutoDownloadConflict(song)
+            if (conflict != null) {
+                val message = when (conflict) {
+                    is AutoDownloadConflict.Artist ->
+                        "Cannot delete download. Auto-download is enabled for artist '${conflict.name}'."
+                    is AutoDownloadConflict.Playlist ->
+                        "Cannot delete download. Song is in auto-downloading playlist '${conflict.name}'."
+                }
+                _userMessage.emit(message)
+            } else {
+                libraryRepository.deleteDownloadedFileForSong(song)
+            }
+        }
     }
 
     fun onPlaySongNext(song: Song) {
@@ -119,8 +181,7 @@ class HistoryViewModel @Inject constructor(
     fun onShuffleSong(song: Song) {
         val currentSongs = history.value.map { it.entry.song }
         if (currentSongs.isNotEmpty()) {
-            val (downloaded, remote) = currentSongs.partition { it.localFilePath != null }
-            val finalShuffledList = downloaded.shuffled() + remote.shuffled()
+            val finalShuffledList = currentSongs.shuffled()
             viewModelScope.launch {
                 musicServiceConnection.playSongList(finalShuffledList, 0)
             }
@@ -138,7 +199,7 @@ class HistoryViewModel @Inject constructor(
 
     fun selectItemForPlaylist(item: Any) {
         if (item is Song || item is StreamInfoItem) {
-            itemToAddToPlaylist = item
+            handleAction(PendingAction.ShowAddToPlaylistSheet(item))
         }
     }
 
@@ -154,20 +215,104 @@ class HistoryViewModel @Inject constructor(
     }
 
     fun prepareToCreatePlaylist() {
-        pendingItem = itemToAddToPlaylist
+        pendingItemForPlaylist = itemToAddToPlaylist
         dismissAddToPlaylistSheet()
         showCreatePlaylistDialog = true
     }
 
     fun createPlaylistAndAddPendingItem(name: String) {
-        pendingItem?.let { item ->
-            playlistManager.createPlaylistAndAddItem(name, item)
-            pendingItem = null
+        val item = pendingItemForPlaylist ?: return
+        val activeGroupId = preferencesManager.activeLibraryGroupId
+        if (activeGroupId != 0L) {
+            playlistManager.createPlaylistAndAddItem(name, item, activeGroupId)
         }
         dismissCreatePlaylistDialog()
     }
 
     fun dismissCreatePlaylistDialog() {
         showCreatePlaylistDialog = false
+        pendingItemForPlaylist = null
+    }
+
+    private fun handleAction(action: PendingAction) {
+        viewModelScope.launch(Dispatchers.IO) {
+            pendingAction = action
+            if (libraryGroups.value.isEmpty()) {
+                withContext(Dispatchers.Main) { showCreateGroupDialog = true }
+                return@launch
+            }
+
+            val activeGroupId = preferencesManager.activeLibraryGroupId
+            if (activeGroupId == 0L) {
+                withContext(Dispatchers.Main) { showSelectGroupDialog = true }
+                return@launch
+            }
+            proceedWithAction(action, activeGroupId)
+        }
+    }
+
+    private suspend fun proceedWithAction(action: PendingAction, groupId: Long) {
+        when (action) {
+            is PendingAction.AddToLibrary -> {
+                if (action.song.isInLibrary) return
+                val conflict = libraryRepository.checkArtistGroupConflict(action.song.artist, groupId)
+                if (conflict != null) {
+                    val targetGroup = libraryGroupDao.getGroup(groupId)
+                    if (targetGroup != null) {
+                        withContext(Dispatchers.Main) {
+                            conflictDialogState = ConflictDialogState(action.song, groupId, targetGroup.name, conflict)
+                        }
+                    }
+                } else {
+                    addSongToLibraryAndLink(action.song, groupId)
+                }
+            }
+            is PendingAction.ShowAddToPlaylistSheet -> {
+                withContext(Dispatchers.Main) {
+                    itemToAddToPlaylist = action.item
+                }
+            }
+            else -> { /* Other actions not handled in this screen */ }
+        }
+    }
+
+    fun createGroupAndProceed(groupName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val action = pendingAction ?: return@launch
+            val newGroupId = libraryGroupDao.insertGroup(LibraryGroup(name = groupName.trim()))
+            withContext(Dispatchers.Main) {
+                preferencesManager.activeLibraryGroupId = newGroupId
+            }
+            proceedWithAction(action, newGroupId)
+            pendingAction = null
+        }
+        showCreateGroupDialog = false
+    }
+
+    fun onGroupSelectedForAddition(groupId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val action = pendingAction ?: return@launch
+            withContext(Dispatchers.Main) {
+                preferencesManager.activeLibraryGroupId = groupId
+            }
+            proceedWithAction(action, groupId)
+            pendingAction = null
+        }
+        showSelectGroupDialog = false
+    }
+
+    fun dismissCreateGroupDialog() {
+        showCreateGroupDialog = false
+        pendingAction = null
+    }
+
+    fun dismissSelectGroupDialog() {
+        showSelectGroupDialog = false
+        pendingAction = null
+    }
+
+    fun prepareToCreateGroup() {
+        showSelectGroupDialog = false
+        showCreateGroupDialog = true
     }
 }

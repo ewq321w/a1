@@ -1,9 +1,12 @@
+// file: com/example/m/ui/search/details/AlbumDetailScreen.kt
 package com.example.m.ui.search.details
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -23,11 +27,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.example.m.R
+import com.example.m.data.database.LibraryGroup
 import com.example.m.data.database.Song
 import com.example.m.ui.common.getHighQualityThumbnailUrl
-import com.example.m.ui.library.components.AddToPlaylistSheet
-import com.example.m.ui.library.components.ConfirmAddAllToLibraryDialog
-import com.example.m.ui.library.components.CreatePlaylistDialog
+import com.example.m.ui.library.components.*
 import com.example.m.ui.search.SearchResultItem
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
@@ -38,13 +41,41 @@ fun AlbumDetailScreen(
     viewModel: AlbumDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val allPlaylists by viewModel.allPlaylists.collectAsState()
-    val sheetState = rememberModalBottomSheetState()
+    val libraryGroups by viewModel.libraryGroups.collectAsState()
     val listState = rememberLazyListState()
 
-    val showCreatePlaylistDialog by remember { derivedStateOf { viewModel.showCreatePlaylistDialog } }
-    val itemToAddToPlaylist by remember { derivedStateOf { viewModel.itemToAddToPlaylist } }
     val showConfirmDialog by remember { derivedStateOf { viewModel.showConfirmAddAllDialog } }
+    val conflictDialogState by remember { derivedStateOf { viewModel.conflictDialogState } }
+    val showCreateGroupDialog by remember { derivedStateOf { viewModel.showCreateGroupDialog } }
+    val showSelectGroupDialog by remember { derivedStateOf { viewModel.showSelectGroupDialog } }
+
+
+    if (showCreateGroupDialog) {
+        CreateLibraryGroupDialog(
+            onDismiss = { viewModel.dismissCreateGroupDialog() },
+            onCreate = { name -> viewModel.createGroupAndProceed(name) },
+            isFirstGroup = libraryGroups.isEmpty()
+        )
+    }
+
+    if (showSelectGroupDialog) {
+        SelectLibraryGroupDialog(
+            groups = libraryGroups,
+            onDismiss = { viewModel.dismissSelectGroupDialog() },
+            onGroupSelected = { groupId -> viewModel.onGroupSelectedForAddition(groupId) },
+            onCreateNewGroup = viewModel::prepareToCreateGroup
+        )
+    }
+
+    conflictDialogState?.let { state ->
+        ArtistGroupConflictDialog(
+            artistName = state.song.artist,
+            conflictingGroupName = state.conflict.conflictingGroupName,
+            targetGroupName = state.targetGroupName,
+            onDismiss = { viewModel.dismissConflictDialog() },
+            onMoveArtistToTargetGroup = { viewModel.resolveConflictByMoving() }
+        )
+    }
 
     if (showConfirmDialog) {
         val albumName = uiState.albumInfo?.name ?: "this album"
@@ -54,57 +85,6 @@ fun AlbumDetailScreen(
             onConfirm = { viewModel.confirmAddAllToLibrary() }
         )
     }
-
-    if (showCreatePlaylistDialog) {
-        CreatePlaylistDialog(
-            onDismiss = { viewModel.dismissCreatePlaylistDialog() },
-            onCreate = { name ->
-                viewModel.createPlaylistAndAddPendingItem(name)
-            }
-        )
-    }
-
-    val currentItemToAdd = itemToAddToPlaylist
-    if (currentItemToAdd != null) {
-        val songTitle: String
-        val songArtist: String
-        val thumbnailUrl: String
-
-        when (currentItemToAdd) {
-            is Song -> {
-                songTitle = currentItemToAdd.title
-                songArtist = currentItemToAdd.artist
-                thumbnailUrl = currentItemToAdd.getHighQualityThumbnailUrl()
-            }
-            is StreamInfoItem -> {
-                songTitle = currentItemToAdd.name ?: "Unknown"
-                songArtist = currentItemToAdd.uploaderName ?: "Unknown"
-                thumbnailUrl = currentItemToAdd.getHighQualityThumbnailUrl()
-            }
-            else -> {
-                songTitle = ""; songArtist = ""; thumbnailUrl = ""
-            }
-        }
-
-        ModalBottomSheet(
-            onDismissRequest = { viewModel.dismissAddToPlaylistSheet() },
-            sheetState = sheetState
-        ) {
-            AddToPlaylistSheet(
-                songTitle = songTitle,
-                songArtist = songArtist,
-                songThumbnailUrl = thumbnailUrl,
-                playlists = allPlaylists,
-                onPlaylistSelected = { playlistId ->
-                    viewModel.onPlaylistSelectedForAddition(playlistId)
-                },
-                onCreateNewPlaylist = {
-                    viewModel.prepareToCreatePlaylist()
-                }
-            )
-        }
-    }
-
 
     Scaffold(
         topBar = {
@@ -186,9 +166,7 @@ fun AlbumDetailScreen(
                             isSong = uiState.searchType == "music",
                             imageLoader = viewModel.imageLoader,
                             onPlay = { viewModel.onSongSelected(index) },
-                            onDownload = { viewModel.downloadSong(item.result) },
                             onAddToLibrary = { viewModel.addSongToLibrary(item.result) },
-                            onAddToPlaylistClick = { viewModel.selectItemForPlaylist(item) },
                             onPlayNext = { viewModel.onPlayNext(item.result) },
                             onAddToQueue = { viewModel.onAddToQueue(item.result) }
                         )
@@ -208,12 +186,11 @@ fun AlbumDetailScreen(
                     }
                 }
 
-                // Check if we need to load more items
                 val layoutInfo = remember { derivedStateOf { listState.layoutInfo } }
                 LaunchedEffect(layoutInfo.value.visibleItemsInfo) {
                     val lastVisibleItemIndex = layoutInfo.value.visibleItemsInfo.lastOrNull()?.index ?: 0
                     if (uiState.songs.isNotEmpty() &&
-                        lastVisibleItemIndex >= uiState.songs.size - 5 && // Threshold to start loading
+                        lastVisibleItemIndex >= uiState.songs.size - 5 &&
                         !uiState.isLoadingMore &&
                         uiState.nextPage != null
                     ) {

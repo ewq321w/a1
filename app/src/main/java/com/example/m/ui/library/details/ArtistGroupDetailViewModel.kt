@@ -1,3 +1,4 @@
+// file: com/example/m/ui/library/details/ArtistGroupDetailViewModel.kt
 package com.example.m.ui.library.details
 
 import android.content.Context
@@ -30,7 +31,8 @@ class ArtistGroupDetailViewModel @Inject constructor(
     private val libraryRepository: LibraryRepository,
     @ApplicationContext private val context: Context,
     private val imageLoader: ImageLoader,
-    private val thumbnailProcessor: ThumbnailProcessor
+    private val thumbnailProcessor: ThumbnailProcessor,
+    private val songDao: SongDao
 ) : ViewModel() {
     private val groupId: Long = checkNotNull(savedStateHandle["groupId"])
 
@@ -77,6 +79,22 @@ class ArtistGroupDetailViewModel @Inject constructor(
             val songs = artistDao.getSongsForArtistSortedByCustom(artist.artistId).shuffled()
             if (songs.isNotEmpty()) {
                 musicServiceConnection.playSongList(songs, 0)
+            }
+        }
+    }
+
+    fun shuffleUngroupedSongsForArtist(artist: Artist) {
+        viewModelScope.launch {
+            val groupsMap = artistDao.getAllArtistSongGroupsWithSongsOrdered(artist.artistId).first()
+            val groupedSongIds = groupsMap.values.flatten().map { it.songId }.toSet()
+
+            val artistWithSongs = artistDao.getArtistWithLibrarySongs(artist.artistId).first()
+            val allArtistSongs = artistWithSongs?.songs ?: emptyList()
+
+            val ungroupedSongs = allArtistSongs.filter { it.songId !in groupedSongIds }
+
+            if (ungroupedSongs.isNotEmpty()) {
+                musicServiceConnection.playSongList(ungroupedSongs.shuffled(), 0)
             }
         }
     }
@@ -130,14 +148,21 @@ class ArtistGroupDetailViewModel @Inject constructor(
     }
 
     fun createPlaylistAndAddPendingItem(name: String) {
-        pendingItem?.let { item ->
-            playlistManager.createPlaylistAndAddItem(name, item)
-            pendingItem = null
+        val item = pendingItem ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val artistName = groupWithArtists.value?.artists?.firstOrNull()?.name
+            if (artistName != null) {
+                val activeGroupId = songDao.getArtistLibrarySong(artistName)?.libraryGroupId
+                if (activeGroupId != null) {
+                    playlistManager.createPlaylistAndAddItem(name, item, activeGroupId)
+                }
+            }
         }
         dismissCreatePlaylistDialog()
     }
 
     fun dismissCreatePlaylistDialog() {
         showCreatePlaylistDialog = false
+        pendingItem = null
     }
 }
