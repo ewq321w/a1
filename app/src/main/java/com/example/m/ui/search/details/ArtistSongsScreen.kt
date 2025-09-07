@@ -17,12 +17,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.m.data.database.LibraryGroup
-import com.example.m.data.database.Song
-import com.example.m.ui.common.getHighQualityThumbnailUrl
-import com.example.m.ui.library.components.*
+import com.example.m.managers.DialogState
+import com.example.m.ui.library.components.ArtistGroupConflictDialog
+import com.example.m.ui.library.components.CreateLibraryGroupDialog
+import com.example.m.ui.library.components.SelectLibraryGroupDialog
 import com.example.m.ui.search.SearchResultItem
-import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,38 +32,36 @@ fun ArtistSongsScreen(
     val uiState by viewModel.uiState.collectAsState()
     val title = if (uiState.searchType == "music") "Popular" else "Videos"
     val listState = rememberLazyListState()
+    val dialogState by viewModel.dialogState.collectAsState()
 
-    val conflictDialogState by remember { derivedStateOf { viewModel.conflictDialogState } }
-    val showCreateGroupDialog by remember { derivedStateOf { viewModel.showCreateGroupDialog } }
-    val showSelectGroupDialog by remember { derivedStateOf { viewModel.showSelectGroupDialog } }
-    val libraryGroups by viewModel.libraryGroups.collectAsState()
-
-    if (showCreateGroupDialog) {
-        CreateLibraryGroupDialog(
-            onDismiss = { viewModel.dismissCreateGroupDialog() },
-            onCreate = { name -> viewModel.createGroupAndProceed(name) },
-            isFirstGroup = libraryGroups.isEmpty()
-        )
+    when (val state = dialogState) {
+        is DialogState.CreateGroup -> {
+            CreateLibraryGroupDialog(
+                onDismiss = { viewModel.onEvent(ArtistSongsEvent.DismissDialog) },
+                onCreate = { name -> viewModel.onEvent(ArtistSongsEvent.RequestCreateGroup(name)) },
+                isFirstGroup = state.isFirstGroup
+            )
+        }
+        is DialogState.SelectGroup -> {
+            SelectLibraryGroupDialog(
+                groups = state.groups,
+                onDismiss = { viewModel.onEvent(ArtistSongsEvent.DismissDialog) },
+                onGroupSelected = { groupId -> viewModel.onEvent(ArtistSongsEvent.SelectGroup(groupId)) },
+                onCreateNewGroup = { viewModel.onEvent(ArtistSongsEvent.DismissDialog) }
+            )
+        }
+        is DialogState.Conflict -> {
+            ArtistGroupConflictDialog(
+                artistName = state.song.artist,
+                conflictingGroupName = state.conflict.conflictingGroupName,
+                targetGroupName = state.targetGroupName,
+                onDismiss = { viewModel.onEvent(ArtistSongsEvent.DismissDialog) },
+                onMoveArtistToTargetGroup = { viewModel.onEvent(ArtistSongsEvent.ResolveConflict) }
+            )
+        }
+        is DialogState.Hidden -> {}
     }
 
-    if (showSelectGroupDialog) {
-        SelectLibraryGroupDialog(
-            groups = libraryGroups,
-            onDismiss = { viewModel.dismissSelectGroupDialog() },
-            onGroupSelected = { groupId -> viewModel.onGroupSelectedForAddition(groupId) },
-            onCreateNewGroup = viewModel::prepareToCreateGroup
-        )
-    }
-
-    conflictDialogState?.let { state ->
-        ArtistGroupConflictDialog(
-            artistName = state.song.artist,
-            conflictingGroupName = state.conflict.conflictingGroupName,
-            targetGroupName = state.targetGroupName,
-            onDismiss = { viewModel.dismissConflictDialog() },
-            onMoveArtistToTargetGroup = { viewModel.resolveConflictByMoving() }
-        )
-    }
 
     Scaffold(
         topBar = {
@@ -95,16 +92,16 @@ fun ArtistSongsScreen(
                     state = listState,
                     modifier = Modifier.padding(paddingValues).fillMaxSize()
                 ) {
-                    itemsIndexed(uiState.songs, key = { index, item -> item.result.streamInfo.url + index }) { index, item ->
+                    itemsIndexed(uiState.songs, key = { index, item -> (item.result.streamInfo.url ?: "") + index }) { index, item ->
                         SearchResultItem(
                             result = item.result,
-                            downloadStatus = item.downloadStatus,
+                            localSong = item.localSong,
                             isSong = uiState.searchType == "music",
                             imageLoader = viewModel.imageLoader,
-                            onPlay = { viewModel.onSongSelected(index) },
-                            onAddToLibrary = { viewModel.addSongToLibrary(item.result) },
-                            onPlayNext = { viewModel.onPlayNext(item.result) },
-                            onAddToQueue = { viewModel.onAddToQueue(item.result) }
+                            onPlay = { viewModel.onEvent(ArtistSongsEvent.SongSelected(index)) },
+                            onAddToLibrary = { viewModel.onEvent(ArtistSongsEvent.AddToLibrary(item.result)) },
+                            onPlayNext = { viewModel.onEvent(ArtistSongsEvent.PlayNext(item.result)) },
+                            onAddToQueue = { viewModel.onEvent(ArtistSongsEvent.AddToQueue(item.result)) }
                         )
                     }
 
@@ -127,7 +124,7 @@ fun ArtistSongsScreen(
                     val totalItems = layoutInfo.value.totalItemsCount
                     val lastVisibleItemIndex = layoutInfo.value.visibleItemsInfo.lastOrNull()?.index ?: 0
                     if (totalItems > 0 && lastVisibleItemIndex >= totalItems - 5) {
-                        viewModel.loadMoreSongs()
+                        viewModel.onEvent(ArtistSongsEvent.LoadMore)
                     }
                 }
             }

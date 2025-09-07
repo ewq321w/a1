@@ -18,6 +18,17 @@ import javax.inject.Inject
 
 private const val TAG = "HomeViewModel"
 
+data class HomeUiState(
+    val recentMix: List<StreamInfoItem> = emptyList(),
+    val discoveryMix: List<StreamInfoItem> = emptyList(),
+    internal val recentMixSongs: List<Song> = emptyList() // Internal state for playback
+)
+
+sealed interface HomeEvent {
+    data class PlayRecentMix(val index: Int) : HomeEvent
+    data class PlayDiscoveryMix(val index: Int) : HomeEvent
+}
+
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val listeningHistoryDao: ListeningHistoryDao,
@@ -26,14 +37,8 @@ class HomeViewModel @Inject constructor(
     private val musicServiceConnection: MusicServiceConnection
 ) : ViewModel() {
 
-    private val _recentMixSongs = MutableStateFlow<List<Song>>(emptyList())
-
-    val recentMix: StateFlow<List<StreamInfoItem>> = _recentMixSongs.map { songs ->
-        songs.map { it.toStreamInfoItem() }
-    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
-
-    private val _discoveryMix = MutableStateFlow<List<StreamInfoItem>>(emptyList())
-    val discoveryMix: StateFlow<List<StreamInfoItem>> = _discoveryMix
+    private val _uiState = MutableStateFlow(HomeUiState())
+    val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -41,10 +46,16 @@ class HomeViewModel @Inject constructor(
                 if (topRecentPlays.isNotEmpty()) {
                     generateRecommendations(topRecentPlays)
                 } else {
-                    _recentMixSongs.value = emptyList()
-                    _discoveryMix.value = emptyList()
+                    _uiState.update { it.copy(recentMix = emptyList(), discoveryMix = emptyList(), recentMixSongs = emptyList()) }
                 }
             }
+        }
+    }
+
+    fun onEvent(event: HomeEvent) {
+        when(event) {
+            is HomeEvent.PlayRecentMix -> playRecentMix(event.index)
+            is HomeEvent.PlayDiscoveryMix -> playDiscoveryMix(event.index)
         }
     }
 
@@ -52,29 +63,31 @@ class HomeViewModel @Inject constructor(
         Log.d(TAG, "Generating recommendations...")
         val recentSongIds = topRecentPlays.map { it.songId }
         val recentSongs = libraryRepository.getSongsByIds(recentSongIds)
-        _recentMixSongs.value = recentSongIds.mapNotNull { id -> recentSongs.find { it.songId == id } }
+        val orderedRecentSongs = recentSongIds.mapNotNull { id -> recentSongs.find { it.songId == id } }
 
-        val seedSong = _recentMixSongs.value.firstOrNull()
+        _uiState.update { it.copy(recentMixSongs = orderedRecentSongs, recentMix = orderedRecentSongs.map { song -> song.toStreamInfoItem() }) }
+
+        val seedSong = orderedRecentSongs.firstOrNull()
         if (seedSong != null) {
             val discoveryQuery = "${seedSong.artist} songs"
             Log.d(TAG, "Discovery Mix seed artist: ${seedSong.artist}")
 
             val searchResults = youtubeRepository.search(discoveryQuery, "music_songs")
+            val downloadedVideoIds = orderedRecentSongs.map { it.videoId }.toSet()
 
-            val downloadedVideoIds = _recentMixSongs.value.map { it.videoId }.toSet()
-
-            _discoveryMix.value = searchResults?.items
+            val discoveryItems = searchResults?.items
                 ?.filterIsInstance<StreamInfoItem>()
                 ?.filter { it.url != null && !downloadedVideoIds.contains(it.url.substringAfter("v=")) }
                 ?: emptyList()
+            _uiState.update { it.copy(discoveryMix = discoveryItems) }
         } else {
-            _discoveryMix.value = emptyList()
+            _uiState.update { it.copy(discoveryMix = emptyList()) }
         }
-        Log.d(TAG, "Recommendations generated. RecentMix: ${_recentMixSongs.value.size}, DiscoveryMix: ${_discoveryMix.value.size}")
+        Log.d(TAG, "Recommendations generated. RecentMix: ${uiState.value.recentMix.size}, DiscoveryMix: ${uiState.value.discoveryMix.size}")
     }
 
-    fun playRecentMix(selectedIndex: Int) {
-        val songs = _recentMixSongs.value
+    private fun playRecentMix(selectedIndex: Int) {
+        val songs = _uiState.value.recentMixSongs
         if (songs.isNotEmpty()) {
             viewModelScope.launch {
                 musicServiceConnection.playSongList(songs, selectedIndex)
@@ -82,8 +95,8 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    fun playDiscoveryMix(selectedIndex: Int) {
-        val items = _discoveryMix.value
+    private fun playDiscoveryMix(selectedIndex: Int) {
+        val items = _uiState.value.discoveryMix
         if (items.isNotEmpty()) {
             viewModelScope.launch {
                 musicServiceConnection.playSongList(items, selectedIndex)

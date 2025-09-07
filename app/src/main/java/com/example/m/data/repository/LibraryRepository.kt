@@ -155,6 +155,35 @@ class LibraryRepository @Inject constructor(
         }
     }
 
+    suspend fun removeDownloadsForArtist(artist: Artist) {
+        if (artist.downloadAutomatically) {
+            artistDao.updateArtist(artist.copy(downloadAutomatically = false))
+        }
+        val songs = artistDao.getSongsForArtistSortedByCustom(artist.artistId)
+        songs.forEach { song ->
+            val autoDownloadPlaylists = playlistDao.getAutoDownloadPlaylistsForSong(song.songId)
+            if (autoDownloadPlaylists.isNotEmpty()) {
+                return@forEach // Skip this song as it's in an auto-download playlist
+            }
+
+            song.localFilePath?.let { path ->
+                try {
+                    val uri = path.toUri()
+                    if (uri.scheme == "content") {
+                        context.contentResolver.delete(uri, null, null)
+                    } else {
+                        File(path).delete()
+                    }
+                    songDao.updateSong(song.copy(localFilePath = null))
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    // If deletion fails, still unlink from DB to fix the app's state for the user.
+                    songDao.updateSong(song.copy(localFilePath = null))
+                }
+            }
+        }
+    }
+
     suspend fun checkForAutoDownloadConflict(song: Song): AutoDownloadConflict? {
         val artist = artistDao.getArtistByName(song.artist)
         if (artist?.downloadAutomatically == true) {

@@ -3,10 +3,8 @@ package com.example.m.ui.search.details
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.basicMarquee
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,7 +16,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -27,12 +24,12 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.example.m.R
-import com.example.m.data.database.LibraryGroup
-import com.example.m.data.database.Song
-import com.example.m.ui.common.getHighQualityThumbnailUrl
-import com.example.m.ui.library.components.*
+import com.example.m.managers.DialogState
+import com.example.m.ui.library.components.ArtistGroupConflictDialog
+import com.example.m.ui.library.components.ConfirmAddAllToLibraryDialog
+import com.example.m.ui.library.components.CreateLibraryGroupDialog
+import com.example.m.ui.library.components.SelectLibraryGroupDialog
 import com.example.m.ui.search.SearchResultItem
-import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -41,48 +38,45 @@ fun AlbumDetailScreen(
     viewModel: AlbumDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val libraryGroups by viewModel.libraryGroups.collectAsState()
     val listState = rememberLazyListState()
+    val dialogState by viewModel.dialogState.collectAsState()
 
-    val showConfirmDialog by remember { derivedStateOf { viewModel.showConfirmAddAllDialog } }
-    val conflictDialogState by remember { derivedStateOf { viewModel.conflictDialogState } }
-    val showCreateGroupDialog by remember { derivedStateOf { viewModel.showCreateGroupDialog } }
-    val showSelectGroupDialog by remember { derivedStateOf { viewModel.showSelectGroupDialog } }
-
-
-    if (showCreateGroupDialog) {
-        CreateLibraryGroupDialog(
-            onDismiss = { viewModel.dismissCreateGroupDialog() },
-            onCreate = { name -> viewModel.createGroupAndProceed(name) },
-            isFirstGroup = libraryGroups.isEmpty()
-        )
+    when (val state = dialogState) {
+        is DialogState.CreateGroup -> {
+            CreateLibraryGroupDialog(
+                onDismiss = { viewModel.onEvent(AlbumDetailEvent.DismissDialog) },
+                onCreate = { name -> viewModel.onEvent(AlbumDetailEvent.RequestCreateGroup(name)) },
+                isFirstGroup = state.isFirstGroup
+            )
+        }
+        is DialogState.SelectGroup -> {
+            SelectLibraryGroupDialog(
+                groups = state.groups,
+                onDismiss = { viewModel.onEvent(AlbumDetailEvent.DismissDialog) },
+                onGroupSelected = { groupId -> viewModel.onEvent(AlbumDetailEvent.SelectGroup(groupId)) },
+                onCreateNewGroup = {
+                    viewModel.onEvent(AlbumDetailEvent.DismissDialog)
+                }
+            )
+        }
+        is DialogState.Conflict -> {
+            ArtistGroupConflictDialog(
+                artistName = state.song.artist,
+                conflictingGroupName = state.conflict.conflictingGroupName,
+                targetGroupName = state.targetGroupName,
+                onDismiss = { viewModel.onEvent(AlbumDetailEvent.DismissDialog) },
+                onMoveArtistToTargetGroup = { viewModel.onEvent(AlbumDetailEvent.ResolveConflict) }
+            )
+        }
+        is DialogState.Hidden -> {}
     }
 
-    if (showSelectGroupDialog) {
-        SelectLibraryGroupDialog(
-            groups = libraryGroups,
-            onDismiss = { viewModel.dismissSelectGroupDialog() },
-            onGroupSelected = { groupId -> viewModel.onGroupSelectedForAddition(groupId) },
-            onCreateNewGroup = viewModel::prepareToCreateGroup
-        )
-    }
 
-    conflictDialogState?.let { state ->
-        ArtistGroupConflictDialog(
-            artistName = state.song.artist,
-            conflictingGroupName = state.conflict.conflictingGroupName,
-            targetGroupName = state.targetGroupName,
-            onDismiss = { viewModel.dismissConflictDialog() },
-            onMoveArtistToTargetGroup = { viewModel.resolveConflictByMoving() }
-        )
-    }
-
-    if (showConfirmDialog) {
-        val albumName = uiState.albumInfo?.name ?: "this album"
+    if (uiState.showConfirmAddAllDialog) {
         ConfirmAddAllToLibraryDialog(
-            itemName = albumName,
-            onDismiss = { viewModel.dismissConfirmAddAllToLibraryDialog() },
-            onConfirm = { viewModel.confirmAddAllToLibrary() }
+            itemName = uiState.albumInfo?.name ?: "this album",
+            onDismiss = { viewModel.onEvent(AlbumDetailEvent.DismissConfirmAddAllToLibraryDialog) },
+            onConfirm = { viewModel.onEvent(AlbumDetailEvent.ConfirmAddAllToLibrary) }
         )
     }
 
@@ -111,14 +105,14 @@ fun AlbumDetailScreen(
                             DropdownMenuItem(
                                 text = { Text("Shuffle") },
                                 onClick = {
-                                    viewModel.shuffle()
+                                    viewModel.onEvent(AlbumDetailEvent.Shuffle)
                                     showMenu = false
                                 }
                             )
                             DropdownMenuItem(
                                 text = { Text("Add all to library") },
                                 onClick = {
-                                    viewModel.onAddAllToLibraryClicked()
+                                    viewModel.onEvent(AlbumDetailEvent.ShowConfirmAddAllToLibraryDialog)
                                     showMenu = false
                                 }
                             )
@@ -159,16 +153,16 @@ fun AlbumDetailScreen(
                         )
                     }
 
-                    itemsIndexed(uiState.songs, key = { index, item -> item.result.streamInfo.url + index }) { index, item ->
+                    itemsIndexed(uiState.songs, key = { index, item -> (item.result.streamInfo.url ?: "") + index }) { index, item ->
                         SearchResultItem(
                             result = item.result,
-                            downloadStatus = item.downloadStatus,
+                            localSong = item.localSong,
                             isSong = uiState.searchType == "music",
                             imageLoader = viewModel.imageLoader,
-                            onPlay = { viewModel.onSongSelected(index) },
-                            onAddToLibrary = { viewModel.addSongToLibrary(item.result) },
-                            onPlayNext = { viewModel.onPlayNext(item.result) },
-                            onAddToQueue = { viewModel.onAddToQueue(item.result) }
+                            onPlay = { viewModel.onEvent(AlbumDetailEvent.SongSelected(index)) },
+                            onAddToLibrary = { viewModel.onEvent(AlbumDetailEvent.AddToLibrary(item.result)) },
+                            onPlayNext = { viewModel.onEvent(AlbumDetailEvent.PlayNext(item.result)) },
+                            onAddToQueue = { viewModel.onEvent(AlbumDetailEvent.AddToQueue(item.result)) }
                         )
                     }
 
@@ -194,7 +188,7 @@ fun AlbumDetailScreen(
                         !uiState.isLoadingMore &&
                         uiState.nextPage != null
                     ) {
-                        viewModel.loadMoreSongs()
+                        viewModel.onEvent(AlbumDetailEvent.LoadMore)
                     }
                 }
             }

@@ -20,8 +20,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.example.m.R
+import com.example.m.data.database.DownloadStatus
 import com.example.m.data.database.Song
-import com.example.m.managers.DownloadStatus
 import java.text.DecimalFormat
 
 internal fun formatDuration(totalSeconds: Long): String {
@@ -48,7 +48,6 @@ internal fun formatPlayCount(count: Int): String {
 @Composable
 fun SongItem(
     song: Song,
-    downloadStatus: DownloadStatus?,
     onClick: () -> Unit,
     onAddToPlaylistClick: () -> Unit,
     onPlayNextClick: () -> Unit,
@@ -67,7 +66,7 @@ fun SongItem(
 ) {
     var showMenu by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
-    val isDownloading = downloadStatus is DownloadStatus.Downloading || downloadStatus is DownloadStatus.Queued
+    val isDownloading = song.downloadStatus == DownloadStatus.DOWNLOADING || song.downloadStatus == DownloadStatus.QUEUED
 
     if (showDeleteConfirmDialog) {
         ConfirmDeleteDialog(
@@ -96,23 +95,21 @@ fun SongItem(
         },
         supportingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val showStatusIcon = downloadStatus != null || song.localFilePath != null || song.isInLibrary
-
-                if (showStatusIcon) {
+                if (song.downloadStatus != DownloadStatus.NOT_DOWNLOADED || song.isInLibrary) {
                     Box(
                         modifier = Modifier.width(20.dp),
                         contentAlignment = Alignment.CenterStart
                     ) {
                         val iconSize = 16.dp
-                        when (downloadStatus) {
-                            is DownloadStatus.Downloading -> {
+                        when (song.downloadStatus) {
+                            DownloadStatus.DOWNLOADING -> {
                                 CircularProgressIndicator(
-                                    progress = { downloadStatus.progress / 100f },
+                                    progress = { song.downloadProgress / 100f },
                                     modifier = Modifier.size(iconSize),
                                     strokeWidth = 1.5.dp
                                 )
                             }
-                            is DownloadStatus.Queued -> {
+                            DownloadStatus.QUEUED -> {
                                 Icon(
                                     imageVector = Icons.Default.HourglassTop,
                                     contentDescription = "Queued",
@@ -120,7 +117,7 @@ fun SongItem(
                                     modifier = Modifier.size(iconSize)
                                 )
                             }
-                            is DownloadStatus.Failed -> {
+                            DownloadStatus.FAILED -> {
                                 Icon(
                                     imageVector = Icons.Default.ErrorOutline,
                                     contentDescription = "Failed",
@@ -128,15 +125,16 @@ fun SongItem(
                                     modifier = Modifier.size(iconSize)
                                 )
                             }
-                            null -> {
-                                if (song.localFilePath != null) {
-                                    Icon(
-                                        imageVector = Icons.Default.CheckCircle,
-                                        contentDescription = "Downloaded",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(iconSize)
-                                    )
-                                } else if (song.isInLibrary) {
+                            DownloadStatus.DOWNLOADED -> {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Downloaded",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(iconSize)
+                                )
+                            }
+                            DownloadStatus.NOT_DOWNLOADED -> {
+                                if (song.isInLibrary) {
                                     Icon(
                                         imageVector = Icons.Default.Check,
                                         contentDescription = "In Library",
@@ -195,7 +193,7 @@ fun SongItem(
                         )
                     }
                     onDownloadClick?.let { downloadAction ->
-                        val isDownloaded = song.localFilePath != null
+                        val isDownloaded = song.downloadStatus == DownloadStatus.DOWNLOADED
                         val downloadText = when {
                             isDownloading -> "Downloading..."
                             isDownloaded -> "Delete download"

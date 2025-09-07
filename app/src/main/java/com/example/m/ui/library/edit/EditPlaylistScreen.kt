@@ -3,7 +3,7 @@ package com.example.m.ui.library.edit
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,30 +24,27 @@ fun EditPlaylistScreen(
     onBack: () -> Unit,
     viewModel: EditPlaylistViewModel = hiltViewModel()
 ) {
-    val playlistWithSongs by viewModel.playlistWithSongs.collectAsState()
-    var playlistName by remember(playlistWithSongs) {
-        mutableStateOf(playlistWithSongs?.playlist?.name ?: "")
+    val uiState by viewModel.uiState.collectAsState()
+    var playlistName by remember(uiState.playlistWithSongs) {
+        mutableStateOf(uiState.playlistWithSongs?.playlist?.name ?: "")
     }
-    val songPendingRemoval by remember { derivedStateOf { viewModel.songPendingRemoval } }
-
-    val songs = playlistWithSongs?.songs ?: emptyList()
+    val songs = uiState.playlistWithSongs?.songs ?: emptyList()
 
     val state = rememberReorderableLazyListState(onMove = { from, to ->
         val adjustedFrom = from.index - 1
         val adjustedTo = to.index - 1
-
         if (adjustedFrom >= 0 && adjustedTo >= 0) {
-            viewModel.onSongMoved(adjustedFrom, adjustedTo)
+            viewModel.onEvent(EditPlaylistEvent.SongMoved(adjustedFrom, adjustedTo))
         }
     })
 
-    songPendingRemoval?.let { songToRemove ->
+    uiState.songPendingRemoval?.let { songToRemove ->
         ConfirmRemoveDialog(
             itemType = "song",
             itemName = songToRemove.title,
             containerType = "playlist",
-            onDismiss = { viewModel.cancelSongRemoval() },
-            onConfirm = { viewModel.confirmSongRemoval() }
+            onDismiss = { viewModel.onEvent(EditPlaylistEvent.CancelSongRemoval) },
+            onConfirm = { viewModel.onEvent(EditPlaylistEvent.ConfirmSongRemoval) }
         )
     }
 
@@ -55,73 +52,35 @@ fun EditPlaylistScreen(
         topBar = {
             TopAppBar(
                 title = { Text("Edit Playlist") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    TextButton(onClick = {
-                        viewModel.saveChanges(playlistName)
-                        onBack()
-                    }) {
-                        Text("Save")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface
-                )
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
+                actions = { TextButton(onClick = { viewModel.onEvent(EditPlaylistEvent.SaveChanges(playlistName)); onBack() }) { Text("Save") } },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface, titleContentColor = MaterialTheme.colorScheme.onSurface, navigationIconContentColor = MaterialTheme.colorScheme.onSurface)
             )
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { paddingValues ->
-        if (playlistWithSongs == null) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
+        if (uiState.playlistWithSongs == null) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         } else {
-            LazyColumn(
-                state = state.listState,
-                modifier = Modifier
-                    .padding(paddingValues)
-                    .fillMaxSize()
-                    .reorderable(state)
-            ) {
+            LazyColumn(state = state.listState, modifier = Modifier.padding(paddingValues).fillMaxSize().reorderable(state)) {
                 item {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
+                    Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         CompositeThumbnailImage(
                             urls = songs.map { it.thumbnailUrl },
                             contentDescription = "Playlist thumbnail",
-                            processUrls = viewModel::processThumbnails,
+                            processUrls = { urls -> viewModel.thumbnailProcessor.process(urls) },
                             modifier = Modifier.size(150.dp)
                         )
                         Spacer(Modifier.height(16.dp))
-                        OutlinedTextField(
-                            value = playlistName,
-                            onValueChange = { playlistName = it },
-                            label = { Text("Playlist Name") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        OutlinedTextField(value = playlistName, onValueChange = { playlistName = it }, label = { Text("Playlist Name") }, modifier = Modifier.fillMaxWidth())
                         Spacer(Modifier.height(16.dp))
                     }
                 }
-
-                items(
-                    items = songs,
-                    key = { song: Song -> song.songId },
-                    contentType = { "EditableSongItem" }
-                ) { song ->
+                items(items = songs, key = { song: Song -> song.songId }) { song ->
                     ReorderableItem(state, key = song.songId) { isDragging ->
-                        val onRemoveClickRemembered = remember(song) { { viewModel.onRemoveSongClicked(song) } }
-
                         EditSongItem(
                             song = song,
-                            onRemoveClick = onRemoveClickRemembered,
+                            onRemoveClick = { viewModel.onEvent(EditPlaylistEvent.RemoveSongClicked(song)) },
                             state = state,
                             modifier = Modifier.shadow(if (isDragging) 4.dp else 0.dp)
                         )

@@ -66,8 +66,8 @@ fun AppNavHost(
         navController = navController,
         startDestination = Screen.Home.route,
         modifier = modifier,
-        enterTransition = { fadeIn(animationSpec = tween(80)) },
-        exitTransition = { fadeOut(animationSpec = tween(80)) }
+        enterTransition = { fadeIn(animationSpec = tween(50)) },
+        exitTransition = { fadeOut(animationSpec = tween(50)) }
     ) {
         composable(Screen.Home.route) {
             HomeScreen()

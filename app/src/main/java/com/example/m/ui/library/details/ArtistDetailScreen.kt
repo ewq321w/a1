@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.m.data.database.Song
+import com.example.m.managers.ThumbnailProcessor
 import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.library.components.*
 import kotlinx.coroutines.flow.collectLatest
@@ -38,22 +39,10 @@ fun ArtistDetailScreen(
     onEditGroup: (Long) -> Unit
 ) {
     val viewModel: ArtistDetailViewModel = hiltViewModel()
-    val artist by viewModel.artist.collectAsState()
-    val displayList by viewModel.displayList.collectAsState()
-    val allPlaylists by viewModel.allPlaylists.collectAsState()
-    val artistSongGroups by viewModel.artistSongGroups.collectAsState()
-    val sortOrder by viewModel.sortOrder.collectAsState()
-    val artistName = artist?.name ?: "Artist"
+    val uiState by viewModel.uiState.collectAsState()
+    val artistName = uiState.artist?.name ?: "Artist"
     var showMenu by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
-
-    val itemToAddToPlaylist by remember { derivedStateOf { viewModel.itemToAddToPlaylist } }
-    val songToAddToGroup by remember { derivedStateOf { viewModel.songToAddToGroup } }
-    val showCreatePlaylistDialog by remember { derivedStateOf { viewModel.showCreatePlaylistDialog } }
-    val showCreateSongGroupDialog by remember { derivedStateOf { viewModel.showCreateSongGroupDialog } }
-    val itemToDelete by viewModel.itemPendingDeletion
-    val groupToRename by remember { derivedStateOf { viewModel.groupToRename } }
-    val groupToDelete by remember { derivedStateOf { viewModel.groupToDelete } }
     val sheetState = rememberModalBottomSheetState()
 
     LaunchedEffect(Unit) {
@@ -68,92 +57,84 @@ fun ArtistDetailScreen(
         }
     }
 
-    if (showCreatePlaylistDialog) {
+    if (uiState.showRemoveDownloadsConfirm) {
+        uiState.artist?.let {
+            ConfirmDeleteDialog(
+                itemType = "downloads for",
+                itemName = it.name,
+                onDismiss = { viewModel.onEvent(ArtistDetailEvent.HideRemoveDownloadsConfirm) },
+                onConfirm = { viewModel.onEvent(ArtistDetailEvent.ConfirmRemoveDownloads) }
+            )
+        }
+    }
+
+    if (uiState.showCreatePlaylistDialog) {
         CreatePlaylistDialog(
-            onDismiss = { viewModel.dismissCreatePlaylistDialog() },
-            onCreate = { name -> viewModel.createPlaylistAndAddPendingItem(name) }
+            onDismiss = { viewModel.onEvent(ArtistDetailEvent.DismissCreatePlaylistDialog) },
+            onCreate = { name -> viewModel.onEvent(ArtistDetailEvent.CreatePlaylist(name)) }
         )
     }
 
-    if (showCreateSongGroupDialog) {
+    if (uiState.showCreateSongGroupDialog) {
         CreateArtistSongGroupDialog(
-            onDismiss = { viewModel.dismissCreateSongGroupDialog() },
-            onCreate = { name -> viewModel.createGroupAndAddSong(name) }
+            onDismiss = { viewModel.onEvent(ArtistDetailEvent.DismissCreateSongGroupDialog) },
+            onCreate = { name -> viewModel.onEvent(ArtistDetailEvent.CreateGroupAndAddSong(name)) }
         )
     }
 
-    groupToRename?.let { group ->
+    uiState.groupToRename?.let { group ->
         RenameArtistSongGroupDialog(
             initialName = group.name,
-            onDismiss = { viewModel.cancelRenameGroup() },
-            onConfirm = { newName -> viewModel.confirmRenameGroup(newName) }
+            onDismiss = { viewModel.onEvent(ArtistDetailEvent.CancelRenameGroup) },
+            onConfirm = { newName -> viewModel.onEvent(ArtistDetailEvent.ConfirmRenameGroup(newName)) }
         )
     }
 
-    groupToDelete?.let { group ->
+    uiState.groupToDelete?.let { group ->
         ConfirmDeleteDialog(
             itemType = "group",
             itemName = group.name,
-            onDismiss = { viewModel.cancelDeleteGroup() },
-            onConfirm = { viewModel.confirmDeleteGroup() }
+            onDismiss = { viewModel.onEvent(ArtistDetailEvent.CancelDeleteGroup) },
+            onConfirm = { viewModel.onEvent(ArtistDetailEvent.ConfirmDeleteGroup) }
         )
     }
 
-    val currentItem = itemToAddToPlaylist
-    if (currentItem != null) {
-        val songTitle = if (currentItem is Song) currentItem.title else (currentItem as StreamInfoItem).name ?: "Unknown"
-        val songArtist = if (currentItem is Song) currentItem.artist else (currentItem as StreamInfoItem).uploaderName ?: "Unknown"
-        val thumbnailUrl = if (currentItem is Song) currentItem.thumbnailUrl else (currentItem as StreamInfoItem).getHighQualityThumbnailUrl()
+    uiState.itemToAddToPlaylist?.let { item ->
+        val songTitle = (item as? Song)?.title ?: (item as? StreamInfoItem)?.name ?: "Unknown"
+        val songArtist = (item as? Song)?.artist ?: (item as? StreamInfoItem)?.uploaderName ?: "Unknown"
+        val thumbnailUrl = (item as? Song)?.thumbnailUrl ?: (item as? StreamInfoItem)?.getHighQualityThumbnailUrl() ?: ""
 
-        ModalBottomSheet(
-            onDismissRequest = { viewModel.dismissAddToPlaylistSheet() },
-            sheetState = sheetState
-        ) {
+        ModalBottomSheet(onDismissRequest = { viewModel.onEvent(ArtistDetailEvent.DismissAddToPlaylistSheet) }, sheetState = sheetState) {
             AddToPlaylistSheet(
                 songTitle = songTitle,
                 songArtist = songArtist,
                 songThumbnailUrl = thumbnailUrl,
-                playlists = allPlaylists,
-                onPlaylistSelected = { playlistId ->
-                    viewModel.onPlaylistSelectedForAddition(playlistId)
-                },
-                onCreateNewPlaylist = {
-                    viewModel.prepareToCreatePlaylist()
-                }
+                playlists = uiState.allPlaylists,
+                onPlaylistSelected = { playlistId -> viewModel.onEvent(ArtistDetailEvent.PlaylistSelectedForAddition(playlistId)) },
+                onCreateNewPlaylist = { viewModel.onEvent(ArtistDetailEvent.PrepareToCreatePlaylist) }
             )
         }
     }
 
-    val currentSongToAddToGroup = songToAddToGroup
-    if (currentSongToAddToGroup != null) {
-        ModalBottomSheet(
-            onDismissRequest = { viewModel.dismissAddToGroupSheet() },
-            sheetState = sheetState
-        ) {
+    uiState.songToAddToGroup?.let { song ->
+        ModalBottomSheet(onDismissRequest = { viewModel.onEvent(ArtistDetailEvent.DismissAddToGroupSheet) }, sheetState = sheetState) {
             AddToArtistSongGroupSheet(
-                songTitle = currentSongToAddToGroup.title,
-                songArtist = currentSongToAddToGroup.artist,
-                songThumbnailUrl = currentSongToAddToGroup.thumbnailUrl,
-                groups = artistSongGroups,
-                onGroupSelected = { groupId ->
-                    viewModel.addSongToGroup(groupId)
-                },
-                onCreateNewGroup = {
-                    viewModel.prepareToCreateGroupWithSong()
-                }
+                songTitle = song.title,
+                songArtist = song.artist,
+                songThumbnailUrl = song.thumbnailUrl,
+                groups = uiState.artistSongGroups,
+                onGroupSelected = { groupId -> viewModel.onEvent(ArtistDetailEvent.AddSongToGroup(groupId)) },
+                onCreateNewGroup = { viewModel.onEvent(ArtistDetailEvent.PrepareToCreateGroupWithSong) }
             )
         }
     }
 
-    (itemToDelete as? Song)?.let { song ->
+    (uiState.itemPendingDeletion as? Song)?.let { song ->
         ConfirmDeleteDialog(
             itemType = "song",
             itemName = song.title,
-            onDismiss = { viewModel.itemPendingDeletion.value = null },
-            onConfirm = {
-                viewModel.deleteSong(song)
-                viewModel.itemPendingDeletion.value = null
-            }
+            onDismiss = { viewModel.onEvent(ArtistDetailEvent.ClearItemForDeletion) },
+            onConfirm = { viewModel.onEvent(ArtistDetailEvent.ConfirmDeletion) }
         )
     }
 
@@ -169,8 +150,8 @@ fun ArtistDetailScreen(
                 },
                 actions = {
                     ArtistSortMenu(
-                        currentSortOrder = sortOrder,
-                        onSortOrderSelected = { viewModel.setSortOrder(it) }
+                        currentSortOrder = uiState.sortOrder,
+                        onSortOrderSelected = { viewModel.onEvent(ArtistDetailEvent.SetSortOrder(it)) }
                     )
                     Box {
                         IconButton(onClick = { showMenu = true }) {
@@ -179,33 +160,40 @@ fun ArtistDetailScreen(
                         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                             DropdownMenuItem(
                                 text = { Text("Play All") },
-                                onClick = { viewModel.playAll(); showMenu = false }
+                                onClick = { viewModel.onEvent(ArtistDetailEvent.PlayAll); showMenu = false }
                             )
                             DropdownMenuItem(
                                 text = { Text("Shuffle All") },
-                                onClick = { viewModel.shuffleAll(); showMenu = false }
+                                onClick = { viewModel.onEvent(ArtistDetailEvent.ShuffleAll); showMenu = false }
                             )
                             DropdownMenuItem(
                                 text = { Text("Shuffle Ungrouped") },
-                                onClick = { viewModel.shuffleUngrouped(); showMenu = false }
+                                onClick = { viewModel.onEvent(ArtistDetailEvent.ShuffleUngrouped); showMenu = false }
                             )
-                            val toggleText = if (artist?.downloadAutomatically == true) "Disable auto-download" else "Enable auto-download"
+                            val toggleText = if (uiState.artist?.downloadAutomatically == true) "Disable auto-download" else "Enable auto-download"
                             DropdownMenuItem(
                                 text = { Text(toggleText) },
-                                onClick = { viewModel.toggleAutoDownload(); showMenu = false }
+                                onClick = { viewModel.onEvent(ArtistDetailEvent.ToggleAutoDownload); showMenu = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Remove all downloads") },
+                                onClick = {
+                                    viewModel.onEvent(ArtistDetailEvent.ShowRemoveDownloadsConfirm)
+                                    showMenu = false
+                                }
                             )
                             HorizontalDivider()
                             DropdownMenuItem(
                                 text = { Text("Create group") },
                                 onClick = {
-                                    viewModel.prepareToCreateSongGroup()
+                                    viewModel.onEvent(ArtistDetailEvent.PrepareToCreateSongGroup)
                                     showMenu = false
                                 }
                             )
                             DropdownMenuItem(
                                 text = { Text("Edit song order") },
                                 onClick = {
-                                    artist?.artistId?.let(onEditArtistSongs)
+                                    uiState.artist?.artistId?.let(onEditArtistSongs)
                                     showMenu = false
                                 }
                             )
@@ -216,7 +204,7 @@ fun ArtistDetailScreen(
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { paddingValues ->
-        if (displayList.isEmpty()) {
+        if (uiState.displayList.isEmpty()) {
             EmptyStateMessage(message = "No songs found for this artist.")
         } else {
             val listState = rememberLazyListState()
@@ -227,38 +215,37 @@ fun ArtistDetailScreen(
                     .padding(paddingValues)
                     .fillMaxSize()
             ) {
-                items(displayList, key = { item ->
+                items(uiState.displayList, key = { item ->
                     when (item) {
                         is ArtistDetailListItem.GroupHeader -> "group-${item.data.group.groupId}"
-                        is ArtistDetailListItem.SongItem -> "song-${item.songForList.song.songId}"
+                        is ArtistDetailListItem.SongItem -> "song-${item.song.songId}"
                     }
                 }) { item ->
                     when (item) {
                         is ArtistDetailListItem.GroupHeader -> {
                             GroupHeaderItem(
                                 data = item.data,
-                                processUrls = viewModel::processThumbnails,
-                                onPlayClick = { viewModel.playGroup(item.data.group.groupId) },
-                                onShuffleClick = { viewModel.shuffleGroup(item.data.group.groupId) },
+                                onPlayClick = { viewModel.onEvent(ArtistDetailEvent.PlayGroup(item.data.group.groupId)) },
+                                onShuffleClick = { viewModel.onEvent(ArtistDetailEvent.ShuffleGroup(item.data.group.groupId)) },
                                 onClick = { onGroupClick(item.data.group.groupId) },
                                 onEdit = { onEditGroup(item.data.group.groupId) },
-                                onDelete = { viewModel.prepareToDeleteGroup(item.data.group) }
+                                onDelete = { viewModel.onEvent(ArtistDetailEvent.PrepareToDeleteGroup(item.data.group)) }
                             )
                         }
                         is ArtistDetailListItem.SongItem -> {
+                            val song = item.song
                             SongItem(
-                                song = item.songForList.song,
-                                downloadStatus = item.songForList.downloadStatus,
-                                onClick = { viewModel.onSongSelected(item.songForList.song) },
-                                onAddToPlaylistClick = { viewModel.selectItemForPlaylist(item.songForList.song) },
-                                onDeleteClick = { viewModel.itemPendingDeletion.value = item.songForList.song },
-                                onPlayNextClick = { viewModel.onPlaySongNext(item.songForList.song) },
-                                onAddToQueueClick = { viewModel.onAddSongToQueue(item.songForList.song) },
-                                onShuffleClick = { viewModel.onShuffleSong(item.songForList.song) },
-                                onGoToArtistClick = { viewModel.onGoToArtist(item.songForList.song) },
-                                onDownloadClick = { viewModel.downloadSong(item.songForList.song) },
-                                onDeleteDownloadClick = { viewModel.deleteSongDownload(item.songForList.song) },
-                                onAddToGroupClick = { viewModel.selectSongToAddToGroup(item.songForList.song) }
+                                song = song,
+                                onClick = { viewModel.onEvent(ArtistDetailEvent.SongSelected(song)) },
+                                onAddToPlaylistClick = { viewModel.onEvent(ArtistDetailEvent.SelectItemForPlaylist(song)) },
+                                onDeleteClick = { viewModel.onEvent(ArtistDetailEvent.SetItemForDeletion(song)) },
+                                onPlayNextClick = { viewModel.onEvent(ArtistDetailEvent.PlayNext(song)) },
+                                onAddToQueueClick = { viewModel.onEvent(ArtistDetailEvent.AddToQueue(song)) },
+                                onShuffleClick = { viewModel.onEvent(ArtistDetailEvent.ShuffleSong(song)) },
+                                onGoToArtistClick = { viewModel.onEvent(ArtistDetailEvent.GoToArtist(song)) },
+                                onDownloadClick = { viewModel.onEvent(ArtistDetailEvent.DownloadSong(song)) },
+                                onDeleteDownloadClick = { viewModel.onEvent(ArtistDetailEvent.DeleteDownload(song)) },
+                                onAddToGroupClick = { viewModel.onEvent(ArtistDetailEvent.SelectSongToAddToGroup(song)) }
                             )
                         }
                     }
@@ -271,7 +258,6 @@ fun ArtistDetailScreen(
 @Composable
 fun GroupHeaderItem(
     data: GroupHeaderData,
-    processUrls: suspend (List<String>) -> List<String>,
     onPlayClick: () -> Unit,
     onShuffleClick: () -> Unit,
     onClick: () -> Unit,
@@ -298,15 +284,6 @@ fun GroupHeaderItem(
                     contentDescription = "Group",
                     modifier = Modifier.fillMaxSize(),
                     tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
-                )
-                CompositeThumbnailImage(
-                    urls = data.thumbnailUrls,
-                    contentDescription = "Thumbnails for ${data.group.name}",
-                    processUrls = processUrls,
-                    modifier = Modifier
-                        .fillMaxSize(0.65f)
-                        .padding(top = 4.dp)
-                        .clip(RoundedCornerShape(3.dp))
                 )
             }
         },

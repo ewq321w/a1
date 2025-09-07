@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.example.m.R
+import com.example.m.ui.main.MainEvent
 import com.example.m.ui.main.MainViewModel
 import java.util.concurrent.TimeUnit
 
@@ -117,7 +118,7 @@ fun PlayerScreen(
                     },
                     valueRange = 0f..(playbackState.totalDuration.toFloat().takeIf { it > 0 } ?: 1f),
                     onValueChangeFinished = {
-                        viewModel.seekTo(sliderPosition.toLong())
+                        viewModel.onEvent(MainEvent.SeekTo(sliderPosition.toLong()))
                         userIsDragging = false
                     },
                     modifier = Modifier.padding(vertical = 16.dp),
@@ -143,14 +144,14 @@ fun PlayerScreen(
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = viewModel::skipToPrevious, modifier = Modifier.size(55.dp)) {
+                    IconButton(onClick = { viewModel.onEvent(MainEvent.SkipToPrevious) }, modifier = Modifier.size(55.dp)) {
                         Icon(
                             Icons.Default.SkipPrevious, contentDescription = "Previous",
                             tint = MaterialTheme.colorScheme.onBackground,
                             modifier = Modifier.size(40.dp)
                         )
                     }
-                    IconButton(onClick = viewModel::togglePlayPause, modifier = Modifier.size(100.dp)) {
+                    IconButton(onClick = { viewModel.onEvent(MainEvent.TogglePlayPause) }, modifier = Modifier.size(100.dp)) {
                         Icon(
                             imageVector = if (isPlaying) Icons.Default.PauseCircleFilled else Icons.Default.PlayCircleFilled,
                             contentDescription = "Play/Pause",
@@ -158,7 +159,7 @@ fun PlayerScreen(
                             modifier = Modifier.size(80.dp)
                         )
                     }
-                    IconButton(onClick = viewModel::skipToNext, modifier = Modifier.size(55.dp)) {
+                    IconButton(onClick = { viewModel.onEvent(MainEvent.SkipToNext) }, modifier = Modifier.size(55.dp)) {
                         Icon(
                             Icons.Default.SkipNext, contentDescription = "Next",
                             tint = MaterialTheme.colorScheme.onBackground,

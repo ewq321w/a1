@@ -1,9 +1,6 @@
 // file: com/example/m/ui/library/edit/EditArtistSongGroupViewModel.kt
 package com.example.m.ui.library.edit
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -14,26 +11,34 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+data class EditArtistSongGroupUiState(
+    val groupWithSongs: ArtistSongGroupWithSongs? = null,
+    val songPendingRemoval: Song? = null
+)
+
+sealed interface EditArtistSongGroupEvent {
+    data class SongMoved(val from: Int, val to: Int) : EditArtistSongGroupEvent
+    data class SaveChanges(val newName: String) : EditArtistSongGroupEvent
+    data class RemoveSongClicked(val song: Song) : EditArtistSongGroupEvent
+    object ConfirmSongRemoval : EditArtistSongGroupEvent
+    object CancelSongRemoval : EditArtistSongGroupEvent
+}
+
 @HiltViewModel
 class EditArtistSongGroupViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val artistDao: ArtistDao,
-    private val thumbnailProcessor: ThumbnailProcessor
+    val thumbnailProcessor: ThumbnailProcessor
 ) : ViewModel() {
 
     private val groupId: Long = checkNotNull(savedStateHandle["groupId"])
 
-    private val _groupWithSongs = MutableStateFlow<ArtistSongGroupWithSongs?>(null)
-    val groupWithSongs: StateFlow<ArtistSongGroupWithSongs?> = _groupWithSongs
-
-    var songPendingRemoval by mutableStateOf<Song?>(null)
-        private set
-
-    suspend fun processThumbnails(urls: List<String>) = thumbnailProcessor.process(urls)
+    private val _uiState = MutableStateFlow(EditArtistSongGroupUiState())
+    val uiState: StateFlow<EditArtistSongGroupUiState> = _uiState.asStateFlow()
 
     init {
         viewModelScope.launch {
-            _groupWithSongs.value = artistDao.getArtistSongGroupWithSongsOrdered(groupId)
+            val group = artistDao.getArtistSongGroupWithSongsOrdered(groupId)
                 .map { map ->
                     map.entries.firstOrNull()?.let { entry ->
                         ArtistSongGroupWithSongs(
@@ -43,55 +48,57 @@ class EditArtistSongGroupViewModel @Inject constructor(
                     }
                 }
                 .first()
+            _uiState.update { it.copy(groupWithSongs = group) }
         }
     }
 
-    fun onSongMoved(from: Int, to: Int) {
-        _groupWithSongs.update { currentGroupWithSongs ->
-            currentGroupWithSongs?.let { groupWithSongs ->
-                val mutableSongs = groupWithSongs.songs.toMutableList()
+    fun onEvent(event: EditArtistSongGroupEvent) {
+        when (event) {
+            is EditArtistSongGroupEvent.SongMoved -> onSongMoved(event.from, event.to)
+            is EditArtistSongGroupEvent.SaveChanges -> saveChanges(event.newName)
+            is EditArtistSongGroupEvent.RemoveSongClicked -> _uiState.update { it.copy(songPendingRemoval = event.song) }
+            is EditArtistSongGroupEvent.ConfirmSongRemoval -> confirmSongRemoval()
+            is EditArtistSongGroupEvent.CancelSongRemoval -> _uiState.update { it.copy(songPendingRemoval = null) }
+        }
+    }
 
-                if (from >= 0 && from < mutableSongs.size &&
-                    to >= 0 && to < mutableSongs.size &&
-                    from != to
-                ) {
+    private fun onSongMoved(from: Int, to: Int) {
+        _uiState.update { currentState ->
+            currentState.groupWithSongs?.let { groupWithSongs ->
+                val mutableSongs = groupWithSongs.songs.toMutableList()
+                if (from in mutableSongs.indices && to in mutableSongs.indices) {
                     val movedSong = mutableSongs.removeAt(from)
                     mutableSongs.add(to, movedSong)
-                    groupWithSongs.copy(songs = mutableSongs)
+                    currentState.copy(groupWithSongs = groupWithSongs.copy(songs = mutableSongs))
                 } else {
-                    groupWithSongs
+                    currentState
+                }
+            } ?: currentState
+        }
+    }
+
+    private fun saveChanges(newName: String) {
+        val currentGroupWithSongs = _uiState.value.groupWithSongs ?: return
+        viewModelScope.launch {
+            if (currentGroupWithSongs.group.name != newName) {
+                artistDao.updateArtistSongGroup(currentGroupWithSongs.group.copy(name = newName))
+            }
+            artistDao.updateGroupSongOrder(groupId, currentGroupWithSongs.songs)
+        }
+    }
+
+    private fun confirmSongRemoval() {
+        _uiState.value.songPendingRemoval?.let { songToRemove ->
+            viewModelScope.launch {
+                artistDao.deleteSongFromArtistSongGroup(groupId, songToRemove.songId)
+                _uiState.update {
+                    val updatedSongs = it.groupWithSongs?.songs?.filterNot { s -> s.songId == songToRemove.songId }
+                    it.copy(
+                        songPendingRemoval = null,
+                        groupWithSongs = it.groupWithSongs?.copy(songs = updatedSongs ?: emptyList())
+                    )
                 }
             }
         }
-    }
-
-    fun saveChanges(newName: String) {
-        val currentGroupWithSongs = _groupWithSongs.value ?: return
-        val currentGroup = currentGroupWithSongs.group
-        val currentSongs = currentGroupWithSongs.songs
-
-        viewModelScope.launch {
-            if (currentGroup.name != newName) {
-                artistDao.updateArtistSongGroup(currentGroup.copy(name = newName))
-            }
-            artistDao.updateGroupSongOrder(groupId, currentSongs)
-        }
-    }
-
-    fun onRemoveSongClicked(song: Song) {
-        songPendingRemoval = song
-    }
-
-    fun confirmSongRemoval() {
-        songPendingRemoval?.let { songToRemove ->
-            viewModelScope.launch {
-                artistDao.deleteSongFromArtistSongGroup(groupId, songToRemove.songId)
-                songPendingRemoval = null
-            }
-        }
-    }
-
-    fun cancelSongRemoval() {
-        songPendingRemoval = null
     }
 }

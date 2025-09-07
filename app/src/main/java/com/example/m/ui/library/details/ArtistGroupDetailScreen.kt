@@ -30,57 +30,49 @@ fun ArtistGroupDetailScreen(
     onEditArtistSongs: (Long) -> Unit,
     viewModel: ArtistGroupDetailViewModel = hiltViewModel()
 ) {
-    val groupWithArtists by viewModel.groupWithArtists.collectAsState()
-    val artistsInGroup by viewModel.artistsInGroup.collectAsState()
-    val allPlaylists by viewModel.allPlaylists.collectAsState()
-
-    val showCreatePlaylistDialog by remember { derivedStateOf { viewModel.showCreatePlaylistDialog } }
-    val itemToAddToPlaylist by remember { derivedStateOf { viewModel.itemToAddToPlaylist } }
+    val uiState by viewModel.uiState.collectAsState()
     val sheetState = rememberModalBottomSheetState()
 
-    if (showCreatePlaylistDialog) {
+    if (uiState.showCreatePlaylistDialog) {
         CreatePlaylistDialog(
-            onDismiss = { viewModel.dismissCreatePlaylistDialog() },
-            onCreate = { name -> viewModel.createPlaylistAndAddPendingItem(name) }
+            onDismiss = { viewModel.onEvent(ArtistGroupDetailEvent.DismissCreatePlaylistDialog) },
+            onCreate = { name -> viewModel.onEvent(ArtistGroupDetailEvent.CreatePlaylist(name)) }
         )
     }
 
-    val currentItemToAdd = itemToAddToPlaylist
-    if (currentItemToAdd != null) {
+    uiState.itemToAddToPlaylist?.let { item ->
         val songTitle: String
         val songArtist: String
         val thumbnailUrl: String
 
-        when (currentItemToAdd) {
+        when (item) {
             is Song -> {
-                songTitle = currentItemToAdd.title
-                songArtist = currentItemToAdd.artist
-                thumbnailUrl = currentItemToAdd.getHighQualityThumbnailUrl()
+                songTitle = item.title
+                songArtist = item.artist
+                thumbnailUrl = item.getHighQualityThumbnailUrl()
             }
             is StreamInfoItem -> {
-                songTitle = currentItemToAdd.name ?: "Unknown"
-                songArtist = currentItemToAdd.uploaderName ?: "Unknown"
-                thumbnailUrl = currentItemToAdd.getHighQualityThumbnailUrl()
+                songTitle = item.name ?: "Unknown"
+                songArtist = item.uploaderName ?: "Unknown"
+                thumbnailUrl = item.getHighQualityThumbnailUrl()
             }
-            else -> {
-                songTitle = ""; songArtist = ""; thumbnailUrl = ""
-            }
+            else -> return@let
         }
 
         ModalBottomSheet(
-            onDismissRequest = { viewModel.dismissAddToPlaylistSheet() },
+            onDismissRequest = { viewModel.onEvent(ArtistGroupDetailEvent.DismissAddToPlaylistSheet) },
             sheetState = sheetState
         ) {
             AddToPlaylistSheet(
                 songTitle = songTitle,
                 songArtist = songArtist,
                 songThumbnailUrl = thumbnailUrl,
-                playlists = allPlaylists,
+                playlists = uiState.allPlaylists,
                 onPlaylistSelected = { playlistId ->
-                    viewModel.onPlaylistSelectedForAddition(playlistId)
+                    viewModel.onEvent(ArtistGroupDetailEvent.PlaylistSelectedForAddition(playlistId))
                 },
                 onCreateNewPlaylist = {
-                    viewModel.prepareToCreatePlaylist()
+                    viewModel.onEvent(ArtistGroupDetailEvent.PrepareToCreatePlaylist)
                 }
             )
         }
@@ -89,7 +81,7 @@ fun ArtistGroupDetailScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(groupWithArtists?.group?.name ?: "Group", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = { Text(uiState.groupWithArtists?.group?.name ?: "Group", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -98,10 +90,10 @@ fun ArtistGroupDetailScreen(
             )
         }
     ) { paddingValues ->
-        if (artistsInGroup.isEmpty()) {
-            val message = if (groupWithArtists == null) "Loading..." else "This group is empty."
+        if (uiState.artistsInGroup.isEmpty()) {
+            val message = if (uiState.groupWithArtists == null) "Loading..." else "This group is empty."
             Box(Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
-                if (groupWithArtists == null) {
+                if (uiState.groupWithArtists == null) {
                     CircularProgressIndicator()
                 } else {
                     EmptyStateMessage(message = message)
@@ -113,19 +105,19 @@ fun ArtistGroupDetailScreen(
                     .padding(paddingValues)
                     .fillMaxSize()
             ) {
-                items(artistsInGroup, key = { it.artist.artistId }) { artistWithSongs ->
+                items(uiState.artistsInGroup, key = { it.artist.artistId }) { artistWithSongs ->
                     val artist = artistWithSongs.artist
                     ArtistItem(
                         artistWithSongs = artistWithSongs,
                         onClick = { onArtistClick(artist.artistId) },
-                        onPlay = { viewModel.playArtist(artist) },
-                        onShuffle = { viewModel.shuffleArtist(artist) },
-                        onShuffleUngrouped = { viewModel.shuffleUngroupedSongsForArtist(artist) },
+                        onPlay = { viewModel.onEvent(ArtistGroupDetailEvent.PlayArtist(artist)) },
+                        onShuffle = { viewModel.onEvent(ArtistGroupDetailEvent.ShuffleArtist(artist)) },
+                        onShuffleUngrouped = { viewModel.onEvent(ArtistGroupDetailEvent.ShuffleUngroupedSongs(artist)) },
                         onEdit = { onEditArtistSongs(artist.artistId) },
-                        onToggleAutoDownload = { viewModel.toggleAutoDownloadForArtist(artist) },
-                        groupAction = "Remove from group" to { viewModel.removeArtistFromGroup(artist) },
-                        onHideArtist = { viewModel.hideArtist(artist) },
-                        processUrls = viewModel::processThumbnails
+                        onToggleAutoDownload = { viewModel.onEvent(ArtistGroupDetailEvent.ToggleAutoDownload(artist)) },
+                        groupAction = "Remove from group" to { viewModel.onEvent(ArtistGroupDetailEvent.RemoveArtistFromGroup(artist)) },
+                        onHideArtist = { viewModel.onEvent(ArtistGroupDetailEvent.HideArtist(artist)) },
+                        processUrls = { urls -> viewModel.thumbnailProcessor.process(urls) }
                     )
                 }
             }

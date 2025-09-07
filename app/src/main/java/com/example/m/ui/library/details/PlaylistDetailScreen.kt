@@ -20,7 +20,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.m.data.database.Playlist
 import com.example.m.data.database.Song
 import com.example.m.ui.common.getHighQualityThumbnailUrl
-import com.example.m.ui.library.SongForList
 import com.example.m.ui.library.components.*
 import kotlinx.coroutines.flow.collectLatest
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
@@ -33,15 +32,9 @@ fun PlaylistDetailScreen(
     onArtistClick: (Long) -> Unit
 ) {
     val viewModel: PlaylistDetailViewModel = hiltViewModel()
-    val playlist by viewModel.playlist.collectAsState()
-    val songs by viewModel.songs.collectAsState()
-    val allPlaylists by viewModel.allPlaylists.collectAsState()
-    val sortOrder by viewModel.sortOrder.collectAsState()
+    val uiState by viewModel.uiState.collectAsState()
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
-
-    val showCreatePlaylistDialog by remember { derivedStateOf { viewModel.showCreatePlaylistDialog } }
-    val itemToAddToPlaylist by remember { derivedStateOf { viewModel.itemToAddToPlaylist } }
     val sheetState = rememberModalBottomSheetState()
 
     LaunchedEffect(Unit) {
@@ -56,39 +49,34 @@ fun PlaylistDetailScreen(
         }
     }
 
-    if (showCreatePlaylistDialog) {
+    if (uiState.showCreatePlaylistDialog) {
         CreatePlaylistDialog(
-            onDismiss = { viewModel.dismissCreatePlaylistDialog() },
-            onCreate = { name -> viewModel.createPlaylistAndAddPendingItem(name) }
+            onDismiss = { viewModel.onEvent(PlaylistDetailEvent.DismissCreatePlaylistDialog) },
+            onCreate = { name -> viewModel.onEvent(PlaylistDetailEvent.CreatePlaylist(name)) }
         )
     }
 
-    val currentItem = itemToAddToPlaylist
-    if (currentItem != null) {
+    uiState.itemToAddToPlaylist?.let { currentItem ->
         val songTitle = if (currentItem is Song) currentItem.title else (currentItem as StreamInfoItem).name ?: "Unknown"
         val songArtist = if (currentItem is Song) currentItem.artist else (currentItem as StreamInfoItem).uploaderName ?: "Unknown"
         val thumbnailUrl = if (currentItem is Song) currentItem.thumbnailUrl else (currentItem as StreamInfoItem).getHighQualityThumbnailUrl()
 
         ModalBottomSheet(
-            onDismissRequest = { viewModel.dismissAddToPlaylistSheet() },
+            onDismissRequest = { viewModel.onEvent(PlaylistDetailEvent.DismissAddToPlaylistSheet) },
             sheetState = sheetState
         ) {
             AddToPlaylistSheet(
                 songTitle = songTitle,
                 songArtist = songArtist,
                 songThumbnailUrl = thumbnailUrl,
-                playlists = allPlaylists,
-                onPlaylistSelected = { playlistId ->
-                    viewModel.onPlaylistSelectedForAddition(playlistId)
-                },
-                onCreateNewPlaylist = {
-                    viewModel.prepareToCreatePlaylist()
-                }
+                playlists = uiState.allPlaylists,
+                onPlaylistSelected = { playlistId -> viewModel.onEvent(PlaylistDetailEvent.PlaylistSelectedForAddition(playlistId)) },
+                onCreateNewPlaylist = { viewModel.onEvent(PlaylistDetailEvent.PrepareToCreatePlaylist) }
             )
         }
     }
 
-    playlist?.let { pl ->
+    uiState.playlist?.let { pl ->
         var playlistToRemoveDownloads by remember { mutableStateOf<Playlist?>(null) }
 
         playlistToRemoveDownloads?.let {
@@ -97,7 +85,7 @@ fun PlaylistDetailScreen(
                 itemName = it.name,
                 onDismiss = { playlistToRemoveDownloads = null },
                 onConfirm = {
-                    viewModel.removeDownloadsForPlaylist()
+                    viewModel.onEvent(PlaylistDetailEvent.RemoveAllDownloads)
                     playlistToRemoveDownloads = null
                 }
             )
@@ -110,16 +98,16 @@ fun PlaylistDetailScreen(
                 onDismiss = { showDeleteConfirmation = false },
                 onConfirm = {
                     onBack()
-                    viewModel.deletePlaylist()
+                    viewModel.onEvent(PlaylistDetailEvent.DeletePlaylist)
                 }
             )
         }
 
         PlaylistDetailContent(
             playlist = pl,
-            songs = songs,
-            viewModel = viewModel,
-            sortOrder = sortOrder,
+            songs = uiState.songs,
+            onEvent = viewModel::onEvent,
+            sortOrder = uiState.sortOrder,
             snackbarHostState = snackbarHostState,
             onBack = onBack,
             onEdit = { onEditPlaylist(pl.playlistId) },
@@ -131,20 +119,11 @@ fun PlaylistDetailScreen(
             topBar = {
                 TopAppBar(
                     title = { Text("Loading...") },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    }
+                    navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } }
                 )
             }
         ) { paddingValues ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues),
-                contentAlignment = Alignment.Center
-            ) {
+            Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
         }
@@ -155,8 +134,8 @@ fun PlaylistDetailScreen(
 @Composable
 private fun PlaylistDetailContent(
     playlist: Playlist,
-    songs: List<SongForList>,
-    viewModel: PlaylistDetailViewModel,
+    songs: List<Song>,
+    onEvent: (PlaylistDetailEvent) -> Unit,
     sortOrder: PlaylistSortOrder,
     snackbarHostState: SnackbarHostState,
     onBack: () -> Unit,
@@ -171,26 +150,20 @@ private fun PlaylistDetailContent(
         topBar = {
             TopAppBar(
                 title = { Text(playlist.name, maxLines = 1, modifier = Modifier.basicMarquee()) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
                 actions = {
                     PlaylistSortMenu(
                         currentSortOrder = sortOrder,
-                        onSortOrderSelected = { viewModel.setSortOrder(it) }
+                        onSortOrderSelected = { onEvent(PlaylistDetailEvent.SetSortOrder(it)) }
                     )
                     Box {
-                        IconButton(onClick = { showMenu = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "More options")
-                        }
+                        IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More options") }
                         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                            DropdownMenuItem(text = { Text("Play") }, onClick = { viewModel.onSongSelected(0); showMenu = false })
-                            DropdownMenuItem(text = { Text("Shuffle") }, onClick = { viewModel.shufflePlaylist(); showMenu = false })
+                            DropdownMenuItem(text = { Text("Play") }, onClick = { onEvent(PlaylistDetailEvent.SongSelected(0)); showMenu = false })
+                            DropdownMenuItem(text = { Text("Shuffle") }, onClick = { onEvent(PlaylistDetailEvent.ShufflePlaylist); showMenu = false })
                             DropdownMenuItem(text = { Text("Edit playlist") }, onClick = { onEdit(); showMenu = false })
                             val toggleText = if (playlist.downloadAutomatically) "Disable auto-download" else "Enable auto-download"
-                            DropdownMenuItem(text = { Text(toggleText) }, onClick = { viewModel.onAutoDownloadToggled(!playlist.downloadAutomatically); showMenu = false })
+                            DropdownMenuItem(text = { Text(toggleText) }, onClick = { onEvent(PlaylistDetailEvent.AutoDownloadToggled(!playlist.downloadAutomatically)); showMenu = false })
                             DropdownMenuItem(text = { Text("Remove all downloads") }, onClick = { onRemoveDownloads(); showMenu = false })
                             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                             DropdownMenuItem(text = { Text("Delete playlist") }, onClick = { onShowDeleteDialog(); showMenu = false })
@@ -209,19 +182,18 @@ private fun PlaylistDetailContent(
                     .padding(paddingValues)
                     .fillMaxSize()
             ) {
-                itemsIndexed(songs, key = { _, item -> item.song.songId }) { index, item ->
+                itemsIndexed(songs, key = { _, item -> item.songId }) { index, item ->
                     SongItem(
-                        song = item.song,
-                        downloadStatus = item.downloadStatus,
-                        onClick = { viewModel.onSongSelected(index) },
-                        onAddToPlaylistClick = { viewModel.selectItemForPlaylist(item.song) },
-                        onRemoveFromPlaylistClick = { viewModel.removeSongFromPlaylist(item.song.songId) },
-                        onPlayNextClick = { viewModel.onPlaySongNext(item.song) },
-                        onAddToQueueClick = { viewModel.onAddSongToQueue(item.song) },
-                        onShuffleClick = { viewModel.onShuffleSong(item.song) },
-                        onGoToArtistClick = { viewModel.onGoToArtist(item.song) },
-                        onDownloadClick = { viewModel.downloadSong(item.song) },
-                        onDeleteDownloadClick = { viewModel.deleteSongDownload(item.song) }
+                        song = item,
+                        onClick = { onEvent(PlaylistDetailEvent.SongSelected(index)) },
+                        onAddToPlaylistClick = { onEvent(PlaylistDetailEvent.SelectItemForPlaylist(item)) },
+                        onRemoveFromPlaylistClick = { onEvent(PlaylistDetailEvent.RemoveSong(item.songId)) },
+                        onPlayNextClick = { onEvent(PlaylistDetailEvent.PlayNext(item)) },
+                        onAddToQueueClick = { onEvent(PlaylistDetailEvent.AddToQueue(item)) },
+                        onShuffleClick = { onEvent(PlaylistDetailEvent.ShuffleSong(item)) },
+                        onGoToArtistClick = { onEvent(PlaylistDetailEvent.GoToArtist(item)) },
+                        onDownloadClick = { onEvent(PlaylistDetailEvent.DownloadSong(item)) },
+                        onDeleteDownloadClick = { onEvent(PlaylistDetailEvent.DeleteDownload(item)) }
                     )
                 }
             }

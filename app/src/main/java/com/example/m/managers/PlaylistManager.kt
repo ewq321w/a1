@@ -114,6 +114,17 @@ class PlaylistManager @Inject constructor(
 
     fun startDownload(song: Song) {
         scope.launch {
+            // Prevent re-queueing if already downloaded or in progress
+            val currentSong = songDao.getSongById(song.songId)
+            if (currentSong?.downloadStatus == DownloadStatus.DOWNLOADED ||
+                currentSong?.downloadStatus == DownloadStatus.QUEUED ||
+                currentSong?.downloadStatus == DownloadStatus.DOWNLOADING) {
+                return@launch
+            }
+
+            // Set status to QUEUED immediately for instant UI feedback
+            songDao.updateDownloadStatus(song.songId, DownloadStatus.QUEUED)
+
             downloadQueueDao.addItem(DownloadQueueItem(songId = song.songId))
             val intent = Intent(context, DownloadService::class.java).apply {
                 action = DownloadService.ACTION_PROCESS_QUEUE

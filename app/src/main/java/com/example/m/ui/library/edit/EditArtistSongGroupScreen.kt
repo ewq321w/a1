@@ -24,30 +24,28 @@ fun EditArtistSongGroupScreen(
     onBack: () -> Unit,
     viewModel: EditArtistSongGroupViewModel = hiltViewModel()
 ) {
-    val groupWithSongs by viewModel.groupWithSongs.collectAsState()
-    var groupName by remember(groupWithSongs) {
-        mutableStateOf(groupWithSongs?.group?.name ?: "")
+    val uiState by viewModel.uiState.collectAsState()
+    var groupName by remember(uiState.groupWithSongs) {
+        mutableStateOf(uiState.groupWithSongs?.group?.name ?: "")
     }
-    val songPendingRemoval by remember { derivedStateOf { viewModel.songPendingRemoval } }
-
-    val songs = groupWithSongs?.songs ?: emptyList()
+    val songs = uiState.groupWithSongs?.songs ?: emptyList()
 
     val state = rememberReorderableLazyListState(onMove = { from, to ->
         val adjustedFrom = from.index - 1
         val adjustedTo = to.index - 1
 
         if (adjustedFrom >= 0 && adjustedTo >= 0) {
-            viewModel.onSongMoved(adjustedFrom, adjustedTo)
+            viewModel.onEvent(EditArtistSongGroupEvent.SongMoved(adjustedFrom, adjustedTo))
         }
     })
 
-    songPendingRemoval?.let { songToRemove ->
+    uiState.songPendingRemoval?.let { songToRemove ->
         ConfirmRemoveDialog(
             itemType = "song",
             itemName = songToRemove.title,
             containerType = "group",
-            onDismiss = { viewModel.cancelSongRemoval() },
-            onConfirm = { viewModel.confirmSongRemoval() }
+            onDismiss = { viewModel.onEvent(EditArtistSongGroupEvent.CancelSongRemoval) },
+            onConfirm = { viewModel.onEvent(EditArtistSongGroupEvent.ConfirmSongRemoval) }
         )
     }
 
@@ -62,7 +60,7 @@ fun EditArtistSongGroupScreen(
                 },
                 actions = {
                     TextButton(onClick = {
-                        viewModel.saveChanges(groupName)
+                        viewModel.onEvent(EditArtistSongGroupEvent.SaveChanges(groupName))
                         onBack()
                     }) {
                         Text("Save")
@@ -72,7 +70,7 @@ fun EditArtistSongGroupScreen(
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { paddingValues ->
-        if (groupWithSongs == null) {
+        if (uiState.groupWithSongs == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
@@ -92,7 +90,7 @@ fun EditArtistSongGroupScreen(
                         CompositeThumbnailImage(
                             urls = songs.map { it.thumbnailUrl },
                             contentDescription = "Group thumbnail",
-                            processUrls = viewModel::processThumbnails,
+                            processUrls = { urls -> viewModel.thumbnailProcessor.process(urls) },
                             modifier = Modifier.size(150.dp)
                         )
                         Spacer(Modifier.height(16.dp))
@@ -106,16 +104,11 @@ fun EditArtistSongGroupScreen(
                     }
                 }
 
-                items(
-                    items = songs,
-                    key = { song: Song -> song.songId }
-                ) { song ->
+                items(items = songs, key = { song: Song -> song.songId }) { song ->
                     ReorderableItem(state, key = song.songId) { isDragging ->
-                        val onRemoveClickRemembered = remember(song) { { viewModel.onRemoveSongClicked(song) } }
-
                         EditSongItem(
                             song = song,
-                            onRemoveClick = onRemoveClickRemembered,
+                            onRemoveClick = { viewModel.onEvent(EditArtistSongGroupEvent.RemoveSongClicked(song)) },
                             state = state,
                             modifier = Modifier.shadow(if (isDragging) 4.dp else 0.dp)
                         )

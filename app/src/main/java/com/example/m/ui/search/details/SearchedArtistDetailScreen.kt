@@ -28,14 +28,16 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import com.example.m.R
-import com.example.m.ui.common.getHighQualityThumbnailUrl
-import com.example.m.ui.library.components.*
-import com.example.m.ui.search.SearchResultItem
-import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
-import org.schabi.newpipe.extractor.stream.StreamInfoItem
+import com.example.m.managers.DialogState
 import com.example.m.ui.common.getAvatar
 import com.example.m.ui.common.getBanner
 import com.example.m.ui.common.getThumbnail
+import com.example.m.ui.library.components.ArtistGroupConflictDialog
+import com.example.m.ui.library.components.ConfirmAddAllToLibraryDialog
+import com.example.m.ui.library.components.CreateLibraryGroupDialog
+import com.example.m.ui.library.components.SelectLibraryGroupDialog
+import com.example.m.ui.search.SearchResultItem
+import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
 import java.text.DecimalFormat
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -48,68 +50,60 @@ fun SearchedArtistDetailScreen(
     viewModel: SearchedArtistDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val showConfirmDialog by remember { derivedStateOf { viewModel.showConfirmAddAllDialog } }
-    val conflictDialogState by remember { derivedStateOf { viewModel.conflictDialogState } }
-    val showCreateGroupDialog by remember { derivedStateOf { viewModel.showCreateGroupDialog } }
-    val showSelectGroupDialog by remember { derivedStateOf { viewModel.showSelectGroupDialog } }
-    val libraryGroups by viewModel.libraryGroups.collectAsState()
+    val dialogState by viewModel.dialogState.collectAsState()
 
-    if (showCreateGroupDialog) {
-        CreateLibraryGroupDialog(
-            onDismiss = { viewModel.dismissCreateGroupDialog() },
-            onCreate = { name -> viewModel.createGroupAndProceed(name) },
-            isFirstGroup = libraryGroups.isEmpty()
-        )
+
+    when (val state = dialogState) {
+        is DialogState.CreateGroup -> {
+            CreateLibraryGroupDialog(
+                onDismiss = { viewModel.onEvent(SearchedArtistDetailEvent.DismissDialog) },
+                onCreate = { name -> viewModel.onEvent(SearchedArtistDetailEvent.RequestCreateGroup(name)) },
+                isFirstGroup = state.isFirstGroup
+            )
+        }
+        is DialogState.SelectGroup -> {
+            SelectLibraryGroupDialog(
+                groups = state.groups,
+                onDismiss = { viewModel.onEvent(SearchedArtistDetailEvent.DismissDialog) },
+                onGroupSelected = { groupId -> viewModel.onEvent(SearchedArtistDetailEvent.SelectGroup(groupId)) },
+                onCreateNewGroup = { viewModel.onEvent(SearchedArtistDetailEvent.DismissDialog) }
+            )
+        }
+        is DialogState.Conflict -> {
+            ArtistGroupConflictDialog(
+                artistName = state.song.artist,
+                conflictingGroupName = state.conflict.conflictingGroupName,
+                targetGroupName = state.targetGroupName,
+                onDismiss = { viewModel.onEvent(SearchedArtistDetailEvent.DismissDialog) },
+                onMoveArtistToTargetGroup = { viewModel.onEvent(SearchedArtistDetailEvent.ResolveConflict) }
+            )
+        }
+        is DialogState.Hidden -> {}
     }
 
-    if (showSelectGroupDialog) {
-        SelectLibraryGroupDialog(
-            groups = libraryGroups,
-            onDismiss = { viewModel.dismissSelectGroupDialog() },
-            onGroupSelected = { groupId -> viewModel.onGroupSelectedForAddition(groupId) },
-            onCreateNewGroup = viewModel::prepareToCreateGroup
-        )
-    }
-
-    conflictDialogState?.let { state ->
-        ArtistGroupConflictDialog(
-            artistName = state.song.artist,
-            conflictingGroupName = state.conflict.conflictingGroupName,
-            targetGroupName = state.targetGroupName,
-            onDismiss = { viewModel.dismissConflictDialog() },
-            onMoveArtistToTargetGroup = { viewModel.resolveConflictByMoving() }
-        )
-    }
-
-    if (showConfirmDialog) {
+    if (uiState.showConfirmAddAllDialog) {
         val artistName = uiState.channelInfo?.name ?: "this artist"
         ConfirmAddAllToLibraryDialog(
             itemName = artistName,
-            onDismiss = { viewModel.dismissConfirmAddAllToLibraryDialog() },
-            onConfirm = { viewModel.confirmAddAllToLibrary() }
+            onDismiss = { viewModel.onEvent(SearchedArtistDetailEvent.DismissConfirmAddAllToLibraryDialog) },
+            onConfirm = { viewModel.onEvent(SearchedArtistDetailEvent.ConfirmAddAllToLibrary) }
         )
     }
 
     Scaffold { paddingValues ->
         when {
             uiState.isLoading -> {
-                Box(modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues), contentAlignment = Alignment.Center) {
+                Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
             }
             uiState.errorMessage != null -> {
-                Box(modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues), contentAlignment = Alignment.Center) {
+                Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
                     Text(uiState.errorMessage!!)
                 }
             }
             else -> {
-                LazyColumn(modifier = Modifier
-                    .padding(paddingValues)
-                    .fillMaxSize()) {
+                LazyColumn(modifier = Modifier.padding(paddingValues).fillMaxSize()) {
                     item {
                         ArtistHeader(
                             onBack = onBack,
@@ -124,20 +118,12 @@ fun SearchedArtistDetailScreen(
                         item {
                             Column {
                                 Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp)
-                                        .padding(bottom = 4.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 4.dp),
                                     verticalAlignment = Alignment.Bottom,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     val headerText = if (uiState.searchType == "music") "Popular Songs" else "Videos"
-                                    Text(
-                                        text = headerText,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(bottom = 8.dp)
-                                    )
+                                    Text(text = headerText, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
                                     TextButton(
                                         onClick = {
                                             val info = uiState.channelInfo
@@ -157,13 +143,13 @@ fun SearchedArtistDetailScreen(
                             val index = uiState.songs.indexOf(item)
                             SearchResultItem(
                                 result = item.result,
-                                downloadStatus = item.downloadStatus,
+                                localSong = item.localSong,
                                 isSong = uiState.searchType == "music",
                                 imageLoader = viewModel.imageLoader,
-                                onPlay = { viewModel.onSongSelected(index) },
-                                onAddToLibrary = { viewModel.addSongToLibrary(item.result.streamInfo) },
-                                onPlayNext = { viewModel.onPlayNext(item.result.streamInfo) },
-                                onAddToQueue = { viewModel.onAddToQueue(item.result.streamInfo) }
+                                onPlay = { viewModel.onEvent(SearchedArtistDetailEvent.SongSelected(index)) },
+                                onAddToLibrary = { viewModel.onEvent(SearchedArtistDetailEvent.AddToLibrary(item.result.streamInfo)) },
+                                onPlayNext = { viewModel.onEvent(SearchedArtistDetailEvent.PlayNext(item.result.streamInfo)) },
+                                onAddToQueue = { viewModel.onEvent(SearchedArtistDetailEvent.AddToQueue(item.result.streamInfo)) }
                             )
                         }
                     }
@@ -172,20 +158,12 @@ fun SearchedArtistDetailScreen(
                         item {
                             Column {
                                 Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp)
-                                        .padding(bottom = 4.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 4.dp),
                                     verticalAlignment = Alignment.Bottom,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     val headerText = if (uiState.searchType == "music") "Releases" else "Playlists"
-                                    Text(
-                                        text = headerText,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(bottom = 8.dp)
-                                    )
+                                    Text(text = headerText, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
                                     TextButton(
                                         onClick = {
                                             val info = uiState.channelInfo
@@ -202,10 +180,7 @@ fun SearchedArtistDetailScreen(
                             }
                         }
                         item {
-                            LazyRow(
-                                contentPadding = PaddingValues(16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(16.dp)
-                            ) {
+                            LazyRow(contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                                 items(uiState.releases.take(10)) { release ->
                                     AlbumItem(
                                         album = release,
@@ -225,75 +200,36 @@ fun SearchedArtistDetailScreen(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ArtistHeader(
-    onBack: () -> Unit,
-    bannerUrl: String?,
-    avatarUrl: String?,
-    artistName: String,
-    subscriberCount: Long
-) {
+private fun ArtistHeader(onBack: () -> Unit, bannerUrl: String?, avatarUrl: String?, artistName: String, subscriberCount: Long) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Box {
             AsyncImage(
                 model = bannerUrl,
                 contentDescription = "Artist Banner",
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1060f / 175f),
+                modifier = Modifier.fillMaxWidth().aspectRatio(1060f / 175f),
                 contentScale = ContentScale.Crop,
                 error = painterResource(id = R.drawable.placeholder_gray),
                 placeholder = painterResource(id = R.drawable.placeholder_gray)
             )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Start,
-                verticalAlignment = Alignment.Top
-            ) {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier
-                        .padding(12.dp)
-                        .background(Color.Black.copy(alpha = 0.5f), CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = Color.White
-                    )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start, verticalAlignment = Alignment.Top) {
+                IconButton(onClick = onBack, modifier = Modifier.padding(12.dp).background(Color.Black.copy(alpha = 0.5f), CircleShape)) {
+                    Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
                 }
             }
         }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(
                 model = avatarUrl,
                 contentDescription = "Artist Avatar",
-                modifier = Modifier
-                    .size(70.dp)
-                    .clip(CircleShape),
+                modifier = Modifier.size(70.dp).clip(CircleShape),
                 placeholder = painterResource(id = R.drawable.placeholder_gray),
                 error = painterResource(id = R.drawable.placeholder_gray)
             )
             Spacer(modifier = Modifier.width(16.dp))
             Column(verticalArrangement = Arrangement.Center) {
-                Text(
-                    text = artistName,
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    modifier = Modifier.basicMarquee()
-                )
+                Text(text = artistName, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.basicMarquee())
                 if (subscriberCount >= 0) {
-                    Text(
-                        text = formatSubscriberCount(subscriberCount),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Text(text = formatSubscriberCount(subscriberCount), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -302,45 +238,20 @@ private fun ArtistHeader(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AlbumItem(
-    album: PlaylistInfoItem,
-    imageLoader: ImageLoader,
-    onClick: () -> Unit,
-    showArtist: Boolean = true
-) {
-    Column(
-        modifier = Modifier
-            .width(130.dp)
-            .clickable(onClick = onClick),
-        horizontalAlignment = Alignment.Start
-    ) {
+private fun AlbumItem(album: PlaylistInfoItem, imageLoader: ImageLoader, onClick: () -> Unit, showArtist: Boolean = true) {
+    Column(modifier = Modifier.width(130.dp).clickable(onClick = onClick), horizontalAlignment = Alignment.Start) {
         AsyncImage(
             model = album.getThumbnail(),
             imageLoader = imageLoader,
             contentDescription = album.name,
-            modifier = Modifier
-                .size(130.dp)
-                .clip(RoundedCornerShape(3.dp)),
+            modifier = Modifier.size(130.dp).clip(RoundedCornerShape(3.dp)),
             contentScale = ContentScale.Crop,
             error = painterResource(id = R.drawable.placeholder_gray),
             placeholder = painterResource(id = R.drawable.placeholder_gray)
         )
-        Text(
-            text = album.name ?: "Unknown Album",
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
-            modifier = Modifier
-                .padding(top = 4.dp)
-                .basicMarquee()
-        )
-        if(showArtist) {
-            Text(
-                text = album.uploaderName ?: "Unknown Artist",
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        Text(text = album.name ?: "Unknown Album", style = MaterialTheme.typography.bodyMedium, maxLines = 1, modifier = Modifier.padding(top = 4.dp).basicMarquee())
+        if (showArtist) {
+            Text(text = album.uploaderName ?: "Unknown Artist", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -349,9 +260,7 @@ private fun formatSubscriberCount(count: Long): String {
     if (count < 0) return ""
     if (count < 1000) return "$count subscribers"
     val thousands = count / 1000.0
-    if (count < 1_000_000) {
-        return "${DecimalFormat("0.#").format(thousands)}K subscribers"
-    }
+    if (count < 1_000_000) return "${DecimalFormat("0.#").format(thousands)}K subscribers"
     val millions = count / 1_000_000.0
     return "${DecimalFormat("0.##").format(millions)}M subscribers"
 }

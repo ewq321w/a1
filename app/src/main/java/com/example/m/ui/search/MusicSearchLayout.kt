@@ -1,7 +1,6 @@
 package com.example.m.ui.search
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -52,7 +51,7 @@ fun MusicSearchLayout(
             itemsIndexed(songsWithStatus.take(4), key = { index, item -> (item.result.streamInfo.url ?: "") + index }) { index, item ->
                 SearchResultItem(
                     result = item.result,
-                    downloadStatus = item.downloadStatus,
+                    localSong = item.localSong,
                     isSong = true,
                     imageLoader = imageLoader,
                     onPlay = { onSongClicked(index) },
@@ -71,13 +70,7 @@ fun MusicSearchLayout(
                     onMoreClicked = { onShowMore(SearchCategory.ARTISTS) }
                 )
             }
-            val artistsToShow = if (uiState.artists.size >= 2
-                && uiState.artists[1].artistInfo.name?.endsWith(" - Topic") == true) {
-                uiState.artists.take(2)
-            } else {
-                uiState.artists.take(1)
-            }
-            items(artistsToShow, key = { it.artistInfo.url!! }) { item ->
+            items(uiState.artists.take(2).distinctBy { it.artistInfo.name }, key = { it.artistInfo.url!! }) { item ->
                 ArtistListItem(
                     artistResult = item,
                     imageLoader = imageLoader,
@@ -196,16 +189,14 @@ private fun SectionHeader(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 4.dp),
-            verticalAlignment = Alignment.Bottom,
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 8.dp)
+                fontWeight = FontWeight.Bold
             )
             if (showMoreButton) {
                 TextButton(

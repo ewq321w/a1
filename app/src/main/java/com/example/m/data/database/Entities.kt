@@ -16,6 +16,14 @@ enum class SourceType {
     LOCAL_ONLY
 }
 
+enum class DownloadStatus {
+    NOT_DOWNLOADED,
+    QUEUED,
+    DOWNLOADING,
+    DOWNLOADED,
+    FAILED
+}
+
 @Entity(tableName = "library_groups")
 data class LibraryGroup(
     @PrimaryKey(autoGenerate = true)
@@ -53,7 +61,9 @@ data class Song(
     val dateAddedTimestamp: Long = System.currentTimeMillis(),
     val isInLibrary: Boolean = false,
     val playCount: Int = 0,
-    val libraryGroupId: Long? = null
+    val libraryGroupId: Long? = null,
+    val downloadStatus: DownloadStatus = DownloadStatus.NOT_DOWNLOADED,
+    val downloadProgress: Int = 0
 )
 
 @Entity(

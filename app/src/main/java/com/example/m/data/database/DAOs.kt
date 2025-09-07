@@ -13,6 +13,9 @@ interface LibraryGroupDao {
     @Query("SELECT * FROM library_groups WHERE groupId = :groupId LIMIT 1")
     suspend fun getGroup(groupId: Long): LibraryGroup?
 
+    @Query("SELECT * FROM library_groups WHERE name = :name LIMIT 1")
+    suspend fun getGroup(name: String): LibraryGroup?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertGroup(group: LibraryGroup): Long
 
@@ -36,6 +39,12 @@ interface SongDao {
 
     @Query("UPDATE songs SET playCount = playCount + 1 WHERE songId = :songId")
     suspend fun incrementPlayCount(songId: Long)
+
+    @Query("UPDATE songs SET downloadStatus = :status, downloadProgress = :progress WHERE songId = :songId")
+    suspend fun updateDownloadInfo(songId: Long, status: DownloadStatus, progress: Int)
+
+    @Query("UPDATE songs SET downloadStatus = :status WHERE songId = :songId")
+    suspend fun updateDownloadStatus(songId: Long, status: DownloadStatus)
 
     @Query("SELECT * FROM songs WHERE songId = :id")
     suspend fun getSongById(id: Long): Song?
@@ -138,10 +147,20 @@ interface SongDao {
     suspend fun upsertDownloadedSong(song: Song) {
         val existingSong = getSongByUrl(song.youtubeUrl)
         if (existingSong != null) {
-            existingSong.localFilePath = song.localFilePath
-            updateSong(existingSong)
+            updateSong(
+                existingSong.copy(
+                    localFilePath = song.localFilePath,
+                    downloadStatus = DownloadStatus.DOWNLOADED,
+                    downloadProgress = 100
+                )
+            )
         } else {
-            insertSong(song)
+            insertSong(
+                song.copy(
+                    downloadStatus = DownloadStatus.DOWNLOADED,
+                    downloadProgress = 100
+                )
+            )
         }
     }
 

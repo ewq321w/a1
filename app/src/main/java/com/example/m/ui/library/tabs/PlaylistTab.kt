@@ -2,7 +2,6 @@
 package com.example.m.ui.library.tabs
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -21,8 +20,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.m.data.database.PlaylistWithSongs
+import com.example.m.managers.ThumbnailProcessor
 import com.example.m.ui.library.DeletableItem
-import com.example.m.ui.library.LibraryViewModel
+import com.example.m.ui.library.LibraryEvent
 import com.example.m.ui.library.components.CompositeThumbnailImage
 import com.example.m.ui.library.components.ConfirmDeleteDialog
 import com.example.m.ui.library.components.EmptyStateMessage
@@ -32,7 +32,8 @@ fun PlaylistTabContent(
     playlists: List<PlaylistWithSongs>,
     onPlaylistClick: (Long) -> Unit,
     onEditPlaylist: (Long) -> Unit,
-    viewModel: LibraryViewModel,
+    onEvent: (LibraryEvent) -> Unit,
+    thumbnailProcessor: ThumbnailProcessor,
     modifier: Modifier = Modifier
 ) {
     var playlistToRemoveDownloads by remember { mutableStateOf<PlaylistWithSongs?>(null) }
@@ -43,7 +44,7 @@ fun PlaylistTabContent(
             itemName = playlist.playlist.name,
             onDismiss = { playlistToRemoveDownloads = null },
             onConfirm = {
-                viewModel.removeDownloadsForPlaylist(playlist)
+                onEvent(LibraryEvent.RemoveDownloadsForPlaylist(playlist))
                 playlistToRemoveDownloads = null
             }
         )
@@ -56,29 +57,17 @@ fun PlaylistTabContent(
             modifier = modifier,
             contentPadding = PaddingValues(bottom = 90.dp)
         ) {
-            items(
-                items = playlists,
-                key = { it.playlist.playlistId },
-                contentType = { "Playlist" }
-            ) { p ->
-                val rememberedOnClick = remember { { onPlaylistClick(p.playlist.playlistId) } }
-                val rememberedOnPlay = remember { { viewModel.playPlaylist(p) } }
-                val rememberedOnShuffle = remember { { viewModel.shufflePlaylist(p) } }
-                val rememberedOnToggleAutoDownload = remember { { viewModel.toggleAutoDownload(p) } }
-                val rememberedOnRemoveDownloads = remember { { playlistToRemoveDownloads = p } }
-                val rememberedOnEdit = remember { { onEditPlaylist(p.playlist.playlistId) } }
-                val rememberedOnDelete = remember { { viewModel.itemPendingDeletion.value = DeletableItem.DeletablePlaylist(p) } }
-
+            items(items = playlists, key = { it.playlist.playlistId }) { p ->
                 PlaylistItem(
                     playlistWithSongs = p,
-                    onClick = rememberedOnClick,
-                    onPlay = rememberedOnPlay,
-                    onShuffle = rememberedOnShuffle,
-                    onToggleAutoDownload = rememberedOnToggleAutoDownload,
-                    onRemoveDownloads = rememberedOnRemoveDownloads,
-                    onEdit = rememberedOnEdit,
-                    onDelete = rememberedOnDelete,
-                    viewModel = viewModel
+                    onClick = { onPlaylistClick(p.playlist.playlistId) },
+                    onPlay = { onEvent(LibraryEvent.PlayPlaylist(p)) },
+                    onShuffle = { onEvent(LibraryEvent.ShufflePlaylist(p)) },
+                    onToggleAutoDownload = { onEvent(LibraryEvent.ToggleAutoDownloadPlaylist(p)) },
+                    onRemoveDownloads = { playlistToRemoveDownloads = p },
+                    onEdit = { onEditPlaylist(p.playlist.playlistId) },
+                    onDelete = { onEvent(LibraryEvent.SetItemForDeletion(DeletableItem.DeletablePlaylist(p))) },
+                    thumbnailProcessor = thumbnailProcessor
                 )
             }
         }
@@ -96,50 +85,33 @@ fun PlaylistItem(
     onRemoveDownloads: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
-    viewModel: LibraryViewModel,
+    thumbnailProcessor: ThumbnailProcessor,
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
     ListItem(
-        headlineContent = {
-            Text(
-                playlistWithSongs.playlist.name,
-                fontWeight = FontWeight.Bold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-        },
+        headlineContent = { Text(playlistWithSongs.playlist.name, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium) },
         supportingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (playlistWithSongs.playlist.downloadAutomatically) {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = "Downloads Automatically",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier
-                            .size(16.dp)
-                            .padding(end = 4.dp)
-                    )
+                    Icon(imageVector = Icons.Default.CheckCircle, contentDescription = "Downloads Automatically", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
                 }
-                Text("${playlistWithSongs.songs.size} songs")
+                Text(text = "${playlistWithSongs.songs.size} songs", style = MaterialTheme.typography.bodySmall)
             }
         },
         leadingContent = {
             CompositeThumbnailImage(
                 urls = playlistWithSongs.songs.map { it.thumbnailUrl },
                 contentDescription = "Playlist thumbnail for ${playlistWithSongs.playlist.name}",
-                processUrls = viewModel::processThumbnails,
-                modifier = Modifier
-                    .size(54.dp)
-                    .clip(RoundedCornerShape(3.dp))
+                processUrls = { urls -> thumbnailProcessor.process(urls) },
+                modifier = Modifier.size(54.dp).clip(RoundedCornerShape(3.dp))
             )
         },
         trailingContent = {
             Box {
-                IconButton(onClick = { showMenu = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "More options")
-                }
+                IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More options") }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(text = { Text("Play") }, onClick = { onPlay(); showMenu = false })
                     DropdownMenuItem(text = { Text("Shuffle") }, onClick = { onShuffle(); showMenu = false })
@@ -152,12 +124,7 @@ fun PlaylistItem(
                 }
             }
         },
-        colors = ListItemDefaults.colors(
-            containerColor = Color.Transparent,
-            headlineColor = MaterialTheme.colorScheme.onSurface,
-            supportingColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            trailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
-        ),
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent, headlineColor = MaterialTheme.colorScheme.onSurface, supportingColor = MaterialTheme.colorScheme.onSurfaceVariant, trailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant),
         modifier = modifier.clickable(onClick = onClick).height(72.dp)
     )
 }

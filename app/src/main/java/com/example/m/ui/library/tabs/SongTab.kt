@@ -9,25 +9,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.m.data.database.Song
-import com.example.m.ui.library.SongForList
-import com.example.m.ui.library.SongSortOrder
+import com.example.m.ui.library.LibraryEvent
 import com.example.m.ui.library.components.SongItem
 
 @Composable
 fun SongsTabContent(
-    songs: List<SongForList>,
-    sortOrder: SongSortOrder,
-    onSongSelected: (Int) -> Unit,
-    onAddToPlaylistClick: (Song) -> Unit,
-    onDeleteSongClick: (Song) -> Unit,
-    onPlayNextClick: (Song) -> Unit,
-    onAddToQueueClick: (Song) -> Unit,
-    onShuffleClick: (Song) -> Unit,
-    onGoToArtistClick: (Song) -> Unit,
-    onDownloadClick: (Song) -> Unit,
-    onAddToLibraryClick: (Song) -> Unit,
-    modifier: Modifier = Modifier,
-    onDeleteDownloadClick: (Song) -> Unit
+    songs: List<Song>,
+    onEvent: (LibraryEvent) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyListState()
 
@@ -38,33 +27,20 @@ fun SongsTabContent(
     ) {
         itemsIndexed(
             items = songs,
-            key = { _, item -> item.song.songId }
-        ) { index, item ->
-            val song = item.song
-            val rememberedOnSongSelected = remember { { onSongSelected(index) } }
-            val rememberedOnAddToPlaylistClick = remember { { onAddToPlaylistClick(song) } }
-            val rememberedOnDeleteClick = remember { { onDeleteSongClick(song) } }
-            val rememberedOnPlayNextClick = remember { { onPlayNextClick(song) } }
-            val rememberedOnAddToQueueClick = remember { { onAddToQueueClick(song) } }
-            val rememberedOnShuffleClick = remember { { onShuffleClick(song) } }
-            val rememberedOnGoToArtistClick = remember { { onGoToArtistClick(song) } }
-            val rememberedOnDownloadClick = remember { { onDownloadClick(song) } }
-            val rememberedOnAddToLibraryClick = remember { { onAddToLibraryClick(song) } }
-            val rememberedOnDeleteDownloadClick = remember { { onDeleteDownloadClick(song) } }
-
+            key = { _, song -> song.songId }
+        ) { index, song ->
             SongItem(
                 song = song,
-                downloadStatus = item.downloadStatus,
-                onClick = rememberedOnSongSelected,
-                onAddToPlaylistClick = rememberedOnAddToPlaylistClick,
-                onDeleteClick = rememberedOnDeleteClick,
-                onPlayNextClick = rememberedOnPlayNextClick,
-                onAddToQueueClick = rememberedOnAddToQueueClick,
-                onShuffleClick = rememberedOnShuffleClick,
-                onGoToArtistClick = rememberedOnGoToArtistClick,
-                onDownloadClick = rememberedOnDownloadClick,
-                onAddToLibraryClick = rememberedOnAddToLibraryClick,
-                onDeleteDownloadClick = rememberedOnDeleteDownloadClick
+                onClick = { onEvent(LibraryEvent.SongSelected(index)) },
+                onAddToPlaylistClick = { onEvent(LibraryEvent.PrepareToShowPlaylistSheet(song)) },
+                onDeleteClick = { onEvent(LibraryEvent.SetItemForDeletion(com.example.m.ui.library.DeletableItem.DeletableSong(song))) },
+                onPlayNextClick = { onEvent(LibraryEvent.PlaySongNext(song)) },
+                onAddToQueueClick = { onEvent(LibraryEvent.AddSongToQueue(song)) },
+                onShuffleClick = { onEvent(LibraryEvent.ShuffleSong(song)) },
+                onGoToArtistClick = { onEvent(LibraryEvent.GoToArtist(song)) },
+                onDownloadClick = { onEvent(LibraryEvent.DownloadSong(song)) },
+                onAddToLibraryClick = { onEvent(LibraryEvent.AddToLibrary(song)) },
+                onDeleteDownloadClick = { onEvent(LibraryEvent.DeleteSongDownload(song)) }
             )
         }
     }

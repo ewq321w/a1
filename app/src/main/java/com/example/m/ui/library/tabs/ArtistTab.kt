@@ -2,7 +2,6 @@
 package com.example.m.ui.library.tabs
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -12,7 +11,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,10 +23,12 @@ import androidx.compose.ui.unit.dp
 import com.example.m.data.database.Artist
 import com.example.m.data.database.ArtistGroup
 import com.example.m.data.database.ArtistWithSongs
+import com.example.m.managers.ThumbnailProcessor
 import com.example.m.ui.library.DeletableItem
 import com.example.m.ui.library.LibraryArtistItem
-import com.example.m.ui.library.LibraryViewModel
+import com.example.m.ui.library.LibraryEvent
 import com.example.m.ui.library.components.CompositeThumbnailImage
+import com.example.m.ui.library.components.ConfirmDeleteDialog
 import com.example.m.ui.library.components.EmptyStateMessage
 
 @Composable
@@ -37,16 +37,28 @@ fun ArtistsTabContent(
     onArtistClick: (Long) -> Unit,
     onGoToArtistGroup: (Long) -> Unit,
     onEditArtistSongs: (Long) -> Unit,
-    viewModel: LibraryViewModel,
+    onEvent: (LibraryEvent) -> Unit,
+    thumbnailProcessor: ThumbnailProcessor,
     modifier: Modifier = Modifier
 ) {
+    var artistToRemoveDownloads by remember { mutableStateOf<Artist?>(null) }
+
+    artistToRemoveDownloads?.let { artist ->
+        ConfirmDeleteDialog(
+            itemType = "downloads for",
+            itemName = artist.name,
+            onDismiss = { artistToRemoveDownloads = null },
+            onConfirm = {
+                onEvent(LibraryEvent.RemoveDownloadsForArtist(artist))
+                artistToRemoveDownloads = null
+            }
+        )
+    }
+
     if (artists.isEmpty()) {
         EmptyStateMessage(message = "Your artists and groups will appear here.")
     } else {
-        LazyColumn(
-            modifier = modifier,
-            contentPadding = PaddingValues(bottom = 90.dp)
-        ) {
+        LazyColumn(modifier = modifier, contentPadding = PaddingValues(bottom = 90.dp)) {
             items(
                 items = artists,
                 key = { item ->
@@ -54,25 +66,23 @@ fun ArtistsTabContent(
                         is LibraryArtistItem.ArtistItem -> "artist-${item.artistWithSongs.artist.artistId}"
                         is LibraryArtistItem.GroupItem -> "group-${item.group.groupId}"
                     }
-                },
-                contentType = { item ->
-                    item::class.java.simpleName
                 }
             ) { libraryItem ->
                 when (libraryItem) {
                     is LibraryArtistItem.ArtistItem -> {
-                        val artistWithSongs = libraryItem.artistWithSongs
+                        val artist = libraryItem.artistWithSongs.artist
                         ArtistItem(
-                            artistWithSongs = artistWithSongs,
-                            onClick = { onArtistClick(artistWithSongs.artist.artistId) },
-                            onPlay = { viewModel.playArtist(artistWithSongs.artist) },
-                            onShuffle = { viewModel.shuffleArtist(artistWithSongs.artist) },
-                            onShuffleUngrouped = { viewModel.shuffleUngroupedSongsForArtist(artistWithSongs.artist) },
-                            onEdit = { onEditArtistSongs(artistWithSongs.artist.artistId) },
-                            onToggleAutoDownload = { viewModel.toggleAutoDownloadForArtist(artistWithSongs.artist) },
-                            groupAction = "Move to group..." to { viewModel.prepareToMoveArtist(artistWithSongs.artist) },
-                            onHideArtist = { viewModel.hideArtist(artistWithSongs.artist) },
-                            processUrls = viewModel::processThumbnails
+                            artistWithSongs = libraryItem.artistWithSongs,
+                            onClick = { onArtistClick(artist.artistId) },
+                            onPlay = { onEvent(LibraryEvent.PlayArtist(artist)) },
+                            onShuffle = { onEvent(LibraryEvent.ShuffleArtist(artist)) },
+                            onShuffleUngrouped = { onEvent(LibraryEvent.ShuffleUngroupedSongsForArtist(artist)) },
+                            onEdit = { onEditArtistSongs(artist.artistId) },
+                            onToggleAutoDownload = { onEvent(LibraryEvent.ToggleAutoDownloadArtist(artist)) },
+                            groupAction = "Move to group..." to { onEvent(LibraryEvent.PrepareToMoveArtist(artist)) },
+                            onHideArtist = { onEvent(LibraryEvent.HideArtist(artist)) },
+                            processUrls = { urls -> thumbnailProcessor.process(urls) },
+                            onRemoveDownloads = { artistToRemoveDownloads = artist }
                         )
                     }
                     is LibraryArtistItem.GroupItem -> {
@@ -82,11 +92,11 @@ fun ArtistsTabContent(
                             thumbnailUrls = libraryItem.thumbnailUrls,
                             artistCount = libraryItem.artistCount,
                             onClick = { onGoToArtistGroup(group.groupId) },
-                            onPlayClick = { viewModel.playArtistGroup(group) },
-                            onShuffleClick = { viewModel.shuffleArtistGroup(group) },
-                            onRenameClick = { viewModel.prepareToRenameGroup(group) },
-                            onDeleteClick = { viewModel.itemPendingDeletion.value = DeletableItem.DeletableArtistGroup(group) },
-                            processUrls = viewModel::processThumbnails
+                            onPlayClick = { onEvent(LibraryEvent.PlayArtistGroup(group)) },
+                            onShuffleClick = { onEvent(LibraryEvent.ShuffleArtistGroup(group)) },
+                            onRenameClick = { onEvent(LibraryEvent.PrepareToRenameGroup(group)) },
+                            onDeleteClick = { onEvent(LibraryEvent.SetItemForDeletion(DeletableItem.DeletableArtistGroup(group))) },
+                            processUrls = { urls -> thumbnailProcessor.process(urls) }
                         )
                     }
                 }
@@ -108,6 +118,7 @@ fun ArtistItem(
     processUrls: suspend (List<String>) -> List<String>,
     groupAction: Pair<String, () -> Unit>? = null,
     onHideArtist: (() -> Unit)? = null,
+    onRemoveDownloads: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -115,25 +126,14 @@ fun ArtistItem(
     val librarySongs = artistWithSongs.songs.filter { it.isInLibrary }
 
     ListItem(
-        headlineContent = {
-            Text(
-                artist.name,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-        },
+        headlineContent = { Text(artist.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium) },
         supportingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (artist.downloadAutomatically) {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = "Downloads Automatically",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp)
-                    )
+                    Icon(imageVector = Icons.Default.CheckCircle, contentDescription = "Downloads Automatically", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
                 }
-                Text("${librarySongs.size} songs")
+                Text(text = "${librarySongs.size} songs", style = MaterialTheme.typography.bodySmall)
             }
         },
         leadingContent = {
@@ -141,47 +141,29 @@ fun ArtistItem(
                 urls = librarySongs.map { it.thumbnailUrl },
                 contentDescription = "Thumbnail for ${artist.name}",
                 processUrls = processUrls,
-                modifier = Modifier
-                    .size(54.dp)
-                    .clip(RoundedCornerShape(3.dp))
+                modifier = Modifier.size(54.dp).clip(RoundedCornerShape(3.dp))
             )
         },
         trailingContent = {
             Box {
-                IconButton(onClick = { showMenu = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "More options")
-                }
+                IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More options") }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(text = { Text("Play") }, onClick = { onPlay(); showMenu = false })
                     DropdownMenuItem(text = { Text("Shuffle All") }, onClick = { onShuffle(); showMenu = false })
                     DropdownMenuItem(text = { Text("Shuffle Ungrouped") }, onClick = { onShuffleUngrouped(); showMenu = false })
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                     DropdownMenuItem(text = { Text("Edit song order") }, onClick = { onEdit(); showMenu = false })
-                    groupAction?.let { (text, action) ->
-                        DropdownMenuItem(text = { Text(text) }, onClick = {
-                            action()
-                            showMenu = false
-                        })
-                    }
-                    onHideArtist?.let { hideAction ->
-                        DropdownMenuItem(text = { Text("Hide Artist") }, onClick = {
-                            hideAction()
-                            showMenu = false
-                        })
-                    }
+                    groupAction?.let { (text, action) -> DropdownMenuItem(text = { Text(text) }, onClick = { action(); showMenu = false }) }
+                    onHideArtist?.let { hideAction -> DropdownMenuItem(text = { Text("Hide Artist") }, onClick = { hideAction(); showMenu = false }) }
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                     val toggleText = if (artist.downloadAutomatically) "Disable auto-download" else "Enable auto-download"
                     DropdownMenuItem(text = { Text(toggleText) }, onClick = { onToggleAutoDownload(); showMenu = false })
+                    onRemoveDownloads?.let { DropdownMenuItem(text = { Text("Remove all downloads") }, onClick = { it(); showMenu = false }) }
                 }
             }
         },
-        colors = ListItemDefaults.colors(
-            containerColor = Color.Transparent,
-            headlineColor = MaterialTheme.colorScheme.onSurface
-        ),
-        modifier = modifier
-            .clickable(onClick = onClick)
-            .height(72.dp)
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent, headlineColor = MaterialTheme.colorScheme.onSurface),
+        modifier = modifier.clickable(onClick = onClick).height(72.dp)
     )
 }
 
@@ -200,70 +182,33 @@ fun GroupItem(
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
-
     ListItem(
-        headlineContent = {
-            Text(
-                group.name,
-                fontWeight = FontWeight.Bold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-        },
-        supportingContent = {
-            Text("$artistCount artists")
-        },
+        headlineContent = { Text(group.name, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium) },
+        supportingContent = { Text(text = "$artistCount artists", style = MaterialTheme.typography.bodySmall) },
         leadingContent = {
-            Box(
-                modifier = Modifier.size(54.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Folder,
-                    contentDescription = "Artist Group",
-                    modifier = Modifier.fillMaxSize(),
-                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
-                )
+            Box(modifier = Modifier.size(54.dp), contentAlignment = Alignment.Center) {
+                Icon(imageVector = Icons.Default.Folder, contentDescription = "Artist Group", modifier = Modifier.fillMaxSize(), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f))
                 CompositeThumbnailImage(
                     urls = thumbnailUrls,
                     contentDescription = "Thumbnails for ${group.name}",
                     processUrls = processUrls,
-                    modifier = Modifier
-                        .fillMaxSize(0.65f)
-                        .padding(top = 4.dp)
-                        .clip(RoundedCornerShape(3.dp))
+                    modifier = Modifier.fillMaxSize(0.65f).padding(top = 4.dp).clip(RoundedCornerShape(3.dp))
                 )
             }
         },
         trailingContent = {
             Box {
-                IconButton(onClick = { showMenu = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "More options")
-                }
+                IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More options") }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                    DropdownMenuItem(text = { Text("Play") }, onClick = {
-                        onPlayClick()
-                        showMenu = false
-                    })
-                    DropdownMenuItem(text = { Text("Shuffle") }, onClick = {
-                        onShuffleClick()
-                        showMenu = false
-                    })
+                    DropdownMenuItem(text = { Text("Play") }, onClick = { onPlayClick(); showMenu = false })
+                    DropdownMenuItem(text = { Text("Shuffle") }, onClick = { onShuffleClick(); showMenu = false })
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                    DropdownMenuItem(text = { Text("Rename") }, onClick = {
-                        onRenameClick()
-                        showMenu = false
-                    })
-                    DropdownMenuItem(text = { Text("Delete") }, onClick = {
-                        onDeleteClick()
-                        showMenu = false
-                    })
+                    DropdownMenuItem(text = { Text("Rename") }, onClick = { onRenameClick(); showMenu = false })
+                    DropdownMenuItem(text = { Text("Delete") }, onClick = { onDeleteClick(); showMenu = false })
                 }
             }
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = modifier
-            .clickable(onClick = onClick)
-            .height(72.dp)
+        modifier = modifier.clickable(onClick = onClick).height(72.dp)
     )
 }

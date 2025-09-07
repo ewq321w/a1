@@ -13,9 +13,24 @@ import com.example.m.playback.MusicServiceConnection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
+
+data class MainUiState(
+    val isPlayerScreenVisible: Boolean = false
+)
+
+sealed interface MainEvent {
+    object ShowPlayerScreen : MainEvent
+    object HidePlayerScreen : MainEvent
+    object TogglePlayPause : MainEvent
+    object SkipToNext : MainEvent
+    object SkipToPrevious : MainEvent
+    data class SeekTo(val position: Long) : MainEvent
+}
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
@@ -28,13 +43,25 @@ class MainViewModel @Inject constructor(
     val isPlaying = musicServiceConnection.isPlaying
     val playbackState = musicServiceConnection.playbackState
 
-    val isPlayerScreenVisible = mutableStateOf(false)
+    private val _uiState = mutableStateOf(MainUiState())
+    val uiState: State<MainUiState> = _uiState
 
     private val _isDoingMaintenance = mutableStateOf(false)
     val isDoingMaintenance: State<Boolean> = _isDoingMaintenance
 
     private val _maintenanceResult = mutableStateOf<String?>(null)
     val maintenanceResult: State<String?> = _maintenanceResult
+
+    fun onEvent(event: MainEvent) {
+        when(event) {
+            is MainEvent.ShowPlayerScreen -> _uiState.value = _uiState.value.copy(isPlayerScreenVisible = true)
+            is MainEvent.HidePlayerScreen -> _uiState.value = _uiState.value.copy(isPlayerScreenVisible = false)
+            is MainEvent.TogglePlayPause -> musicServiceConnection.togglePlayPause()
+            is MainEvent.SkipToNext -> musicServiceConnection.skipToNext()
+            is MainEvent.SkipToPrevious -> musicServiceConnection.skipToPrevious()
+            is MainEvent.SeekTo -> musicServiceConnection.seekTo(event.position)
+        }
+    }
 
     fun checkAndResumeDownloadQueue() {
         viewModelScope.launch {
@@ -50,18 +77,14 @@ class MainViewModel @Inject constructor(
     fun runLibraryMaintenance() {
         viewModelScope.launch {
             _isDoingMaintenance.value = true
-            val reQueuedCount: Int
-            val cleanedCount: Int
-            val fixedLinksCount: Int
-            val cleanedArtistsCount: Int
-            val cleanedSongsCount: Int
-
-            withContext(Dispatchers.IO) {
-                reQueuedCount = libraryRepository.verifyLibraryEntries()
-                cleanedCount = libraryRepository.cleanOrphanedFiles()
-                fixedLinksCount = libraryRepository.fixMissingArtistLinks()
-                cleanedArtistsCount = libraryRepository.cleanOrphanedArtists()
-                cleanedSongsCount = libraryRepository.cleanOrphanedSongs()
+            val (reQueuedCount, cleanedCount, fixedLinksCount, cleanedArtistsCount, cleanedSongsCount) = withContext(Dispatchers.IO) {
+                listOf(
+                    async { libraryRepository.verifyLibraryEntries() },
+                    async { libraryRepository.cleanOrphanedFiles() },
+                    async { libraryRepository.fixMissingArtistLinks() },
+                    async { libraryRepository.cleanOrphanedArtists() },
+                    async { libraryRepository.cleanOrphanedSongs() }
+                ).awaitAll()
             }
 
             val results = listOfNotNull(
@@ -72,16 +95,11 @@ class MainViewModel @Inject constructor(
                 if (cleanedSongsCount > 0) "$cleanedSongsCount cached songs removed" else null
             )
 
-            _maintenanceResult.value = if (results.isEmpty()) {
-                "Library check complete. No issues found."
-            } else {
-                "Check complete: ${results.joinToString(", ")}."
-            }
+            _maintenanceResult.value = if (results.isEmpty()) "Library check complete. No issues found."
+            else "Check complete: ${results.joinToString(", ")}."
 
             if (reQueuedCount > 0) {
-                val intent = Intent(context, DownloadService::class.java).apply {
-                    action = DownloadService.ACTION_PROCESS_QUEUE
-                }
+                val intent = Intent(context, DownloadService::class.java).apply { action = DownloadService.ACTION_PROCESS_QUEUE }
                 context.startService(intent)
             }
             _isDoingMaintenance.value = false
@@ -90,29 +108,5 @@ class MainViewModel @Inject constructor(
 
     fun clearMaintenanceResult() {
         _maintenanceResult.value = null
-    }
-
-    fun showPlayerScreen() {
-        isPlayerScreenVisible.value = true
-    }
-
-    fun hidePlayerScreen() {
-        isPlayerScreenVisible.value = false
-    }
-
-    fun togglePlayPause() {
-        musicServiceConnection.togglePlayPause()
-    }
-
-    fun skipToNext() {
-        musicServiceConnection.skipToNext()
-    }
-
-    fun skipToPrevious() {
-        musicServiceConnection.skipToPrevious()
-    }
-
-    fun seekTo(position: Long) {
-        musicServiceConnection.seekTo(position.toLong())
     }
 }

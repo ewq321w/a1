@@ -1,12 +1,12 @@
 package com.example.m.ui.search
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -38,7 +38,8 @@ import androidx.compose.ui.unit.dp
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import com.example.m.R
-import com.example.m.managers.DownloadStatus
+import com.example.m.data.database.DownloadStatus
+import com.example.m.data.database.Song
 import com.example.m.ui.common.getThumbnail
 import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
 import java.text.DecimalFormat
@@ -95,7 +96,7 @@ fun AlbumItem(
 @Composable
 fun SearchResultItem(
     result: SearchResult,
-    downloadStatus: DownloadStatus?,
+    localSong: Song?,
     isSong: Boolean,
     imageLoader: ImageLoader,
     onPlay: () -> Unit,
@@ -104,7 +105,8 @@ fun SearchResultItem(
     onAddToQueue: () -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
-    val showStatusIcon = downloadStatus != null || result.isDownloaded || result.isInLibrary
+    val downloadStatus = localSong?.downloadStatus
+    val isDownloading = downloadStatus == DownloadStatus.DOWNLOADING || downloadStatus == DownloadStatus.QUEUED
 
     Row(
         modifier = Modifier
@@ -115,13 +117,9 @@ fun SearchResultItem(
         verticalAlignment = Alignment.CenterVertically
     ) {
         val imageModifier = if (isSong) {
-            Modifier
-                .size(54.dp)
-                .clip(RoundedCornerShape(3.dp))
+            Modifier.size(54.dp).clip(RoundedCornerShape(3.dp))
         } else {
-            Modifier
-                .size(90.dp, 54.dp)
-                .clip(RoundedCornerShape(3.dp))
+            Modifier.size(90.dp, 54.dp).clip(RoundedCornerShape(3.dp))
         }
 
         AsyncImage(
@@ -144,105 +142,33 @@ fun SearchResultItem(
                 style = MaterialTheme.typography.bodyMedium
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (showStatusIcon) {
-                    Box(
-                        modifier = Modifier.width(20.dp),
-                        contentAlignment = Alignment.CenterStart
-                    ) {
+                if (downloadStatus != null || result.isDownloaded || result.isInLibrary) {
+                    Box(modifier = Modifier.width(20.dp), contentAlignment = Alignment.CenterStart) {
                         val iconSize = 16.dp
                         when (downloadStatus) {
-                            is DownloadStatus.Downloading -> CircularProgressIndicator(
-                                progress = { downloadStatus.progress / 100f },
-                                modifier = Modifier.size(iconSize),
-                                strokeWidth = 1.5.dp
-                            )
-                            is DownloadStatus.Queued -> Icon(
-                                imageVector = Icons.Default.HourglassTop,
-                                contentDescription = "Queued",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(iconSize)
-                            )
-                            is DownloadStatus.Failed -> Icon(
-                                imageVector = Icons.Default.ErrorOutline,
-                                contentDescription = "Failed",
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(iconSize)
-                            )
-                            null -> {
-                                if (result.isDownloaded) {
-                                    Icon(
-                                        imageVector = Icons.Default.CheckCircle,
-                                        contentDescription = "Downloaded",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(iconSize)
-                                    )
-                                } else if (result.isInLibrary) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = "In Library",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(iconSize)
-                                    )
-                                }
+                            DownloadStatus.DOWNLOADING -> CircularProgressIndicator(progress = { (localSong?.downloadProgress ?: 0) / 100f }, modifier = Modifier.size(iconSize), strokeWidth = 1.5.dp)
+                            DownloadStatus.QUEUED -> Icon(imageVector = Icons.Default.HourglassTop, contentDescription = "Queued", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(iconSize))
+                            DownloadStatus.FAILED -> Icon(imageVector = Icons.Default.ErrorOutline, contentDescription = "Failed", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(iconSize))
+                            DownloadStatus.DOWNLOADED -> Icon(imageVector = Icons.Default.CheckCircle, contentDescription = "Downloaded", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(iconSize))
+                            DownloadStatus.NOT_DOWNLOADED, null -> {
+                                if (result.isInLibrary) Icon(imageVector = Icons.Default.Check, contentDescription = "In Library", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(iconSize))
                             }
                         }
                     }
                 }
-                Text(
-                    text = result.streamInfo.uploaderName ?: "Unknown Artist",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    style = MaterialTheme.typography.bodySmall,
-                    overflow = TextOverflow.Ellipsis
-                )
-                if (result.streamInfo.duration > 0) {
-                    Text(
-                        text = " • ${formatDuration(result.streamInfo.duration)}",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-                if (result.streamInfo.viewCount >= 0) {
-                    Text(
-                        text = " • ${formatViewCount(result.streamInfo.viewCount)}",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
+                Text(text = result.streamInfo.uploaderName ?: "Unknown Artist", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, style = MaterialTheme.typography.bodySmall, overflow = TextOverflow.Ellipsis)
+                if (result.streamInfo.duration > 0) Text(text = " • ${formatDuration(result.streamInfo.duration)}", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, style = MaterialTheme.typography.bodySmall)
+                if (result.streamInfo.viewCount >= 0) Text(text = " • ${formatViewCount(result.streamInfo.viewCount)}", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, style = MaterialTheme.typography.bodySmall)
             }
         }
         Box {
             IconButton(onClick = { showMenu = true }) {
                 Icon(Icons.Default.MoreVert, contentDescription = "More options", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            DropdownMenu(
-                expanded = showMenu,
-                onDismissRequest = { showMenu = false }
-            ) {
-                DropdownMenuItem(
-                    text = { Text("Play next") },
-                    onClick = {
-                        onPlayNext()
-                        showMenu = false
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Add to queue") },
-                    onClick = {
-                        onAddToQueue()
-                        showMenu = false
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text(if (result.isInLibrary) "In Library" else "Add to Library") },
-                    enabled = !result.isInLibrary,
-                    onClick = {
-                        onAddToLibrary()
-                        showMenu = false
-                    }
-                )
+            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                DropdownMenuItem(text = { Text("Play next") }, onClick = { onPlayNext(); showMenu = false })
+                DropdownMenuItem(text = { Text("Add to queue") }, onClick = { onAddToQueue(); showMenu = false })
+                DropdownMenuItem(text = { Text(if (result.isInLibrary) "In Library" else "Add to Library") }, enabled = !result.isInLibrary, onClick = { onAddToLibrary(); showMenu = false })
             }
         }
     }
@@ -253,24 +179,17 @@ internal fun formatDuration(totalSeconds: Long): String {
     val hours = totalSeconds / 3600
     val minutes = (totalSeconds % 3600) / 60
     val seconds = totalSeconds % 60
-    return if (hours > 0) {
-        String.format("%d:%02d:%02d", hours, minutes, seconds)
-    } else {
-        String.format("%d:%02d", minutes, seconds)
-    }
+    return if (hours > 0) String.format("%d:%02d:%02d", hours, minutes, seconds)
+    else String.format("%d:%02d", minutes, seconds)
 }
 
 internal fun formatViewCount(count: Long): String {
     if (count < 0) return ""
     if (count < 1000) return "$count views"
     val thousands = count / 1000.0
-    if (count < 1_000_000) {
-        return "${DecimalFormat("0.#").format(thousands)}K views"
-    }
+    if (count < 1_000_000) return "${DecimalFormat("0.#").format(thousands)}K views"
     val millions = count / 1_000_000.0
-    if (count < 1_000_000_000) {
-        return "${DecimalFormat("0.##").format(millions)}M views"
-    }
+    if (count < 1_000_000_000) return "${DecimalFormat("0.##").format(millions)}M views"
     val billions = count / 1_000_000_000.0
     return "${DecimalFormat("0.###").format(billions)}B views"
 }

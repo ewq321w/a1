@@ -3,6 +3,9 @@ package com.example.m
 import android.app.Application
 import com.example.m.util.CrashHandler
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.downloader.Downloader
 import org.schabi.newpipe.extractor.localization.Localization
@@ -17,13 +20,18 @@ class MainApplication : Application() {
     @Named("NewPipe")
     lateinit var downloader: Downloader
 
+    private val applicationScope = CoroutineScope(Dispatchers.Default)
+
     override fun onCreate() {
         super.onCreate()
         // Set up the crash handler
         Thread.setDefaultUncaughtExceptionHandler(CrashHandler(this))
 
-        val defaultLocale = Locale.getDefault()
-        val localization = Localization(defaultLocale.country, defaultLocale.language)
-        NewPipe.init(downloader, localization)
+        // Launch NewPipe initialization in a background coroutine to avoid blocking the main thread
+        applicationScope.launch {
+            val defaultLocale = Locale.getDefault()
+            val localization = Localization(defaultLocale.country, defaultLocale.language)
+            NewPipe.init(downloader, localization)
+        }
     }
 }

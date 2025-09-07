@@ -5,12 +5,11 @@ import android.util.Log
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 import androidx.sqlite.db.SupportSQLiteDatabase
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Provider
 
@@ -29,7 +28,7 @@ import javax.inject.Provider
         ArtistSongGroupSongCrossRef::class,
         LibraryGroup::class
     ],
-    version = 30,
+    version = 31,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -85,23 +84,21 @@ abstract class AppDatabase : RoomDatabase() {
 }
 
 class Converters {
-    @androidx.room.TypeConverter
-    fun fromSourceType(value: SourceType): String {
-        return value.name
-    }
+    @TypeConverter
+    fun fromSourceType(value: SourceType): String = value.name
 
-    @androidx.room.TypeConverter
-    fun toSourceType(value: String): SourceType {
-        return SourceType.valueOf(value)
-    }
+    @TypeConverter
+    fun toSourceType(value: String): SourceType = SourceType.valueOf(value)
 
-    @androidx.room.TypeConverter
-    fun fromStringList(list: List<String>?): String? {
-        return list?.joinToString(separator = "||")
-    }
+    @TypeConverter
+    fun fromDownloadStatus(value: DownloadStatus): String = value.name
 
-    @androidx.room.TypeConverter
-    fun toStringList(string: String?): List<String>? {
-        return string?.split("||")
-    }
+    @TypeConverter
+    fun toDownloadStatus(value: String): DownloadStatus = DownloadStatus.valueOf(value)
+
+    @TypeConverter
+    fun fromStringList(list: List<String>?): String? = list?.joinToString(separator = "||")
+
+    @TypeConverter
+    fun toStringList(string: String?): List<String>? = string?.split("||")
 }

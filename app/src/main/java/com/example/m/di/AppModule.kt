@@ -23,7 +23,6 @@ import dagger.hilt.components.SingletonComponent
 import okhttp3.Cache
 import okhttp3.OkHttpClient
 import java.io.File
-import javax.inject.Inject
 import javax.inject.Named
 import javax.inject.Provider
 import javax.inject.Singleton
@@ -88,7 +87,6 @@ object AppModule {
     @Provides
     fun providePlaylistDao(database: AppDatabase): PlaylistDao = database.playlistDao()
 
-    // FIX: Add the missing provider for the new LibraryGroupDao
     @Singleton
     @Provides
     fun provideLibraryGroupDao(database: AppDatabase): LibraryGroupDao = database.libraryGroupDao()

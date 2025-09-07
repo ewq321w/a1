@@ -9,7 +9,6 @@ import android.provider.MediaStore
 import androidx.core.net.toUri
 import com.example.m.data.database.*
 import com.example.m.data.repository.YoutubeRepository
-import com.example.m.managers.DownloadStatusManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import okhttp3.OkHttpClient
@@ -33,8 +32,6 @@ class DownloadService : Service() {
     @Inject
     lateinit var downloadQueueDao: DownloadQueueDao
     @Inject
-    lateinit var downloadStatusManager: DownloadStatusManager
-    @Inject
     @Named("NewPipe")
     lateinit var okHttpClient: OkHttpClient
 
@@ -51,11 +48,7 @@ class DownloadService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_PROCESS_QUEUE) {
             serviceScope.launch {
-                val queuedItems = downloadQueueDao.getQueuedSongIds(emptyList())
-                if (queuedItems.isNotEmpty()) {
-                    val songs = songDao.getSongsByIds(queuedItems)
-                    songs.forEach { song -> downloadStatusManager.setQueued(song.youtubeUrl) }
-                }
+                // The status is already set to QUEUED by the manager, so we just process the queue.
                 processNextInQueue()
             }
         }
@@ -87,7 +80,7 @@ class DownloadService : Service() {
                         }
 
                         if (fileExists) {
-                            downloadStatusManager.removeStatus(songToDownload.youtubeUrl)
+                            songDao.updateDownloadStatus(songToDownload.songId, DownloadStatus.DOWNLOADED)
                             downloadQueueDao.deleteItem(songToDownload.songId)
                             isProcessing.set(false)
                             processNextInQueue()
@@ -96,7 +89,6 @@ class DownloadService : Service() {
                         }
                     } else {
                         downloadQueueDao.deleteItem(nextQueueItem.songId)
-                        // Cannot get URL to remove from status manager, but it will be removed on next app launch
                         isProcessing.set(false)
                         processNextInQueue()
                     }
@@ -109,7 +101,7 @@ class DownloadService : Service() {
     }
 
     private suspend fun downloadSong(song: Song) {
-        downloadStatusManager.setDownloading(song.youtubeUrl, 0)
+        songDao.updateDownloadInfo(song.songId, DownloadStatus.DOWNLOADING, 0)
         var isDownloadSuccessful = false
         val tempFile = File(cacheDir, "${UUID.randomUUID()}.part")
 
@@ -137,7 +129,7 @@ class DownloadService : Service() {
                             async(Dispatchers.IO) {
                                 val startByte = i * segmentSize
                                 val endByte = if (i == segments - 1) contentLength - 1 else startByte + segmentSize - 1
-                                downloadSegment(song.youtubeUrl, audioStream.url.toString(), randomAccessFile, startByte, endByte, totalBytesDownloaded, contentLength)
+                                downloadSegment(song.songId, audioStream.url.toString(), randomAccessFile, startByte, endByte, totalBytesDownloaded, contentLength)
                             }
                         }.awaitAll()
                     }
@@ -167,7 +159,7 @@ class DownloadService : Service() {
                     resolver.update(uri, values, null, null)
 
                     val downloadedSong = song.copy(localFilePath = uri.toString())
-                    songDao.upsertDownloadedSong(downloadedSong)
+                    songDao.upsertDownloadedSong(downloadedSong) // This will update status to DOWNLOADED
                     isDownloadSuccessful = true
                     break
                 } else {
@@ -187,9 +179,7 @@ class DownloadService : Service() {
         }
 
         if (!isDownloadSuccessful) {
-            downloadStatusManager.setFailed(song.youtubeUrl)
-        } else {
-            downloadStatusManager.removeStatus(song.youtubeUrl)
+            songDao.updateDownloadStatus(song.songId, DownloadStatus.FAILED)
         }
 
         downloadQueueDao.deleteItem(song.songId)
@@ -214,7 +204,7 @@ class DownloadService : Service() {
     }
 
     private suspend fun downloadSegment(
-        songUrl: String,
+        songId: Long,
         url: String,
         raf: RandomAccessFile,
         startByte: Long,
@@ -239,7 +229,7 @@ class DownloadService : Service() {
                 currentPosition += bytesRead
                 val downloaded = totalBytesDownloaded.addAndGet(bytesRead.toLong())
                 val progress = ((downloaded * 100) / contentLength).toInt()
-                downloadStatusManager.setDownloading(songUrl, progress)
+                songDao.updateDownloadInfo(songId, DownloadStatus.DOWNLOADING, progress)
             }
         }
     }

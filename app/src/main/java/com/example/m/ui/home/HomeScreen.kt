@@ -30,8 +30,7 @@ import org.schabi.newpipe.extractor.stream.StreamInfoItem
 fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel()
 ) {
-    val recentMix by viewModel.recentMix.collectAsState()
-    val discoveryMix by viewModel.discoveryMix.collectAsState()
+    val uiState by viewModel.uiState.collectAsState()
 
     Scaffold(
         topBar = {
@@ -55,18 +54,18 @@ fun HomeScreen(
             item {
                 RecommendationSection(
                     title = "Your Recent Mix",
-                    items = recentMix,
-                    onItemClick = { index, _ ->
-                        viewModel.playRecentMix(index)
+                    items = uiState.recentMix,
+                    onItemClick = { index ->
+                        viewModel.onEvent(HomeEvent.PlayRecentMix(index))
                     }
                 )
             }
             item {
                 RecommendationSection(
                     title = "Discovery Mix",
-                    items = discoveryMix,
-                    onItemClick = { index, _ ->
-                        viewModel.playDiscoveryMix(index)
+                    items = uiState.discoveryMix,
+                    onItemClick = { index ->
+                        viewModel.onEvent(HomeEvent.PlayDiscoveryMix(index))
                     }
                 )
             }
@@ -78,7 +77,7 @@ fun HomeScreen(
 fun RecommendationSection(
     title: String,
     items: List<StreamInfoItem>,
-    onItemClick: (Int, List<StreamInfoItem>) -> Unit
+    onItemClick: (Int) -> Unit
 ) {
     if (items.isNotEmpty()) {
         Column {
@@ -94,7 +93,7 @@ fun RecommendationSection(
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 itemsIndexed(items) { index, item ->
-                    val rememberedOnClick = remember { { onItemClick(index, items) } }
+                    val rememberedOnClick = remember { { onItemClick(index) } }
                     RecommendationItem(
                         item = item,
                         onClick = rememberedOnClick

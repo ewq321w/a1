@@ -33,7 +33,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import coil.ImageLoader
 import coil.compose.AsyncImage
-import com.example.m.data.database.LibraryGroup
+import com.example.m.managers.DialogState
 import com.example.m.ui.common.PlaylistActionUI
 import com.example.m.ui.common.getThumbnail
 import com.example.m.ui.library.components.ArtistGroupConflictDialog
@@ -50,52 +50,49 @@ fun SearchScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val allPlaylists by viewModel.allPlaylists.collectAsState()
-    val libraryGroups by viewModel.libraryGroups.collectAsState()
     val songsWithStatus by viewModel.songsWithStatus.collectAsState()
     val videoStreamsWithStatus by viewModel.videoStreamsWithStatus.collectAsState()
-    val conflictDialogState by remember { derivedStateOf { viewModel.conflictDialogState } }
-    val showCreateGroupDialog by remember { derivedStateOf { viewModel.showCreateGroupDialog } }
-    val showSelectGroupDialog by remember { derivedStateOf { viewModel.showSelectGroupDialog } }
-
+    val dialogState by viewModel.dialogState.collectAsState()
 
     if (uiState.detailedViewCategory != null) {
         BackHandler {
-            viewModel.hideDetailedView()
+            viewModel.onEvent(SearchEvent.HideDetailedView)
         }
     }
 
-    if (showCreateGroupDialog) {
-        CreateLibraryGroupDialog(
-            onDismiss = { viewModel.dismissCreateGroupDialog() },
-            onCreate = { name -> viewModel.createGroupAndProceed(name) },
-            isFirstGroup = libraryGroups.isEmpty()
-        )
-    }
-
-    if (showSelectGroupDialog) {
-        SelectLibraryGroupDialog(
-            groups = libraryGroups,
-            onDismiss = { viewModel.dismissSelectGroupDialog() },
-            onGroupSelected = { groupId -> viewModel.onGroupSelectedForAddition(groupId) },
-            onCreateNewGroup = viewModel::prepareToCreateGroup
-        )
-    }
-
-    conflictDialogState?.let { state ->
-        ArtistGroupConflictDialog(
-            artistName = state.song.artist,
-            conflictingGroupName = state.conflict.conflictingGroupName,
-            targetGroupName = state.targetGroupName,
-            onDismiss = { viewModel.dismissConflictDialog() },
-            onMoveArtistToTargetGroup = { viewModel.resolveConflictByMoving() }
-        )
+    when (val state = dialogState) {
+        is DialogState.CreateGroup -> {
+            CreateLibraryGroupDialog(
+                onDismiss = { viewModel.onEvent(SearchEvent.DismissDialog) },
+                onCreate = { name -> viewModel.onEvent(SearchEvent.RequestCreateGroup) },
+                isFirstGroup = state.isFirstGroup
+            )
+        }
+        is DialogState.SelectGroup -> {
+            SelectLibraryGroupDialog(
+                groups = state.groups,
+                onDismiss = { viewModel.onEvent(SearchEvent.DismissDialog) },
+                onGroupSelected = { groupId -> viewModel.onEvent(SearchEvent.SelectGroup(groupId)) },
+                onCreateNewGroup = { viewModel.onEvent(SearchEvent.RequestCreateGroup) }
+            )
+        }
+        is DialogState.Conflict -> {
+            ArtistGroupConflictDialog(
+                artistName = state.song.artist,
+                conflictingGroupName = state.conflict.conflictingGroupName,
+                targetGroupName = state.targetGroupName,
+                onDismiss = { viewModel.onEvent(SearchEvent.DismissDialog) },
+                onMoveArtistToTargetGroup = { viewModel.onEvent(SearchEvent.ResolveConflict) }
+            )
+        }
+        is DialogState.Hidden -> {}
     }
 
     PlaylistActionUI(
         handler = viewModel.playlistActionHandler,
         allPlaylists = allPlaylists,
         onCreatePlaylist = { name ->
-            viewModel.handlePlaylistCreation(name)
+            viewModel.onEvent(SearchEvent.CreatePlaylist(name))
         }
     )
 
@@ -109,11 +106,11 @@ fun SearchScreen(
                         val searchTextStyle = TextStyle(fontSize = 16.sp)
                         TextField(
                             value = uiState.query,
-                            onValueChange = viewModel::onQueryChange,
+                            onValueChange = { viewModel.onEvent(SearchEvent.QueryChange(it)) },
                             placeholder = { Text("Search", style = searchTextStyle) },
                             leadingIcon = {
                                 IconButton(onClick = {
-                                    viewModel.search()
+                                    viewModel.onEvent(SearchEvent.Search)
                                     keyboardController?.hide()
                                     focusManager.clearFocus()
                                 }) {
@@ -124,7 +121,7 @@ fun SearchScreen(
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                             keyboardActions = KeyboardActions(onSearch = {
-                                viewModel.search()
+                                viewModel.onEvent(SearchEvent.Search)
                                 keyboardController?.hide()
                                 focusManager.clearFocus()
                             }),
@@ -153,7 +150,7 @@ fun SearchScreen(
             ) {
                 FilterChipSection(
                     selectedFilter = uiState.selectedFilter,
-                    onFilterSelected = viewModel::onFilterChange
+                    onFilterSelected = { viewModel.onEvent(SearchEvent.FilterChange(it)) }
                 )
 
                 if (uiState.isLoading) {
@@ -166,7 +163,7 @@ fun SearchScreen(
                             uiState = uiState,
                             songsWithStatus = songsWithStatus,
                             imageLoader = viewModel.imageLoader,
-                            onSongClicked = { index -> viewModel.onSongSelected(index) },
+                            onSongClicked = { index -> viewModel.onEvent(SearchEvent.SongSelected(index)) },
                             onAlbumClicked = { albumResult ->
                                 val encodedUrl = URLEncoder.encode(albumResult.albumInfo.url, StandardCharsets.UTF_8.toString())
                                 navController.navigate("album_detail/music/$encodedUrl")
@@ -175,18 +172,18 @@ fun SearchScreen(
                                 val encodedUrl = URLEncoder.encode(artistResult.artistInfo.url, StandardCharsets.UTF_8.toString())
                                 navController.navigate("searched_artist_detail/music/$encodedUrl")
                             },
-                            onShowMore = viewModel::showDetailedView,
-                            onAddToLibrary = viewModel::addSongToLibrary,
-                            onPlayNext = viewModel::onPlayNext,
-                            onAddToQueue = viewModel::onAddToQueue,
-                            onShuffleAlbum = viewModel::onShuffleAlbum
+                            onShowMore = { viewModel.onEvent(SearchEvent.ShowDetailedView(it)) },
+                            onAddToLibrary = { viewModel.onEvent(SearchEvent.AddToLibrary(it)) },
+                            onPlayNext = { viewModel.onEvent(SearchEvent.PlayNext(it)) },
+                            onAddToQueue = { viewModel.onEvent(SearchEvent.AddToQueue(it)) },
+                            onShuffleAlbum = { viewModel.onEvent(SearchEvent.ShuffleAlbum(it)) }
                         )
                     } else {
                         VideoSearchLayout(
                             uiState = uiState,
                             videoStreamsWithStatus = videoStreamsWithStatus,
                             imageLoader = viewModel.imageLoader,
-                            onVideoClick = { index -> viewModel.onSongSelected(index) },
+                            onVideoClick = { index -> viewModel.onEvent(SearchEvent.SongSelected(index)) },
                             onPlaylistClick = { albumResult ->
                                 val encodedUrl = URLEncoder.encode(albumResult.albumInfo.url, StandardCharsets.UTF_8.toString())
                                 navController.navigate("album_detail/video/$encodedUrl")
@@ -195,10 +192,10 @@ fun SearchScreen(
                                 val encodedUrl = URLEncoder.encode(artistResult.artistInfo.url, StandardCharsets.UTF_8.toString())
                                 navController.navigate("searched_artist_detail/video/$encodedUrl")
                             },
-                            onShowMore = viewModel::showDetailedView,
-                            onAddToLibrary = viewModel::addSongToLibrary,
-                            onPlayNext = viewModel::onPlayNext,
-                            onAddToQueue = viewModel::onAddToQueue
+                            onShowMore = { viewModel.onEvent(SearchEvent.ShowDetailedView(it)) },
+                            onAddToLibrary = { viewModel.onEvent(SearchEvent.AddToLibrary(it)) },
+                            onPlayNext = { viewModel.onEvent(SearchEvent.PlayNext(it)) },
+                            onAddToQueue = { viewModel.onEvent(SearchEvent.AddToQueue(it)) }
                         )
                     }
                 }
@@ -210,9 +207,9 @@ fun SearchScreen(
                 songsWithStatus = songsWithStatus,
                 videoStreamsWithStatus = videoStreamsWithStatus,
                 imageLoader = viewModel.imageLoader,
-                onBack = viewModel::hideDetailedView,
-                onSongClicked = { index -> viewModel.onSongSelected(index) },
-                onLoadMore = viewModel::loadMoreResults,
+                onBack = { viewModel.onEvent(SearchEvent.HideDetailedView) },
+                onSongClicked = { index -> viewModel.onEvent(SearchEvent.SongSelected(index)) },
+                onLoadMore = { viewModel.onEvent(SearchEvent.LoadMore) },
                 onAlbumClicked = { albumResult ->
                     val encodedUrl = URLEncoder.encode(albumResult.albumInfo.url, StandardCharsets.UTF_8.toString())
                     val searchType = if (uiState.selectedFilter == "music_songs") "music" else "video"
@@ -223,9 +220,9 @@ fun SearchScreen(
                     val searchType = if (uiState.selectedFilter == "music_songs") "music" else "video"
                     navController.navigate("searched_artist_detail/$searchType/$encodedUrl")
                 },
-                onAddToLibrary = viewModel::addSongToLibrary,
-                onPlayNext = viewModel::onPlayNext,
-                onAddToQueue = viewModel::onAddToQueue
+                onAddToLibrary = { viewModel.onEvent(SearchEvent.AddToLibrary(it)) },
+                onPlayNext = { viewModel.onEvent(SearchEvent.PlayNext(it)) },
+                onAddToQueue = { viewModel.onEvent(SearchEvent.AddToQueue(it)) }
             )
         }
     }
@@ -263,28 +260,19 @@ private fun DetailedView(
                     }
                     Text(titleText)
                 },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
-                    }
-                },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
                 windowInsets = TopAppBarDefaults.windowInsets
             )
         }
     ) { paddingValues ->
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .padding(paddingValues)
-                .fillMaxSize()
-        ) {
+        LazyColumn(state = listState, modifier = Modifier.padding(paddingValues).fillMaxSize()) {
             when (category) {
                 SearchCategory.SONGS, SearchCategory.VIDEOS -> {
                     val itemsToShow = if (category == SearchCategory.SONGS) songsWithStatus else videoStreamsWithStatus
                     itemsIndexed(itemsToShow, key = { index, item -> (item.result.streamInfo.url ?: "") + index }) { index, item ->
                         SearchResultItem(
                             result = item.result,
-                            downloadStatus = item.downloadStatus,
+                            localSong = item.localSong,
                             isSong = category == SearchCategory.SONGS,
                             imageLoader = imageLoader,
                             onPlay = { onSongClicked(index) },
@@ -297,40 +285,13 @@ private fun DetailedView(
                 SearchCategory.ALBUMS, SearchCategory.PLAYLISTS -> {
                     val items = if (category == SearchCategory.ALBUMS) uiState.albums else uiState.playlists
                     itemsIndexed(items, key = { index, item -> (item.albumInfo.url ?: "") + index }) { _, item ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onAlbumClicked(item) }
-                                .height(72.dp)
-                                .padding(horizontal = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            AsyncImage(
-                                model = item.albumInfo.getThumbnail(),
-                                imageLoader = imageLoader,
-                                contentDescription = item.albumInfo.name,
-                                modifier = Modifier
-                                    .size(54.dp)
-                                    .aspectRatio(1f),
-                                contentScale = ContentScale.Crop
-                            )
+                        Row(modifier = Modifier.fillMaxWidth().clickable { onAlbumClicked(item) }.height(72.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            AsyncImage(model = item.albumInfo.getThumbnail(), imageLoader = imageLoader, contentDescription = item.albumInfo.name, modifier = Modifier.size(54.dp).aspectRatio(1f), contentScale = ContentScale.Crop)
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = item.albumInfo.name ?: "",
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
+                                Text(text = item.albumInfo.name ?: "", maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
                                 if (item.albumInfo.uploaderName != null) {
-                                    Text(
-                                        text = item.albumInfo.uploaderName!!,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    Text(text = item.albumInfo.uploaderName!!, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
@@ -339,58 +300,24 @@ private fun DetailedView(
                 SearchCategory.ARTISTS, SearchCategory.CHANNELS -> {
                     val items = if (uiState.selectedFilter == "music_songs") uiState.artists else uiState.videoChannels
                     itemsIndexed(items, key = { index, item -> (item.artistInfo.url ?: "") + index }) { _, item ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onArtistClicked(item) }
-                                .height(72.dp)
-                                .padding(horizontal = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            AsyncImage(
-                                model = item.artistInfo.thumbnails.lastOrNull()?.url,
-                                imageLoader = imageLoader,
-                                contentDescription = item.artistInfo.name,
-                                modifier = Modifier
-                                    .size(54.dp)
-                                    .clip(CircleShape)
-                            )
+                        Row(modifier = Modifier.fillMaxWidth().clickable { onArtistClicked(item) }.height(72.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            AsyncImage(model = item.artistInfo.thumbnails.lastOrNull()?.url, imageLoader = imageLoader, contentDescription = item.artistInfo.name, modifier = Modifier.size(54.dp).clip(CircleShape))
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = item.artistInfo.name ?: "",
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
+                                Text(text = item.artistInfo.name ?: "", maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
                                 val subs = formatSubscriberCount(item.artistInfo.subscriberCount)
                                 if (subs.isNotEmpty()) {
-                                    Text(
-                                        text = subs,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    Text(text = subs, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
                     }
                 }
             }
-
             if (uiState.isLoadingMore) {
-                item {
-                    Box(modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
-                }
+                item { Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
             }
         }
-
         val layoutInfo = remember { derivedStateOf { listState.layoutInfo } }
         LaunchedEffect(layoutInfo.value.visibleItemsInfo) {
             val totalItems = layoutInfo.value.totalItemsCount
@@ -404,35 +331,19 @@ private fun DetailedView(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FilterChipSection(
-    selectedFilter: String,
-    onFilterSelected: (String) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
+fun FilterChipSection(selectedFilter: String, onFilterSelected: (String) -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         FilterChip(
             selected = selectedFilter == "music_songs",
             onClick = { onFilterSelected("music_songs") },
             label = { Text("Songs") },
-            leadingIcon = if (selectedFilter == "music_songs") {
-                { Icon(Icons.Default.Done, contentDescription = "Selected") }
-            } else {
-                null
-            }
+            leadingIcon = if (selectedFilter == "music_songs") { { Icon(Icons.Default.Done, contentDescription = "Selected") } } else null
         )
         FilterChip(
             selected = selectedFilter == "all",
             onClick = { onFilterSelected("all") },
             label = { Text("Videos") },
-            leadingIcon = if (selectedFilter == "all") {
-                { Icon(Icons.Default.Done, contentDescription = "Selected") }
-            } else {
-                null
-            }
+            leadingIcon = if (selectedFilter == "all") { { Icon(Icons.Default.Done, contentDescription = "Selected") } } else null
         )
     }
 }

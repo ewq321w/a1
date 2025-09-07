@@ -1,6 +1,7 @@
 // file: com/example/m/ui/main/MainScreen.kt
 package com.example.m.ui.main
 
+import android.annotation.SuppressLint
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,7 @@ import com.example.m.ui.navigation.bottomNavItems
 import com.example.m.ui.player.MiniPlayer
 import com.example.m.ui.player.PlayerScreen
 
+@SuppressLint("RestrictedApi", "ContextCastToActivity")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen() {
@@ -32,7 +34,7 @@ fun MainScreen() {
     val nowPlaying by mainViewModel.nowPlaying.collectAsState()
     val isPlaying by mainViewModel.isPlaying.collectAsState()
     val playbackState by mainViewModel.playbackState.collectAsState()
-    val showPlayerScreen by mainViewModel.isPlayerScreenVisible
+    val uiState by mainViewModel.uiState
 
     val snackbarHostState = remember { SnackbarHostState() }
     val maintenanceResult by mainViewModel.maintenanceResult
@@ -50,7 +52,6 @@ fun MainScreen() {
         bottomBar = {
             Column(Modifier.navigationBarsPadding()) {
                 nowPlaying?.let { metadata ->
-                    // Only show the MiniPlayer if there's a valid title.
                     if (!metadata.title.isNullOrBlank()) {
                         MiniPlayer(
                             artworkUri = metadata.artworkUri?.toString() ?: "",
@@ -59,37 +60,25 @@ fun MainScreen() {
                             isPlaying = isPlaying,
                             currentPosition = playbackState.currentPosition,
                             totalDuration = playbackState.totalDuration,
-                            onPlayPauseClicked = mainViewModel::togglePlayPause,
-                            onContainerClicked = mainViewModel::showPlayerScreen
+                            onPlayPauseClicked = { mainViewModel.onEvent(MainEvent.TogglePlayPause) },
+                            onContainerClicked = { mainViewModel.onEvent(MainEvent.ShowPlayerScreen) }
                         )
                     }
                 }
-
-                NavigationBar(
-                    modifier = Modifier.height(85.dp),
-                    containerColor = MaterialTheme.colorScheme.surface
-                ) {
+                NavigationBar(modifier = Modifier.height(72.dp), containerColor = MaterialTheme.colorScheme.surface) {
                     val navBackStack by navController.currentBackStack.collectAsState()
-
-                    val currentTabRoute = navBackStack
-                        .lastOrNull { entry -> bottomNavItems.any { it.route == entry.destination.route } }
-                        ?.destination?.route
+                    val currentTabRoute = navBackStack.lastOrNull { entry -> bottomNavItems.any { it.route == entry.destination.route } }?.destination?.route
 
                     bottomNavItems.forEach { screen ->
                         val selected = screen.route == currentTabRoute
-
                         NavigationBarItem(
                             icon = { Icon(screen.icon, contentDescription = screen.label) },
                             label = { Text(screen.label) },
                             selected = selected,
                             onClick = {
-                                if (selected) {
-                                    navController.popBackStack(screen.route, inclusive = false)
-                                } else {
+                                if (!selected) {
                                     navController.navigate(screen.route) {
-                                        popUpTo(navController.graph.findStartDestination().id) {
-                                            saveState = true
-                                        }
+                                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                         launchSingleTop = true
                                         restoreState = true
                                     }
@@ -109,14 +98,11 @@ fun MainScreen() {
         }
     ) { innerPadding ->
         Box(modifier = Modifier.padding(innerPadding)) {
-            AppNavHost(
-                navController = navController,
-                modifier = Modifier.fillMaxSize()
-            )
+            AppNavHost(navController = navController, modifier = Modifier.fillMaxSize())
         }
     }
 
-    if (showPlayerScreen) {
-        PlayerScreen(onDismiss = mainViewModel::hidePlayerScreen)
+    if (uiState.isPlayerScreenVisible) {
+        PlayerScreen(onDismiss = { mainViewModel.onEvent(MainEvent.HidePlayerScreen) })
     }
 }
