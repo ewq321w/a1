@@ -8,10 +8,12 @@ import android.provider.MediaStore
 import androidx.core.net.toUri
 import androidx.room.Transaction
 import com.example.m.data.database.*
+import com.example.m.download.DownloadService
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import timber.log.Timber
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -121,7 +123,7 @@ class LibraryRepository @Inject constructor(
                     File(path).delete()
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                Timber.e(e, "Failed to delete file from device: $path")
             }
         }
         songDao.deleteSong(song)
@@ -147,11 +149,23 @@ class LibraryRepository @Inject constructor(
                     songDao.updateSong(song.copy(localFilePath = null))
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                Timber.e(e, "Failed to delete downloaded file, but unlinking from DB: $path")
                 // If deletion fails (e.g. SecurityException), still unlink from DB
                 // to fix the app's state for the user.
                 songDao.updateSong(song.copy(localFilePath = null))
             }
+        }
+    }
+
+    suspend fun removeDownloadsForPlaylist(playlist: PlaylistWithSongs) {
+        if (playlist.playlist.downloadAutomatically) {
+            playlistDao.updatePlaylist(playlist.playlist.copy(downloadAutomatically = false))
+        }
+        playlist.songs.forEach { song ->
+            val artist = artistDao.getArtistByName(song.artist)
+            if (artist?.downloadAutomatically == true) return@forEach
+            // Re-use existing logic for deleting a single file
+            deleteDownloadedFileForSong(song)
         }
     }
 
@@ -165,22 +179,7 @@ class LibraryRepository @Inject constructor(
             if (autoDownloadPlaylists.isNotEmpty()) {
                 return@forEach // Skip this song as it's in an auto-download playlist
             }
-
-            song.localFilePath?.let { path ->
-                try {
-                    val uri = path.toUri()
-                    if (uri.scheme == "content") {
-                        context.contentResolver.delete(uri, null, null)
-                    } else {
-                        File(path).delete()
-                    }
-                    songDao.updateSong(song.copy(localFilePath = null))
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    // If deletion fails, still unlink from DB to fix the app's state for the user.
-                    songDao.updateSong(song.copy(localFilePath = null))
-                }
-            }
+            deleteDownloadedFileForSong(song)
         }
     }
 
@@ -196,6 +195,25 @@ class LibraryRepository @Inject constructor(
         }
 
         return null
+    }
+
+    suspend fun startDownload(song: Song) {
+        // Prevent re-queueing if already downloaded or in progress
+        val currentSong = songDao.getSongById(song.songId)
+        if (currentSong?.downloadStatus == DownloadStatus.DOWNLOADED ||
+            currentSong?.downloadStatus == DownloadStatus.QUEUED ||
+            currentSong?.downloadStatus == DownloadStatus.DOWNLOADING) {
+            return
+        }
+
+        // Set status to QUEUED immediately for instant UI feedback
+        songDao.updateDownloadStatus(song.songId, DownloadStatus.QUEUED)
+
+        downloadQueueDao.addItem(DownloadQueueItem(songId = song.songId))
+        val intent = android.content.Intent(context, DownloadService::class.java).apply {
+            action = DownloadService.ACTION_PROCESS_QUEUE
+        }
+        context.startService(intent)
     }
 
     suspend fun verifyLibraryEntries(): Int {
@@ -243,7 +261,7 @@ class LibraryRepository @Inject constructor(
             try {
                 context.contentResolver.delete(uri, null, null)
             } catch (e: Exception) {
-                e.printStackTrace()
+                Timber.e(e, "Failed to delete orphaned file: $uri")
             }
         }
         return orphanedUris.size

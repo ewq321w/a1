@@ -10,6 +10,8 @@ import com.example.m.data.repository.YoutubeRepository
 import com.example.m.managers.DialogState
 import com.example.m.managers.LibraryActionsManager
 import com.example.m.managers.PlaybackListManager
+import com.example.m.managers.PlaylistActionState
+import com.example.m.managers.PlaylistActionsManager
 import com.example.m.playback.MusicServiceConnection
 import com.example.m.ui.search.SearchResult
 import com.example.m.ui.search.SearchResultForList
@@ -43,6 +45,7 @@ sealed interface ArtistSongsEvent {
     data class SongSelected(val index: Int) : ArtistSongsEvent
     object LoadMore : ArtistSongsEvent
     data class AddToLibrary(val result: SearchResult) : ArtistSongsEvent
+    data class AddToPlaylist(val result: SearchResult) : ArtistSongsEvent
     data class PlayNext(val result: SearchResult) : ArtistSongsEvent
     data class AddToQueue(val result: SearchResult) : ArtistSongsEvent
     data class RequestCreateGroup(val name: String) : ArtistSongsEvent
@@ -59,7 +62,8 @@ class ArtistSongsViewModel @Inject constructor(
     private val songDao: SongDao,
     private val playbackListManager: PlaybackListManager,
     val imageLoader: ImageLoader,
-    private val libraryActionsManager: LibraryActionsManager
+    private val libraryActionsManager: LibraryActionsManager,
+    private val playlistActionsManager: PlaylistActionsManager
 ) : ViewModel() {
 
     private val channelUrl: String = savedStateHandle["channelUrl"]!!
@@ -73,6 +77,7 @@ class ArtistSongsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val dialogState: StateFlow<DialogState> = libraryActionsManager.dialogState
+    val playlistActionState: StateFlow<PlaylistActionState> = playlistActionsManager.state
 
     init {
         loadContent()
@@ -93,6 +98,7 @@ class ArtistSongsViewModel @Inject constructor(
             is ArtistSongsEvent.SongSelected -> onSongSelected(event.index)
             is ArtistSongsEvent.LoadMore -> loadMoreSongs()
             is ArtistSongsEvent.AddToLibrary -> libraryActionsManager.addToLibrary(event.result.streamInfo)
+            is ArtistSongsEvent.AddToPlaylist -> playlistActionsManager.selectItem(event.result.streamInfo)
             is ArtistSongsEvent.PlayNext -> musicServiceConnection.playNext(event.result.streamInfo)
             is ArtistSongsEvent.AddToQueue -> musicServiceConnection.addToQueue(event.result.streamInfo)
             is ArtistSongsEvent.RequestCreateGroup -> libraryActionsManager.onCreateGroup(event.name)
@@ -101,6 +107,11 @@ class ArtistSongsViewModel @Inject constructor(
             is ArtistSongsEvent.DismissDialog -> libraryActionsManager.dismissDialog()
         }
     }
+
+    fun onPlaylistCreateConfirm(name: String) = playlistActionsManager.onCreatePlaylist(name)
+    fun onPlaylistSelected(playlistId: Long) = playlistActionsManager.onPlaylistSelected(playlistId)
+    fun onPlaylistActionDismiss() = playlistActionsManager.dismiss()
+    fun onPrepareToCreatePlaylist() = playlistActionsManager.prepareToCreatePlaylist()
 
     private fun refreshSongStatuses() {
         if (_uiState.value.songs.isEmpty()) return

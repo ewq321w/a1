@@ -61,10 +61,9 @@ interface SongDao {
     // --- Queries for "All Music" ---
     @Query("""
         SELECT s.* FROM songs AS s
-        INNER JOIN artists AS a ON s.artist = a.name
-        INNER JOIN artist_song_cross_ref AS ascr ON a.artistId = ascr.artistId AND s.songId = ascr.songId
+        INNER JOIN artist_song_cross_ref AS ascr ON s.songId = ascr.songId
         WHERE s.isInLibrary = 1
-        ORDER BY a.name ASC, ascr.customOrderPosition ASC
+        ORDER BY s.artist ASC, ascr.customOrderPosition ASC
     """)
     fun getLibrarySongsSortedByArtist(): Flow<List<Song>>
 
@@ -80,10 +79,9 @@ interface SongDao {
     // --- Queries to filter songs by libraryGroupId ---
     @Query("""
         SELECT s.* FROM songs AS s
-        INNER JOIN artists AS a ON s.artist = a.name
-        INNER JOIN artist_song_cross_ref AS ascr ON a.artistId = ascr.artistId AND s.songId = ascr.songId
+        INNER JOIN artist_song_cross_ref AS ascr ON s.songId = ascr.songId
         WHERE s.isInLibrary = 1 AND s.libraryGroupId = :groupId
-        ORDER BY a.name ASC, ascr.customOrderPosition ASC
+        ORDER BY s.artist ASC, ascr.customOrderPosition ASC
     """)
     fun getLibrarySongsSortedByArtist(groupId: Long): Flow<List<Song>>
 

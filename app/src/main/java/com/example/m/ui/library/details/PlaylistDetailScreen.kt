@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.m.data.database.Playlist
 import com.example.m.data.database.Song
+import com.example.m.managers.PlaylistActionState
 import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.library.components.*
 import kotlinx.coroutines.flow.collectLatest
@@ -33,6 +34,7 @@ fun PlaylistDetailScreen(
 ) {
     val viewModel: PlaylistDetailViewModel = hiltViewModel()
     val uiState by viewModel.uiState.collectAsState()
+    val playlistActionState by viewModel.playlistActionState.collectAsState()
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val sheetState = rememberModalBottomSheetState()
@@ -49,32 +51,39 @@ fun PlaylistDetailScreen(
         }
     }
 
-    if (uiState.showCreatePlaylistDialog) {
-        CreatePlaylistDialog(
-            onDismiss = { viewModel.onEvent(PlaylistDetailEvent.DismissCreatePlaylistDialog) },
-            onCreate = { name -> viewModel.onEvent(PlaylistDetailEvent.CreatePlaylist(name)) }
-        )
-    }
+    when(val state = playlistActionState) {
+        is PlaylistActionState.AddToPlaylist -> {
+            val item = state.item
+            val songTitle = (item as? Song)?.title ?: (item as? StreamInfoItem)?.name ?: "Unknown"
+            val songArtist = (item as? Song)?.artist ?: (item as? StreamInfoItem)?.uploaderName ?: "Unknown"
+            val thumbnailUrl = (item as? Song)?.thumbnailUrl ?: (item as? StreamInfoItem)?.getHighQualityThumbnailUrl() ?: ""
 
-    uiState.itemToAddToPlaylist?.let { currentItem ->
-        val songTitle = if (currentItem is Song) currentItem.title else (currentItem as StreamInfoItem).name ?: "Unknown"
-        val songArtist = if (currentItem is Song) currentItem.artist else (currentItem as StreamInfoItem).uploaderName ?: "Unknown"
-        val thumbnailUrl = if (currentItem is Song) currentItem.thumbnailUrl else (currentItem as StreamInfoItem).getHighQualityThumbnailUrl()
-
-        ModalBottomSheet(
-            onDismissRequest = { viewModel.onEvent(PlaylistDetailEvent.DismissAddToPlaylistSheet) },
-            sheetState = sheetState
-        ) {
-            AddToPlaylistSheet(
-                songTitle = songTitle,
-                songArtist = songArtist,
-                songThumbnailUrl = thumbnailUrl,
-                playlists = uiState.allPlaylists,
-                onPlaylistSelected = { playlistId -> viewModel.onEvent(PlaylistDetailEvent.PlaylistSelectedForAddition(playlistId)) },
-                onCreateNewPlaylist = { viewModel.onEvent(PlaylistDetailEvent.PrepareToCreatePlaylist) }
+            ModalBottomSheet(
+                onDismissRequest = { viewModel.onPlaylistActionDismiss() },
+                sheetState = sheetState
+            ) {
+                AddToPlaylistSheet(
+                    songTitle = songTitle,
+                    songArtist = songArtist,
+                    songThumbnailUrl = thumbnailUrl,
+                    playlists = state.playlists,
+                    onPlaylistSelected = { playlistId -> viewModel.onPlaylistSelected(playlistId) },
+                    onCreateNewPlaylist = { viewModel.onPrepareToCreatePlaylist() }
+                )
+            }
+        }
+        is PlaylistActionState.CreatePlaylist -> {
+            TextFieldDialog(
+                title = "New Playlist",
+                label = "Playlist name",
+                confirmButtonText = "Create",
+                onDismiss = { viewModel.onPlaylistActionDismiss() },
+                onConfirm = { name -> viewModel.onPlaylistCreateConfirm(name) }
             )
         }
+        is PlaylistActionState.Hidden -> {}
     }
+
 
     uiState.playlist?.let { pl ->
         var playlistToRemoveDownloads by remember { mutableStateOf<Playlist?>(null) }
@@ -186,7 +195,7 @@ private fun PlaylistDetailContent(
                     SongItem(
                         song = item,
                         onClick = { onEvent(PlaylistDetailEvent.SongSelected(index)) },
-                        onAddToPlaylistClick = { onEvent(PlaylistDetailEvent.SelectItemForPlaylist(item)) },
+                        onAddToPlaylistClick = { onEvent(PlaylistDetailEvent.AddToPlaylist(item)) },
                         onRemoveFromPlaylistClick = { onEvent(PlaylistDetailEvent.RemoveSong(item.songId)) },
                         onPlayNextClick = { onEvent(PlaylistDetailEvent.PlayNext(item)) },
                         onAddToQueueClick = { onEvent(PlaylistDetailEvent.AddToQueue(item)) },

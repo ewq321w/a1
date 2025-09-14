@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Folder
@@ -17,13 +16,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.m.data.database.Song
-import com.example.m.managers.ThumbnailProcessor
+import com.example.m.managers.PlaylistActionState
 import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.library.components.*
 import kotlinx.coroutines.flow.collectLatest
@@ -40,6 +37,7 @@ fun ArtistDetailScreen(
 ) {
     val viewModel: ArtistDetailViewModel = hiltViewModel()
     val uiState by viewModel.uiState.collectAsState()
+    val playlistActionState by viewModel.playlistActionState.collectAsState()
     val artistName = uiState.artist?.name ?: "Artist"
     var showMenu by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -68,23 +66,52 @@ fun ArtistDetailScreen(
         }
     }
 
-    if (uiState.showCreatePlaylistDialog) {
-        CreatePlaylistDialog(
-            onDismiss = { viewModel.onEvent(ArtistDetailEvent.DismissCreatePlaylistDialog) },
-            onCreate = { name -> viewModel.onEvent(ArtistDetailEvent.CreatePlaylist(name)) }
-        )
+    when(val state = playlistActionState) {
+        is PlaylistActionState.AddToPlaylist -> {
+            val item = state.item
+            val songTitle = (item as? Song)?.title ?: (item as? StreamInfoItem)?.name ?: "Unknown"
+            val songArtist = (item as? Song)?.artist ?: (item as? StreamInfoItem)?.uploaderName ?: "Unknown"
+            val thumbnailUrl = (item as? Song)?.thumbnailUrl ?: (item as? StreamInfoItem)?.getHighQualityThumbnailUrl() ?: ""
+
+            ModalBottomSheet(onDismissRequest = { viewModel.onPlaylistActionDismiss() }, sheetState = sheetState) {
+                AddToPlaylistSheet(
+                    songTitle = songTitle,
+                    songArtist = songArtist,
+                    songThumbnailUrl = thumbnailUrl,
+                    playlists = state.playlists,
+                    onPlaylistSelected = { playlistId -> viewModel.onPlaylistSelected(playlistId) },
+                    onCreateNewPlaylist = { viewModel.onPrepareToCreatePlaylist() }
+                )
+            }
+        }
+        is PlaylistActionState.CreatePlaylist -> {
+            TextFieldDialog(
+                title = "New Playlist",
+                label = "Playlist name",
+                confirmButtonText = "Create",
+                onDismiss = { viewModel.onPlaylistActionDismiss() },
+                onConfirm = { name -> viewModel.onPlaylistCreateConfirm(name) }
+            )
+        }
+        is PlaylistActionState.Hidden -> {}
     }
 
     if (uiState.showCreateSongGroupDialog) {
-        CreateArtistSongGroupDialog(
+        TextFieldDialog(
+            title = "New Group",
+            label = "Group name",
+            confirmButtonText = "Create",
             onDismiss = { viewModel.onEvent(ArtistDetailEvent.DismissCreateSongGroupDialog) },
-            onCreate = { name -> viewModel.onEvent(ArtistDetailEvent.CreateGroupAndAddSong(name)) }
+            onConfirm = { name -> viewModel.onEvent(ArtistDetailEvent.CreateGroupAndAddSong(name)) }
         )
     }
 
     uiState.groupToRename?.let { group ->
-        RenameArtistSongGroupDialog(
-            initialName = group.name,
+        TextFieldDialog(
+            title = "Rename Group",
+            label = "Group name",
+            initialValue = group.name,
+            confirmButtonText = "Rename",
             onDismiss = { viewModel.onEvent(ArtistDetailEvent.CancelRenameGroup) },
             onConfirm = { newName -> viewModel.onEvent(ArtistDetailEvent.ConfirmRenameGroup(newName)) }
         )
@@ -97,23 +124,6 @@ fun ArtistDetailScreen(
             onDismiss = { viewModel.onEvent(ArtistDetailEvent.CancelDeleteGroup) },
             onConfirm = { viewModel.onEvent(ArtistDetailEvent.ConfirmDeleteGroup) }
         )
-    }
-
-    uiState.itemToAddToPlaylist?.let { item ->
-        val songTitle = (item as? Song)?.title ?: (item as? StreamInfoItem)?.name ?: "Unknown"
-        val songArtist = (item as? Song)?.artist ?: (item as? StreamInfoItem)?.uploaderName ?: "Unknown"
-        val thumbnailUrl = (item as? Song)?.thumbnailUrl ?: (item as? StreamInfoItem)?.getHighQualityThumbnailUrl() ?: ""
-
-        ModalBottomSheet(onDismissRequest = { viewModel.onEvent(ArtistDetailEvent.DismissAddToPlaylistSheet) }, sheetState = sheetState) {
-            AddToPlaylistSheet(
-                songTitle = songTitle,
-                songArtist = songArtist,
-                songThumbnailUrl = thumbnailUrl,
-                playlists = uiState.allPlaylists,
-                onPlaylistSelected = { playlistId -> viewModel.onEvent(ArtistDetailEvent.PlaylistSelectedForAddition(playlistId)) },
-                onCreateNewPlaylist = { viewModel.onEvent(ArtistDetailEvent.PrepareToCreatePlaylist) }
-            )
-        }
     }
 
     uiState.songToAddToGroup?.let { song ->
@@ -237,7 +247,7 @@ fun ArtistDetailScreen(
                             SongItem(
                                 song = song,
                                 onClick = { viewModel.onEvent(ArtistDetailEvent.SongSelected(song)) },
-                                onAddToPlaylistClick = { viewModel.onEvent(ArtistDetailEvent.SelectItemForPlaylist(song)) },
+                                onAddToPlaylistClick = { viewModel.onEvent(ArtistDetailEvent.AddToPlaylist(song)) },
                                 onDeleteClick = { viewModel.onEvent(ArtistDetailEvent.SetItemForDeletion(song)) },
                                 onPlayNextClick = { viewModel.onEvent(ArtistDetailEvent.PlayNext(song)) },
                                 onAddToQueueClick = { viewModel.onEvent(ArtistDetailEvent.AddToQueue(song)) },

@@ -101,15 +101,15 @@ fun SongItem(
                         contentAlignment = Alignment.CenterStart
                     ) {
                         val iconSize = 16.dp
-                        when (song.downloadStatus) {
-                            DownloadStatus.DOWNLOADING -> {
+                        when {
+                            song.downloadStatus == DownloadStatus.DOWNLOADING -> {
                                 CircularProgressIndicator(
                                     progress = { song.downloadProgress / 100f },
                                     modifier = Modifier.size(iconSize),
                                     strokeWidth = 1.5.dp
                                 )
                             }
-                            DownloadStatus.QUEUED -> {
+                            song.downloadStatus == DownloadStatus.QUEUED -> {
                                 Icon(
                                     imageVector = Icons.Default.HourglassTop,
                                     contentDescription = "Queued",
@@ -117,7 +117,7 @@ fun SongItem(
                                     modifier = Modifier.size(iconSize)
                                 )
                             }
-                            DownloadStatus.FAILED -> {
+                            song.downloadStatus == DownloadStatus.FAILED -> {
                                 Icon(
                                     imageVector = Icons.Default.ErrorOutline,
                                     contentDescription = "Failed",
@@ -125,7 +125,7 @@ fun SongItem(
                                     modifier = Modifier.size(iconSize)
                                 )
                             }
-                            DownloadStatus.DOWNLOADED -> {
+                            song.downloadStatus == DownloadStatus.DOWNLOADED -> {
                                 Icon(
                                     imageVector = Icons.Default.CheckCircle,
                                     contentDescription = "Downloaded",
@@ -133,15 +133,13 @@ fun SongItem(
                                     modifier = Modifier.size(iconSize)
                                 )
                             }
-                            DownloadStatus.NOT_DOWNLOADED -> {
-                                if (song.isInLibrary) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = "In Library",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(iconSize)
-                                    )
-                                }
+                            song.isInLibrary -> {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "In Library",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(iconSize)
+                                )
                             }
                         }
                     }

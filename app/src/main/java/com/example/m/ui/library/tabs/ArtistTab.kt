@@ -20,47 +20,85 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.m.data.database.Artist
 import com.example.m.data.database.ArtistGroup
 import com.example.m.data.database.ArtistWithSongs
 import com.example.m.managers.ThumbnailProcessor
 import com.example.m.ui.library.DeletableItem
 import com.example.m.ui.library.LibraryArtistItem
-import com.example.m.ui.library.LibraryEvent
 import com.example.m.ui.library.components.CompositeThumbnailImage
 import com.example.m.ui.library.components.ConfirmDeleteDialog
 import com.example.m.ui.library.components.EmptyStateMessage
+import com.example.m.ui.library.components.MoveToGroupSheet
+import com.example.m.ui.library.components.TextFieldDialog
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ArtistsTabContent(
-    artists: List<LibraryArtistItem>,
     onArtistClick: (Long) -> Unit,
     onGoToArtistGroup: (Long) -> Unit,
     onEditArtistSongs: (Long) -> Unit,
-    onEvent: (LibraryEvent) -> Unit,
-    thumbnailProcessor: ThumbnailProcessor,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    viewModel: ArtistsViewModel = hiltViewModel()
 ) {
-    var artistToRemoveDownloads by remember { mutableStateOf<Artist?>(null) }
+    val uiState by viewModel.uiState.collectAsState()
 
-    artistToRemoveDownloads?.let { artist ->
+    uiState.artistToRemoveDownloads?.let { artist ->
         ConfirmDeleteDialog(
             itemType = "downloads for",
             itemName = artist.name,
-            onDismiss = { artistToRemoveDownloads = null },
-            onConfirm = {
-                onEvent(LibraryEvent.RemoveDownloadsForArtist(artist))
-                artistToRemoveDownloads = null
-            }
+            onDismiss = { viewModel.onEvent(ArtistTabEvent.CancelRemoveDownloads) },
+            onConfirm = { viewModel.onEvent(ArtistTabEvent.ConfirmRemoveDownloads) }
         )
     }
 
-    if (artists.isEmpty()) {
+    (uiState.itemPendingDeletion as? DeletableItem.DeletableArtistGroup)?.let { item ->
+        ConfirmDeleteDialog(
+            itemType = "artist group",
+            itemName = item.group.name,
+            onDismiss = { viewModel.onEvent(ArtistTabEvent.ClearItemForDeletion) },
+            onConfirm = { viewModel.onEvent(ArtistTabEvent.ConfirmDeletion) }
+        )
+    }
+
+    if (uiState.showCreateArtistGroupDialog) {
+        TextFieldDialog(
+            title = "New Artist Group",
+            label = "Group name",
+            confirmButtonText = "Create",
+            onDismiss = { viewModel.onEvent(ArtistTabEvent.DismissCreateArtistGroupDialog) },
+            onConfirm = { name -> viewModel.onEvent(ArtistTabEvent.CreateArtistGroup(name)) }
+        )
+    }
+
+    uiState.groupToRename?.let { group ->
+        TextFieldDialog(
+            title = "Rename Artist Group",
+            label = "Group name",
+            initialValue = group.name,
+            confirmButtonText = "Rename",
+            onDismiss = { viewModel.onEvent(ArtistTabEvent.CancelRenameGroup) },
+            onConfirm = { newName -> viewModel.onEvent(ArtistTabEvent.ConfirmRenameGroup(newName)) }
+        )
+    }
+
+    uiState.artistToMove?.let { artist ->
+        ModalBottomSheet(onDismissRequest = { viewModel.onEvent(ArtistTabEvent.DismissMoveArtistSheet) }) {
+            MoveToGroupSheet(
+                artistName = artist.name,
+                groups = uiState.allArtistGroups,
+                onGroupSelected = { groupId -> viewModel.onEvent(ArtistTabEvent.MoveArtistToGroup(groupId)) }
+            )
+        }
+    }
+
+    if (uiState.libraryArtistItems.isEmpty()) {
         EmptyStateMessage(message = "Your artists and groups will appear here.")
     } else {
         LazyColumn(modifier = modifier, contentPadding = PaddingValues(bottom = 90.dp)) {
             items(
-                items = artists,
+                items = uiState.libraryArtistItems,
                 key = { item ->
                     when (item) {
                         is LibraryArtistItem.ArtistItem -> "artist-${item.artistWithSongs.artist.artistId}"
@@ -74,15 +112,15 @@ fun ArtistsTabContent(
                         ArtistItem(
                             artistWithSongs = libraryItem.artistWithSongs,
                             onClick = { onArtistClick(artist.artistId) },
-                            onPlay = { onEvent(LibraryEvent.PlayArtist(artist)) },
-                            onShuffle = { onEvent(LibraryEvent.ShuffleArtist(artist)) },
-                            onShuffleUngrouped = { onEvent(LibraryEvent.ShuffleUngroupedSongsForArtist(artist)) },
+                            onPlay = { viewModel.onEvent(ArtistTabEvent.PlayArtist(artist)) },
+                            onShuffle = { viewModel.onEvent(ArtistTabEvent.ShuffleArtist(artist)) },
+                            onShuffleUngrouped = { viewModel.onEvent(ArtistTabEvent.ShuffleUngroupedSongsForArtist(artist)) },
                             onEdit = { onEditArtistSongs(artist.artistId) },
-                            onToggleAutoDownload = { onEvent(LibraryEvent.ToggleAutoDownloadArtist(artist)) },
-                            groupAction = "Move to group..." to { onEvent(LibraryEvent.PrepareToMoveArtist(artist)) },
-                            onHideArtist = { onEvent(LibraryEvent.HideArtist(artist)) },
-                            processUrls = { urls -> thumbnailProcessor.process(urls) },
-                            onRemoveDownloads = { artistToRemoveDownloads = artist }
+                            onToggleAutoDownload = { viewModel.onEvent(ArtistTabEvent.ToggleAutoDownloadArtist(artist)) },
+                            groupAction = "Move to group..." to { viewModel.onEvent(ArtistTabEvent.PrepareToMoveArtist(artist)) },
+                            onHideArtist = { viewModel.onEvent(ArtistTabEvent.HideArtist(artist)) },
+                            processUrls = { urls -> viewModel.thumbnailProcessor.process(urls) },
+                            onRemoveDownloads = { viewModel.onEvent(ArtistTabEvent.PrepareToRemoveDownloads(artist)) }
                         )
                     }
                     is LibraryArtistItem.GroupItem -> {
@@ -92,11 +130,11 @@ fun ArtistsTabContent(
                             thumbnailUrls = libraryItem.thumbnailUrls,
                             artistCount = libraryItem.artistCount,
                             onClick = { onGoToArtistGroup(group.groupId) },
-                            onPlayClick = { onEvent(LibraryEvent.PlayArtistGroup(group)) },
-                            onShuffleClick = { onEvent(LibraryEvent.ShuffleArtistGroup(group)) },
-                            onRenameClick = { onEvent(LibraryEvent.PrepareToRenameGroup(group)) },
-                            onDeleteClick = { onEvent(LibraryEvent.SetItemForDeletion(DeletableItem.DeletableArtistGroup(group))) },
-                            processUrls = { urls -> thumbnailProcessor.process(urls) }
+                            onPlayClick = { viewModel.onEvent(ArtistTabEvent.PlayArtistGroup(group)) },
+                            onShuffleClick = { viewModel.onEvent(ArtistTabEvent.ShuffleArtistGroup(group)) },
+                            onRenameClick = { viewModel.onEvent(ArtistTabEvent.PrepareToRenameGroup(group)) },
+                            onDeleteClick = { viewModel.onEvent(ArtistTabEvent.SetItemForDeletion(group)) },
+                            processUrls = { urls -> viewModel.thumbnailProcessor.process(urls) }
                         )
                     }
                 }

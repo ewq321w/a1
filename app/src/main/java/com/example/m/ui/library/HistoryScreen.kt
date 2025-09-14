@@ -12,9 +12,11 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.m.data.database.Song
 import com.example.m.managers.DialogState
+import com.example.m.managers.PlaylistActionState
 import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.library.components.*
 import kotlinx.coroutines.flow.collectLatest
@@ -34,6 +36,7 @@ fun HistoryScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var clearActionPending by remember { mutableStateOf<ClearAction?>(null) }
     val dialogState by viewModel.dialogState.collectAsState()
+    val playlistActionState by viewModel.playlistActionState.collectAsState()
 
     LaunchedEffect(Unit) {
         viewModel.navigateToArtist.collect { artistId ->
@@ -49,10 +52,20 @@ fun HistoryScreen(
 
     when (val state = dialogState) {
         is DialogState.CreateGroup -> {
-            CreateLibraryGroupDialog(
+            TextFieldDialog(
+                title = "New Library Group",
+                label = "Group name",
+                confirmButtonText = "Create",
                 onDismiss = { viewModel.onDialogDismiss() },
-                onCreate = { name -> viewModel.onDialogCreateGroup(name) },
-                isFirstGroup = state.isFirstGroup
+                onConfirm = { name -> viewModel.onDialogCreateGroup(name) },
+                content = {
+                    if (state.isFirstGroup) {
+                        Text(
+                            "To start your library, please create a group to add songs to.",
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                }
             )
         }
         is DialogState.SelectGroup -> {
@@ -79,12 +92,39 @@ fun HistoryScreen(
         }
     }
 
-    if (uiState.showCreatePlaylistDialog) {
-        CreatePlaylistDialog(
-            onDismiss = { viewModel.onEvent(HistoryEvent.DismissCreatePlaylistDialog) },
-            onCreate = { name -> viewModel.onEvent(HistoryEvent.CreatePlaylist(name)) }
-        )
+    when (val state = playlistActionState) {
+        is PlaylistActionState.AddToPlaylist -> {
+            val item = state.item
+            val songTitle = (item as? Song)?.title ?: (item as? StreamInfoItem)?.name ?: "Unknown"
+            val songArtist = (item as? Song)?.artist ?: (item as? StreamInfoItem)?.uploaderName ?: "Unknown"
+            val thumbnailUrl = (item as? Song)?.thumbnailUrl ?: (item as? StreamInfoItem)?.getHighQualityThumbnailUrl() ?: ""
+
+            ModalBottomSheet(
+                onDismissRequest = { viewModel.onPlaylistActionDismiss() },
+                sheetState = sheetState
+            ) {
+                AddToPlaylistSheet(
+                    songTitle = songTitle,
+                    songArtist = songArtist,
+                    songThumbnailUrl = thumbnailUrl,
+                    playlists = state.playlists,
+                    onPlaylistSelected = { playlistId -> viewModel.onPlaylistSelected(playlistId) },
+                    onCreateNewPlaylist = { viewModel.onPrepareToCreatePlaylist() }
+                )
+            }
+        }
+        is PlaylistActionState.CreatePlaylist -> {
+            TextFieldDialog(
+                title = "New Playlist",
+                label = "Playlist name",
+                confirmButtonText = "Create",
+                onDismiss = { viewModel.onPlaylistActionDismiss() },
+                onConfirm = { name -> viewModel.onPlaylistCreateConfirm(name) }
+            )
+        }
+        is PlaylistActionState.Hidden -> {}
     }
+
 
     clearActionPending?.let { action ->
         val (itemType, itemName) = when (action) {
@@ -106,26 +146,6 @@ fun HistoryScreen(
                 clearActionPending = null
             }
         )
-    }
-
-    uiState.itemToAddToPlaylist?.let { currentItem ->
-        val songTitle = if (currentItem is Song) currentItem.title else (currentItem as StreamInfoItem).name ?: "Unknown"
-        val songArtist = if (currentItem is Song) currentItem.artist else (currentItem as StreamInfoItem).uploaderName ?: "Unknown"
-        val thumbnailUrl = if (currentItem is Song) currentItem.thumbnailUrl else (currentItem as StreamInfoItem).getHighQualityThumbnailUrl()
-
-        ModalBottomSheet(
-            onDismissRequest = { viewModel.onEvent(HistoryEvent.DismissAddToPlaylistSheet) },
-            sheetState = sheetState
-        ) {
-            AddToPlaylistSheet(
-                songTitle = songTitle,
-                songArtist = songArtist,
-                songThumbnailUrl = thumbnailUrl,
-                playlists = uiState.allPlaylists,
-                onPlaylistSelected = { playlistId -> viewModel.onEvent(HistoryEvent.PlaylistSelectedForAddition(playlistId)) },
-                onCreateNewPlaylist = { viewModel.onEvent(HistoryEvent.PrepareToCreatePlaylist) }
-            )
-        }
     }
 
     Scaffold(
@@ -170,7 +190,7 @@ fun HistoryScreen(
                     SongItem(
                         song = song,
                         onClick = { viewModel.onEvent(HistoryEvent.SongSelected(index)) },
-                        onAddToPlaylistClick = { viewModel.onEvent(HistoryEvent.SelectItemForPlaylist(song)) },
+                        onAddToPlaylistClick = { viewModel.onEvent(HistoryEvent.AddToPlaylist(song)) },
                         onPlayNextClick = { viewModel.onEvent(HistoryEvent.PlayNext(song)) },
                         onAddToQueueClick = { viewModel.onEvent(HistoryEvent.AddToQueue(song)) },
                         onGoToArtistClick = { viewModel.onEvent(HistoryEvent.GoToArtist(song)) },

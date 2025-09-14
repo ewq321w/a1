@@ -19,55 +19,59 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.m.data.database.PlaylistWithSongs
 import com.example.m.managers.ThumbnailProcessor
 import com.example.m.ui.library.DeletableItem
-import com.example.m.ui.library.LibraryEvent
 import com.example.m.ui.library.components.CompositeThumbnailImage
 import com.example.m.ui.library.components.ConfirmDeleteDialog
 import com.example.m.ui.library.components.EmptyStateMessage
 
 @Composable
 fun PlaylistTabContent(
-    playlists: List<PlaylistWithSongs>,
     onPlaylistClick: (Long) -> Unit,
     onEditPlaylist: (Long) -> Unit,
-    onEvent: (LibraryEvent) -> Unit,
-    thumbnailProcessor: ThumbnailProcessor,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    viewModel: PlaylistsViewModel = hiltViewModel()
 ) {
-    var playlistToRemoveDownloads by remember { mutableStateOf<PlaylistWithSongs?>(null) }
+    val uiState by viewModel.uiState.collectAsState()
 
-    playlistToRemoveDownloads?.let { playlist ->
+    uiState.playlistToRemoveDownloads?.let { playlist ->
         ConfirmDeleteDialog(
             itemType = "downloads for",
             itemName = playlist.playlist.name,
-            onDismiss = { playlistToRemoveDownloads = null },
-            onConfirm = {
-                onEvent(LibraryEvent.RemoveDownloadsForPlaylist(playlist))
-                playlistToRemoveDownloads = null
-            }
+            onDismiss = { viewModel.onEvent(PlaylistTabEvent.CancelRemoveDownloads) },
+            onConfirm = { viewModel.onEvent(PlaylistTabEvent.ConfirmRemoveDownloads) }
         )
     }
 
-    if (playlists.isEmpty()) {
+    uiState.itemPendingDeletion?.let { playlist ->
+        ConfirmDeleteDialog(
+            itemType = "playlist",
+            itemName = playlist.playlist.playlist.name,
+            onDismiss = { viewModel.onEvent(PlaylistTabEvent.ClearItemForDeletion) },
+            onConfirm = { viewModel.onEvent(PlaylistTabEvent.ConfirmDeletion) }
+        )
+    }
+
+    if (uiState.playlists.isEmpty()) {
         EmptyStateMessage(message = "Create your first playlist using the '+' button.")
     } else {
         LazyColumn(
             modifier = modifier,
             contentPadding = PaddingValues(bottom = 90.dp)
         ) {
-            items(items = playlists, key = { it.playlist.playlistId }) { p ->
+            items(items = uiState.playlists, key = { it.playlist.playlistId }) { p ->
                 PlaylistItem(
                     playlistWithSongs = p,
                     onClick = { onPlaylistClick(p.playlist.playlistId) },
-                    onPlay = { onEvent(LibraryEvent.PlayPlaylist(p)) },
-                    onShuffle = { onEvent(LibraryEvent.ShufflePlaylist(p)) },
-                    onToggleAutoDownload = { onEvent(LibraryEvent.ToggleAutoDownloadPlaylist(p)) },
-                    onRemoveDownloads = { playlistToRemoveDownloads = p },
+                    onPlay = { viewModel.onEvent(PlaylistTabEvent.PlayPlaylist(p)) },
+                    onShuffle = { viewModel.onEvent(PlaylistTabEvent.ShufflePlaylist(p)) },
+                    onToggleAutoDownload = { viewModel.onEvent(PlaylistTabEvent.ToggleAutoDownloadPlaylist(p)) },
+                    onRemoveDownloads = { viewModel.onEvent(PlaylistTabEvent.PrepareToRemoveDownloads(p)) },
                     onEdit = { onEditPlaylist(p.playlist.playlistId) },
-                    onDelete = { onEvent(LibraryEvent.SetItemForDeletion(DeletableItem.DeletablePlaylist(p))) },
-                    thumbnailProcessor = thumbnailProcessor
+                    onDelete = { viewModel.onEvent(PlaylistTabEvent.SetItemForDeletion(p)) },
+                    thumbnailProcessor = viewModel.thumbnailProcessor
                 )
             }
         }

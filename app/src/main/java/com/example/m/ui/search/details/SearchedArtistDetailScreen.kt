@@ -10,7 +10,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
@@ -25,19 +24,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import coil.ImageLoader
 import coil.compose.AsyncImage
 import com.example.m.R
+import com.example.m.data.database.Song
 import com.example.m.managers.DialogState
+import com.example.m.managers.PlaylistActionState
 import com.example.m.ui.common.getAvatar
 import com.example.m.ui.common.getBanner
-import com.example.m.ui.common.getThumbnail
-import com.example.m.ui.library.components.ArtistGroupConflictDialog
-import com.example.m.ui.library.components.ConfirmAddAllToLibraryDialog
-import com.example.m.ui.library.components.CreateLibraryGroupDialog
-import com.example.m.ui.library.components.SelectLibraryGroupDialog
+import com.example.m.ui.common.getHighQualityThumbnailUrl
+import com.example.m.ui.library.components.*
+import com.example.m.ui.search.AlbumItem
 import com.example.m.ui.search.SearchResultItem
+import com.example.m.ui.search.formatSubscriberCount
 import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
+import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import java.text.DecimalFormat
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -51,14 +51,26 @@ fun SearchedArtistDetailScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val dialogState by viewModel.dialogState.collectAsState()
+    val playlistActionState by viewModel.playlistActionState.collectAsState()
+    val sheetState = rememberModalBottomSheetState()
 
 
     when (val state = dialogState) {
         is DialogState.CreateGroup -> {
-            CreateLibraryGroupDialog(
+            TextFieldDialog(
+                title = "New Library Group",
+                label = "Group name",
+                confirmButtonText = "Create",
                 onDismiss = { viewModel.onEvent(SearchedArtistDetailEvent.DismissDialog) },
-                onCreate = { name -> viewModel.onEvent(SearchedArtistDetailEvent.RequestCreateGroup(name)) },
-                isFirstGroup = state.isFirstGroup
+                onConfirm = { name -> viewModel.onEvent(SearchedArtistDetailEvent.RequestCreateGroup(name)) },
+                content = {
+                    if (state.isFirstGroup) {
+                        Text(
+                            "To start your library, please create a group to add songs to.",
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                }
             )
         }
         is DialogState.SelectGroup -> {
@@ -79,6 +91,36 @@ fun SearchedArtistDetailScreen(
             )
         }
         is DialogState.Hidden -> {}
+    }
+
+    when(val state = playlistActionState) {
+        is PlaylistActionState.AddToPlaylist -> {
+            val item = state.item
+            val songTitle = (item as? Song)?.title ?: (item as? StreamInfoItem)?.name ?: "Unknown"
+            val songArtist = (item as? Song)?.artist ?: (item as? StreamInfoItem)?.uploaderName ?: "Unknown"
+            val thumbnailUrl = (item as? Song)?.thumbnailUrl ?: (item as? StreamInfoItem)?.getHighQualityThumbnailUrl() ?: ""
+
+            ModalBottomSheet(onDismissRequest = { viewModel.onPlaylistActionDismiss() }, sheetState = sheetState) {
+                AddToPlaylistSheet(
+                    songTitle = songTitle,
+                    songArtist = songArtist,
+                    songThumbnailUrl = thumbnailUrl,
+                    playlists = state.playlists,
+                    onPlaylistSelected = { playlistId -> viewModel.onPlaylistSelected(playlistId) },
+                    onCreateNewPlaylist = { viewModel.onPrepareToCreatePlaylist() }
+                )
+            }
+        }
+        is PlaylistActionState.CreatePlaylist -> {
+            TextFieldDialog(
+                title = "New Playlist",
+                label = "Playlist name",
+                confirmButtonText = "Create",
+                onDismiss = { viewModel.onPlaylistActionDismiss() },
+                onConfirm = { name -> viewModel.onPlaylistCreateConfirm(name) }
+            )
+        }
+        is PlaylistActionState.Hidden -> {}
     }
 
     if (uiState.showConfirmAddAllDialog) {
@@ -148,6 +190,7 @@ fun SearchedArtistDetailScreen(
                                 imageLoader = viewModel.imageLoader,
                                 onPlay = { viewModel.onEvent(SearchedArtistDetailEvent.SongSelected(index)) },
                                 onAddToLibrary = { viewModel.onEvent(SearchedArtistDetailEvent.AddToLibrary(item.result.streamInfo)) },
+                                onAddToPlaylist = { viewModel.onEvent(SearchedArtistDetailEvent.AddToPlaylist(item.result.streamInfo)) },
                                 onPlayNext = { viewModel.onEvent(SearchedArtistDetailEvent.PlayNext(item.result.streamInfo)) },
                                 onAddToQueue = { viewModel.onEvent(SearchedArtistDetailEvent.AddToQueue(item.result.streamInfo)) }
                             )
@@ -234,33 +277,4 @@ private fun ArtistHeader(onBack: () -> Unit, bannerUrl: String?, avatarUrl: Stri
             }
         }
     }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun AlbumItem(album: PlaylistInfoItem, imageLoader: ImageLoader, onClick: () -> Unit, showArtist: Boolean = true) {
-    Column(modifier = Modifier.width(130.dp).clickable(onClick = onClick), horizontalAlignment = Alignment.Start) {
-        AsyncImage(
-            model = album.getThumbnail(),
-            imageLoader = imageLoader,
-            contentDescription = album.name,
-            modifier = Modifier.size(130.dp).clip(RoundedCornerShape(3.dp)),
-            contentScale = ContentScale.Crop,
-            error = painterResource(id = R.drawable.placeholder_gray),
-            placeholder = painterResource(id = R.drawable.placeholder_gray)
-        )
-        Text(text = album.name ?: "Unknown Album", style = MaterialTheme.typography.bodyMedium, maxLines = 1, modifier = Modifier.padding(top = 4.dp).basicMarquee())
-        if (showArtist) {
-            Text(text = album.uploaderName ?: "Unknown Artist", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-private fun formatSubscriberCount(count: Long): String {
-    if (count < 0) return ""
-    if (count < 1000) return "$count subscribers"
-    val thousands = count / 1000.0
-    if (count < 1_000_000) return "${DecimalFormat("0.#").format(thousands)}K subscribers"
-    val millions = count / 1_000_000.0
-    return "${DecimalFormat("0.##").format(millions)}M subscribers"
 }

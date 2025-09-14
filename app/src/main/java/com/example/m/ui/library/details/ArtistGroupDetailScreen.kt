@@ -17,8 +17,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.m.data.database.Song
 import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.library.components.AddToPlaylistSheet
-import com.example.m.ui.library.components.CreatePlaylistDialog
 import com.example.m.ui.library.components.EmptyStateMessage
+import com.example.m.ui.library.components.TextFieldDialog
 import com.example.m.ui.library.tabs.ArtistItem
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
@@ -34,9 +34,12 @@ fun ArtistGroupDetailScreen(
     val sheetState = rememberModalBottomSheetState()
 
     if (uiState.showCreatePlaylistDialog) {
-        CreatePlaylistDialog(
+        TextFieldDialog(
+            title = "New Playlist",
+            label = "Playlist name",
+            confirmButtonText = "Create",
             onDismiss = { viewModel.onEvent(ArtistGroupDetailEvent.DismissCreatePlaylistDialog) },
-            onCreate = { name -> viewModel.onEvent(ArtistGroupDetailEvent.CreatePlaylist(name)) }
+            onConfirm = { name -> viewModel.onEvent(ArtistGroupDetailEvent.CreatePlaylist(name)) }
         )
     }
 

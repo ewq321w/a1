@@ -33,12 +33,16 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import coil.ImageLoader
 import coil.compose.AsyncImage
+import com.example.m.data.database.Song
 import com.example.m.managers.DialogState
-import com.example.m.ui.common.PlaylistActionUI
+import com.example.m.managers.PlaylistActionState
+import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.common.getThumbnail
+import com.example.m.ui.library.components.AddToPlaylistSheet
 import com.example.m.ui.library.components.ArtistGroupConflictDialog
-import com.example.m.ui.library.components.CreateLibraryGroupDialog
 import com.example.m.ui.library.components.SelectLibraryGroupDialog
+import com.example.m.ui.library.components.TextFieldDialog
+import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
@@ -49,10 +53,11 @@ fun SearchScreen(
     viewModel: SearchViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val allPlaylists by viewModel.allPlaylists.collectAsState()
     val songsWithStatus by viewModel.songsWithStatus.collectAsState()
     val videoStreamsWithStatus by viewModel.videoStreamsWithStatus.collectAsState()
     val dialogState by viewModel.dialogState.collectAsState()
+    val playlistActionState by viewModel.playlistActionState.collectAsState()
+    val sheetState = rememberModalBottomSheetState()
 
     if (uiState.detailedViewCategory != null) {
         BackHandler {
@@ -62,10 +67,20 @@ fun SearchScreen(
 
     when (val state = dialogState) {
         is DialogState.CreateGroup -> {
-            CreateLibraryGroupDialog(
+            TextFieldDialog(
+                title = "New Library Group",
+                label = "Group name",
+                confirmButtonText = "Create",
                 onDismiss = { viewModel.onEvent(SearchEvent.DismissDialog) },
-                onCreate = { name -> viewModel.onEvent(SearchEvent.RequestCreateGroup) },
-                isFirstGroup = state.isFirstGroup
+                onConfirm = { name -> viewModel.onEvent(SearchEvent.CreateLibraryGroup(name)) },
+                content = {
+                    if (state.isFirstGroup) {
+                        Text(
+                            "To start your library, please create a group to add songs to.",
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                }
             )
         }
         is DialogState.SelectGroup -> {
@@ -88,13 +103,39 @@ fun SearchScreen(
         is DialogState.Hidden -> {}
     }
 
-    PlaylistActionUI(
-        handler = viewModel.playlistActionHandler,
-        allPlaylists = allPlaylists,
-        onCreatePlaylist = { name ->
-            viewModel.onEvent(SearchEvent.CreatePlaylist(name))
+    when (val state = playlistActionState) {
+        is PlaylistActionState.AddToPlaylist -> {
+            val item = state.item
+            val songTitle = (item as? Song)?.title ?: (item as? StreamInfoItem)?.name ?: "Unknown"
+            val songArtist = (item as? Song)?.artist ?: (item as? StreamInfoItem)?.uploaderName ?: "Unknown"
+            val thumbnailUrl = (item as? Song)?.thumbnailUrl ?: (item as? StreamInfoItem)?.getHighQualityThumbnailUrl() ?: ""
+
+            ModalBottomSheet(
+                onDismissRequest = { viewModel.onPlaylistActionEvent(PlaylistActionState.Hidden) },
+                sheetState = sheetState
+            ) {
+                AddToPlaylistSheet(
+                    songTitle = songTitle,
+                    songArtist = songArtist,
+                    songThumbnailUrl = thumbnailUrl,
+                    playlists = state.playlists,
+                    onPlaylistSelected = { playlistId -> viewModel.onPlaylistSelected(playlistId) },
+                    onCreateNewPlaylist = { viewModel.onPlaylistActionEvent(PlaylistActionState.CreatePlaylist(null)) }
+                )
+            }
         }
-    )
+        is PlaylistActionState.CreatePlaylist -> {
+            TextFieldDialog(
+                title = "New Playlist",
+                label = "Playlist name",
+                confirmButtonText = "Create",
+                onDismiss = { viewModel.onPlaylistActionEvent(PlaylistActionState.Hidden) },
+                onConfirm = { name -> viewModel.onPlaylistCreateConfirm(name) }
+            )
+        }
+        is PlaylistActionState.Hidden -> {}
+    }
+
 
     Scaffold(
         topBar = {
@@ -174,6 +215,7 @@ fun SearchScreen(
                             },
                             onShowMore = { viewModel.onEvent(SearchEvent.ShowDetailedView(it)) },
                             onAddToLibrary = { viewModel.onEvent(SearchEvent.AddToLibrary(it)) },
+                            onAddToPlaylist = { viewModel.onEvent(SearchEvent.AddToPlaylist(it)) },
                             onPlayNext = { viewModel.onEvent(SearchEvent.PlayNext(it)) },
                             onAddToQueue = { viewModel.onEvent(SearchEvent.AddToQueue(it)) },
                             onShuffleAlbum = { viewModel.onEvent(SearchEvent.ShuffleAlbum(it)) }
@@ -194,6 +236,7 @@ fun SearchScreen(
                             },
                             onShowMore = { viewModel.onEvent(SearchEvent.ShowDetailedView(it)) },
                             onAddToLibrary = { viewModel.onEvent(SearchEvent.AddToLibrary(it)) },
+                            onAddToPlaylist = { viewModel.onEvent(SearchEvent.AddToPlaylist(it)) },
                             onPlayNext = { viewModel.onEvent(SearchEvent.PlayNext(it)) },
                             onAddToQueue = { viewModel.onEvent(SearchEvent.AddToQueue(it)) }
                         )
@@ -221,6 +264,7 @@ fun SearchScreen(
                     navController.navigate("searched_artist_detail/$searchType/$encodedUrl")
                 },
                 onAddToLibrary = { viewModel.onEvent(SearchEvent.AddToLibrary(it)) },
+                onAddToPlaylist = { viewModel.onEvent(SearchEvent.AddToPlaylist(it)) },
                 onPlayNext = { viewModel.onEvent(SearchEvent.PlayNext(it)) },
                 onAddToQueue = { viewModel.onEvent(SearchEvent.AddToQueue(it)) }
             )
@@ -242,6 +286,7 @@ private fun DetailedView(
     onAlbumClicked: (AlbumResult) -> Unit,
     onArtistClicked: (ArtistResult) -> Unit,
     onAddToLibrary: (SearchResult) -> Unit,
+    onAddToPlaylist: (SearchResult) -> Unit,
     onPlayNext: (SearchResult) -> Unit,
     onAddToQueue: (SearchResult) -> Unit
 ) {
@@ -277,6 +322,7 @@ private fun DetailedView(
                             imageLoader = imageLoader,
                             onPlay = { onSongClicked(index) },
                             onAddToLibrary = { onAddToLibrary(item.result) },
+                            onAddToPlaylist = { onAddToPlaylist(item.result) },
                             onPlayNext = { onPlayNext(item.result) },
                             onAddToQueue = { onAddToQueue(item.result) }
                         )

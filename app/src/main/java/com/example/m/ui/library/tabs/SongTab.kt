@@ -1,4 +1,4 @@
-// file: com/example/m/ui/library/tabs/SongsTab.kt
+// file: com/example/m/ui/library/tabs/SongTab.kt
 package com.example.m.ui.library.tabs
 
 import androidx.compose.foundation.layout.PaddingValues
@@ -8,39 +8,49 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.example.m.data.database.Song
-import com.example.m.ui.library.LibraryEvent
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.m.ui.library.DeletableItem
+import com.example.m.ui.library.components.ConfirmDeleteDialog
 import com.example.m.ui.library.components.SongItem
 
 @Composable
 fun SongsTabContent(
-    songs: List<Song>,
-    onEvent: (LibraryEvent) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    viewModel: SongsViewModel = hiltViewModel()
 ) {
+    val uiState by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
+
+    uiState.itemPendingDeletion?.let { song ->
+        ConfirmDeleteDialog(
+            itemType = "song",
+            itemName = song.title,
+            onDismiss = { viewModel.onEvent(SongsTabEvent.ClearItemForDeletion) },
+            onConfirm = { viewModel.onEvent(SongsTabEvent.ConfirmDeletion) }
+        )
+    }
 
     LazyColumn(
         state = listState,
         modifier = modifier,
-        contentPadding = PaddingValues(bottom = 16.dp)
+        contentPadding = PaddingValues(bottom = 90.dp)
     ) {
         itemsIndexed(
-            items = songs,
+            items = uiState.songs,
             key = { _, song -> song.songId }
         ) { index, song ->
             SongItem(
                 song = song,
-                onClick = { onEvent(LibraryEvent.SongSelected(index)) },
-                onAddToPlaylistClick = { onEvent(LibraryEvent.PrepareToShowPlaylistSheet(song)) },
-                onDeleteClick = { onEvent(LibraryEvent.SetItemForDeletion(com.example.m.ui.library.DeletableItem.DeletableSong(song))) },
-                onPlayNextClick = { onEvent(LibraryEvent.PlaySongNext(song)) },
-                onAddToQueueClick = { onEvent(LibraryEvent.AddSongToQueue(song)) },
-                onShuffleClick = { onEvent(LibraryEvent.ShuffleSong(song)) },
-                onGoToArtistClick = { onEvent(LibraryEvent.GoToArtist(song)) },
-                onDownloadClick = { onEvent(LibraryEvent.DownloadSong(song)) },
-                onAddToLibraryClick = { onEvent(LibraryEvent.AddToLibrary(song)) },
-                onDeleteDownloadClick = { onEvent(LibraryEvent.DeleteSongDownload(song)) }
+                onClick = { viewModel.onEvent(SongsTabEvent.SongSelected(index)) },
+                onAddToPlaylistClick = { viewModel.onEvent(SongsTabEvent.AddToPlaylist(song)) },
+                onDeleteClick = { viewModel.onEvent(SongsTabEvent.SetItemForDeletion(song)) },
+                onPlayNextClick = { viewModel.onEvent(SongsTabEvent.PlaySongNext(song)) },
+                onAddToQueueClick = { viewModel.onEvent(SongsTabEvent.AddSongToQueue(song)) },
+                onShuffleClick = { viewModel.onEvent(SongsTabEvent.ShuffleSong(song)) },
+                onGoToArtistClick = { viewModel.onEvent(SongsTabEvent.GoToArtist(song)) },
+                onDownloadClick = { viewModel.onEvent(SongsTabEvent.DownloadSong(song)) },
+                onAddToLibraryClick = { viewModel.onEvent(SongsTabEvent.AddToLibrary(song)) },
+                onDeleteDownloadClick = { viewModel.onEvent(SongsTabEvent.DeleteSongDownload(song)) }
             )
         }
     }

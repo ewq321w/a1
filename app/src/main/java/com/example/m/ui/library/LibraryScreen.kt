@@ -14,14 +14,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.m.data.database.LibraryGroup
 import com.example.m.data.database.Song
 import com.example.m.managers.DialogState
-import com.example.m.ui.library.components.*
-import com.example.m.ui.library.tabs.ArtistsTabContent
-import com.example.m.ui.library.tabs.PlaylistTabContent
-import com.example.m.ui.library.tabs.SongsTabContent
-import com.example.m.ui.main.MainViewModel
-import kotlinx.coroutines.launch
-import org.schabi.newpipe.extractor.stream.StreamInfoItem
+import com.example.m.managers.PlaylistActionState
 import com.example.m.ui.common.getHighQualityThumbnailUrl
+import com.example.m.ui.library.components.*
+import com.example.m.ui.library.tabs.*
+import com.example.m.ui.main.MainViewModel
+import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,17 +32,34 @@ fun LibraryScreen(
     onGoToArtistGroup: (Long) -> Unit,
     onGoToHistory: () -> Unit
 ) {
-    val viewModel: LibraryViewModel = hiltViewModel()
     val activity = LocalContext.current as ComponentActivity
     val mainViewModel: MainViewModel = hiltViewModel(activity)
-    val uiState by viewModel.uiState.collectAsState()
-    val dialogState by viewModel.dialogState.collectAsState()
+    val libraryViewModel: LibraryViewModel = hiltViewModel()
+
+    // Each tab now has its own ViewModel, retrieved here
+    val playlistsViewModel: PlaylistsViewModel = hiltViewModel()
+    val artistsViewModel: ArtistsViewModel = hiltViewModel()
+    val songsViewModel: SongsViewModel = hiltViewModel()
+
+    val uiState by libraryViewModel.uiState.collectAsState()
     val isDoingMaintenance by mainViewModel.isDoingMaintenance
-    val coroutineScope = rememberCoroutineScope()
-    val sheetState = rememberModalBottomSheetState()
+
+    // States from the new, smaller ViewModels are collected here
+    val songsDialogState by songsViewModel.dialogState.collectAsState()
+    val songsPlaylistActionState by songsViewModel.playlistActionState.collectAsState()
+    val artistsPlaylistActionState by artistsViewModel.playlistActionState.collectAsState()
+
+    // Since multiple ViewModels can now trigger dialogs, we check them in order of priority.
+    val finalDialogState = songsDialogState
+    val finalPlaylistActionState = if (artistsPlaylistActionState is PlaylistActionState.Hidden) songsPlaylistActionState else artistsPlaylistActionState
 
     LaunchedEffect(Unit) {
-        viewModel.navigateToArtist.collect { artistId ->
+        songsViewModel.navigateToArtist.collect { artistId ->
+            onArtistClick(artistId)
+        }
+    }
+    LaunchedEffect(Unit) {
+        artistsViewModel.navigateToArtist.collect { artistId ->
             onArtistClick(artistId)
         }
     }
@@ -52,27 +67,37 @@ fun LibraryScreen(
     if (uiState.showManageGroupsDialog) {
         ManageLibraryGroupsDialog(
             groups = uiState.libraryGroups,
-            onDismiss = { viewModel.onEvent(LibraryEvent.ManageGroupsDismissed) },
-            onAddGroup = { name -> viewModel.onEvent(LibraryEvent.AddLibraryGroup(name)) },
-            onRenameGroup = { group, newName -> viewModel.onEvent(LibraryEvent.RenameLibraryGroup(group, newName)) },
-            onDeleteGroup = { group -> viewModel.onEvent(LibraryEvent.DeleteLibraryGroup(group)) }
+            onDismiss = { libraryViewModel.onEvent(LibraryEvent.ManageGroupsDismissed) },
+            onAddGroup = { name -> libraryViewModel.onEvent(LibraryEvent.AddLibraryGroup(name)) },
+            onRenameGroup = { group, newName -> libraryViewModel.onEvent(LibraryEvent.RenameLibraryGroup(group, newName)) },
+            onDeleteGroup = { group -> libraryViewModel.onEvent(LibraryEvent.DeleteLibraryGroup(group)) }
         )
     }
 
-    when (val state = dialogState) {
+    when (val state = finalDialogState) {
         is DialogState.CreateGroup -> {
-            CreateLibraryGroupDialog(
-                onDismiss = { viewModel.onDialogDismiss() },
-                onCreate = { name -> viewModel.onDialogCreateGroup(name) },
-                isFirstGroup = state.isFirstGroup
+            TextFieldDialog(
+                title = "New Library Group",
+                label = "Group name",
+                confirmButtonText = "Create",
+                onDismiss = { songsViewModel.onDialogDismiss() },
+                onConfirm = { name -> songsViewModel.onDialogCreateGroup(name) },
+                content = {
+                    if (state.isFirstGroup) {
+                        Text(
+                            "To start your library, please create a group to add songs to.",
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                }
             )
         }
         is DialogState.SelectGroup -> {
             SelectLibraryGroupDialog(
                 groups = state.groups,
-                onDismiss = { viewModel.onDialogDismiss() },
-                onGroupSelected = { groupId -> viewModel.onDialogGroupSelected(groupId) },
-                onCreateNewGroup = { viewModel.onEvent(LibraryEvent.RequestCreateGroup) }
+                onDismiss = { songsViewModel.onDialogDismiss() },
+                onGroupSelected = { groupId -> songsViewModel.onDialogGroupSelected(groupId) },
+                onCreateNewGroup = { songsViewModel.onDialogRequestCreateGroup() }
             )
         }
         is DialogState.Conflict -> {
@@ -80,86 +105,42 @@ fun LibraryScreen(
                 artistName = state.song.artist,
                 conflictingGroupName = state.conflict.conflictingGroupName,
                 targetGroupName = state.targetGroupName,
-                onDismiss = { viewModel.onDialogDismiss() },
-                onMoveArtistToTargetGroup = { viewModel.onDialogResolveConflict() }
+                onDismiss = { songsViewModel.onDialogDismiss() },
+                onMoveArtistToTargetGroup = { songsViewModel.onDialogResolveConflict() }
             )
         }
         is DialogState.Hidden -> {}
     }
 
-    if (uiState.showCreatePlaylistDialog) {
-        CreatePlaylistDialog(
-            onDismiss = { viewModel.onEvent(LibraryEvent.DismissCreatePlaylistDialog) },
-            onCreate = { name -> viewModel.onEvent(LibraryEvent.CreatePlaylist(name)) }
-        )
-    }
+    when (val state = finalPlaylistActionState) {
+        is PlaylistActionState.AddToPlaylist -> {
+            val sheetState = rememberModalBottomSheetState()
+            val item = state.item
+            val songTitle = (item as? Song)?.title ?: (item as? StreamInfoItem)?.name ?: "Unknown"
+            val songArtist = (item as? Song)?.artist ?: (item as? StreamInfoItem)?.uploaderName ?: "Unknown"
+            val thumbnailUrl = (item as? Song)?.thumbnailUrl ?: (item as? StreamInfoItem)?.getHighQualityThumbnailUrl() ?: ""
 
-    if (uiState.showCreateArtistGroupDialog) {
-        CreateArtistGroupDialog(
-            onDismiss = { viewModel.onEvent(LibraryEvent.DismissCreateArtistGroupDialog) },
-            onCreate = { name -> viewModel.onEvent(LibraryEvent.CreateArtistGroup(name)) }
-        )
-    }
-
-    uiState.groupToRename?.let { group ->
-        RenameArtistGroupDialog(
-            initialName = group.name,
-            onDismiss = { viewModel.onEvent(LibraryEvent.CancelRenameGroup) },
-            onConfirm = { newName -> viewModel.onEvent(LibraryEvent.ConfirmRenameGroup(newName)) }
-        )
-    }
-
-    uiState.artistToMove?.let { artist ->
-        ModalBottomSheet(onDismissRequest = { viewModel.onEvent(LibraryEvent.DismissMoveArtistSheet) }) {
-            MoveToGroupSheet(
-                artistName = artist.name,
-                groups = uiState.allArtistGroups,
-                onGroupSelected = { groupId -> viewModel.onEvent(LibraryEvent.MoveArtistToGroup(groupId)) }
+            ModalBottomSheet(onDismissRequest = { artistsViewModel.onPlaylistActionDismiss() }, sheetState = sheetState) {
+                AddToPlaylistSheet(
+                    songTitle = songTitle,
+                    songArtist = songArtist,
+                    songThumbnailUrl = thumbnailUrl,
+                    playlists = state.playlists,
+                    onPlaylistSelected = { playlistId -> artistsViewModel.onPlaylistSelected(playlistId) },
+                    onCreateNewPlaylist = { artistsViewModel.onPrepareToCreatePlaylist() }
+                )
+            }
+        }
+        is PlaylistActionState.CreatePlaylist -> {
+            TextFieldDialog(
+                title = "New Playlist",
+                label = "Playlist name",
+                confirmButtonText = "Create",
+                onDismiss = { artistsViewModel.onPlaylistActionDismiss() },
+                onConfirm = { name -> artistsViewModel.onCreatePlaylist(name) }
             )
         }
-    }
-
-    uiState.itemToAddToPlaylist?.let { item ->
-        val songTitle: String
-        val songArtist: String
-        val thumbnailUrl: String
-
-        when (item) {
-            is Song -> {
-                songTitle = item.title
-                songArtist = item.artist
-                thumbnailUrl = item.thumbnailUrl
-            }
-            is StreamInfoItem -> {
-                songTitle = item.name ?: "Unknown"
-                songArtist = item.uploaderName ?: "Unknown"
-                thumbnailUrl = item.getHighQualityThumbnailUrl()
-            }
-            else -> {
-                songTitle = "Unknown"
-                songArtist = "Unknown"
-                thumbnailUrl = ""
-            }
-        }
-
-        ModalBottomSheet(onDismissRequest = { viewModel.onEvent(LibraryEvent.DismissAddToPlaylistSheet) }, sheetState = sheetState) {
-            AddToPlaylistSheet(
-                songTitle = songTitle,
-                songArtist = songArtist,
-                songThumbnailUrl = thumbnailUrl,
-                playlists = uiState.allPlaylists,
-                onPlaylistSelected = { playlistId -> viewModel.onEvent(LibraryEvent.PlaylistSelectedForAddition(playlistId)) },
-                onCreateNewPlaylist = { viewModel.onEvent(LibraryEvent.PrepareToCreatePlaylistWithSong) }
-            )
-        }
-    }
-
-    uiState.itemPendingDeletion?.let { item ->
-        when (item) {
-            is DeletableItem.DeletableSong -> ConfirmDeleteDialog(itemType = "song", itemName = item.song.title, onDismiss = { viewModel.onEvent(LibraryEvent.ClearItemForDeletion) }, onConfirm = { viewModel.onEvent(LibraryEvent.ConfirmDeletion) })
-            is DeletableItem.DeletablePlaylist -> ConfirmDeleteDialog(itemType = "playlist", itemName = item.playlist.playlist.name, onDismiss = { viewModel.onEvent(LibraryEvent.ClearItemForDeletion) }, onConfirm = { viewModel.onEvent(LibraryEvent.ConfirmDeletion) })
-            is DeletableItem.DeletableArtistGroup -> ConfirmDeleteDialog(itemType = "artist group", itemName = item.group.name, onDismiss = { viewModel.onEvent(LibraryEvent.ClearItemForDeletion) }, onConfirm = { viewModel.onEvent(LibraryEvent.ConfirmDeletion) })
-        }
+        is PlaylistActionState.Hidden -> {}
     }
 
     Scaffold(
@@ -170,19 +151,21 @@ fun LibraryScreen(
                     LibraryGroupSelectorMenu(
                         groups = uiState.libraryGroups,
                         activeGroupId = uiState.activeLibraryGroupId,
-                        onGroupSelected = { viewModel.onEvent(LibraryEvent.SetActiveLibraryGroup(it)) },
-                        onManageGroups = { viewModel.onEvent(LibraryEvent.ManageGroupsClicked) }
+                        onGroupSelected = { libraryViewModel.onEvent(LibraryEvent.SetActiveLibraryGroup(it)) },
+                        onManageGroups = { libraryViewModel.onEvent(LibraryEvent.ManageGroupsClicked) }
                     )
                     IconButton(onClick = onGoToHistory) { Icon(Icons.Default.History, contentDescription = "History") }
                     if (uiState.selectedView == "Songs") {
-                        SongSortMenu(currentSortOrder = uiState.sortOrder, onSortOrderSelected = { viewModel.onEvent(LibraryEvent.SetSortOrder(it)) })
+                        val songsUiState by songsViewModel.uiState.collectAsState()
+                        SongSortMenu(
+                            currentSortOrder = songsUiState.sortOrder,
+                            onSortOrderSelected = { songsViewModel.onEvent(SongsTabEvent.SetSortOrder(it)) }
+                        )
                     }
                     OptionsOverflowMenu(
                         selectedView = uiState.selectedView,
                         mainViewModel = mainViewModel,
-                        onEvent = viewModel::onEvent,
-                        downloadFilter = uiState.downloadFilter,
-                        groupingFilter = uiState.groupingFilter,
+                        songsViewModel = songsViewModel,
                         isDoingMaintenance = isDoingMaintenance,
                         onGoToHiddenArtists = onGoToHiddenArtists
                     )
@@ -193,8 +176,8 @@ fun LibraryScreen(
         },
         floatingActionButton = {
             when (uiState.selectedView) {
-                "Playlists" -> FloatingActionButton(onClick = { viewModel.onEvent(LibraryEvent.PrepareToCreateEmptyPlaylist) }, modifier = Modifier.navigationBarsPadding(), containerColor = MaterialTheme.colorScheme.primary) { Icon(Icons.Default.Add, contentDescription = "Create Playlist") }
-                "Artists" -> FloatingActionButton(onClick = { viewModel.onEvent(LibraryEvent.ShowCreateArtistGroupDialog) }, modifier = Modifier.navigationBarsPadding(), containerColor = MaterialTheme.colorScheme.primary) { Icon(Icons.Default.CreateNewFolder, contentDescription = "Create Artist Group") }
+                "Playlists" -> FloatingActionButton(onClick = { playlistsViewModel.onEvent(PlaylistTabEvent.CreateEmptyPlaylist) }, modifier = Modifier.navigationBarsPadding(), containerColor = MaterialTheme.colorScheme.primary) { Icon(Icons.Default.Add, contentDescription = "Create Playlist") }
+                "Artists" -> FloatingActionButton(onClick = { artistsViewModel.onEvent(ArtistTabEvent.ShowCreateArtistGroupDialog) }, modifier = Modifier.navigationBarsPadding(), containerColor = MaterialTheme.colorScheme.primary) { Icon(Icons.Default.CreateNewFolder, contentDescription = "Create Artist Group") }
             }
         },
         containerColor = MaterialTheme.colorScheme.background
@@ -204,15 +187,29 @@ fun LibraryScreen(
                 listOf("Playlists", "Artists", "Songs").forEachIndexed { index, label ->
                     SegmentedButton(
                         shape = SegmentedButtonDefaults.itemShape(index = index, count = 3),
-                        onClick = { viewModel.onEvent(LibraryEvent.SetSelectedView(label)) },
+                        onClick = { libraryViewModel.onEvent(LibraryEvent.SetSelectedView(label)) },
                         selected = uiState.selectedView == label
                     ) { Text(label) }
                 }
             }
             when (uiState.selectedView) {
-                "Playlists" -> PlaylistTabContent(playlists = uiState.playlists, onPlaylistClick = onPlaylistClick, onEditPlaylist = onEditPlaylist, onEvent = viewModel::onEvent, modifier = Modifier.weight(1f), thumbnailProcessor = viewModel.thumbnailProcessor)
-                "Artists" -> ArtistsTabContent(artists = uiState.libraryArtistItems, onArtistClick = onArtistClick, onGoToArtistGroup = onGoToArtistGroup, onEditArtistSongs = onEditArtistSongs, onEvent = viewModel::onEvent, modifier = Modifier.weight(1f), thumbnailProcessor = viewModel.thumbnailProcessor)
-                "Songs" -> SongsTabContent(songs = uiState.songs, onEvent = viewModel::onEvent, modifier = Modifier.weight(1f))
+                "Playlists" -> PlaylistTabContent(
+                    viewModel = playlistsViewModel,
+                    onPlaylistClick = onPlaylistClick,
+                    onEditPlaylist = onEditPlaylist,
+                    modifier = Modifier.weight(1f)
+                )
+                "Artists" -> ArtistsTabContent(
+                    viewModel = artistsViewModel,
+                    onArtistClick = onArtistClick,
+                    onGoToArtistGroup = onGoToArtistGroup,
+                    onEditArtistSongs = onEditArtistSongs,
+                    modifier = Modifier.weight(1f)
+                )
+                "Songs" -> SongsTabContent(
+                    viewModel = songsViewModel,
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
     }
@@ -243,29 +240,29 @@ private fun LibraryGroupSelectorMenu(groups: List<LibraryGroup>, activeGroupId: 
 private fun OptionsOverflowMenu(
     selectedView: String,
     mainViewModel: MainViewModel,
-    onEvent: (LibraryEvent) -> Unit,
-    downloadFilter: DownloadFilter,
-    groupingFilter: GroupingFilter,
+    songsViewModel: SongsViewModel,
     isDoingMaintenance: Boolean,
     onGoToHiddenArtists: () -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    val songsUiState by songsViewModel.uiState.collectAsState()
+
     Box {
         IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More options") }
         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
             if (selectedView == "Songs") {
-                DropdownMenuItem(text = { Text("Shuffle") }, onClick = { onEvent(LibraryEvent.ShuffleFilteredSongs); showMenu = false }, leadingIcon = { Icon(Icons.Default.Shuffle, contentDescription = "Shuffle") })
+                DropdownMenuItem(text = { Text("Shuffle") }, onClick = { songsViewModel.onEvent(SongsTabEvent.ShuffleFilteredSongs); showMenu = false }, leadingIcon = { Icon(Icons.Default.Shuffle, contentDescription = "Shuffle") })
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                 Text("Show Only", modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                 DropdownMenuItem(
                     text = { Text("Downloaded") },
-                    onClick = { onEvent(LibraryEvent.SetDownloadFilter(if (downloadFilter == DownloadFilter.DOWNLOADED) DownloadFilter.ALL else DownloadFilter.DOWNLOADED)); showMenu = false },
-                    leadingIcon = { if (downloadFilter == DownloadFilter.DOWNLOADED) Icon(Icons.Default.Check, contentDescription = "Selected") else Spacer(Modifier.width(24.dp)) }
+                    onClick = { songsViewModel.onEvent(SongsTabEvent.SetDownloadFilter(if (songsUiState.downloadFilter == DownloadFilter.DOWNLOADED) DownloadFilter.ALL else DownloadFilter.DOWNLOADED)); showMenu = false },
+                    leadingIcon = { if (songsUiState.downloadFilter == DownloadFilter.DOWNLOADED) Icon(Icons.Default.Check, contentDescription = "Selected") else Spacer(Modifier.width(24.dp)) }
                 )
                 DropdownMenuItem(
                     text = { Text("Ungrouped") },
-                    onClick = { onEvent(LibraryEvent.SetGroupingFilter(if (groupingFilter == GroupingFilter.UNGROUPED) GroupingFilter.ALL else GroupingFilter.UNGROUPED)); showMenu = false },
-                    leadingIcon = { if (groupingFilter == GroupingFilter.UNGROUPED) Icon(Icons.Default.Check, contentDescription = "Selected") else Spacer(Modifier.width(24.dp)) }
+                    onClick = { songsViewModel.onEvent(SongsTabEvent.SetGroupingFilter(if (songsUiState.groupingFilter == GroupingFilter.UNGROUPED) GroupingFilter.ALL else GroupingFilter.UNGROUPED)); showMenu = false },
+                    leadingIcon = { if (songsUiState.groupingFilter == GroupingFilter.UNGROUPED) Icon(Icons.Default.Check, contentDescription = "Selected") else Spacer(Modifier.width(24.dp)) }
                 )
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
             }

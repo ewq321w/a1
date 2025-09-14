@@ -9,7 +9,6 @@ import com.example.m.data.repository.LibraryRepository
 import com.example.m.data.repository.YoutubeRepository
 import com.example.m.managers.*
 import com.example.m.playback.MusicServiceConnection
-import com.example.m.ui.common.PlaylistActionHandler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -81,11 +80,12 @@ sealed interface SearchEvent {
     data class ShowDetailedView(val category: SearchCategory) : SearchEvent
     object HideDetailedView : SearchEvent
     data class AddToLibrary(val result: SearchResult) : SearchEvent
-    data class CreatePlaylist(val name: String) : SearchEvent
+    data class AddToPlaylist(val result: SearchResult) : SearchEvent
     data class PlayNext(val result: SearchResult) : SearchEvent
     data class AddToQueue(val result: SearchResult) : SearchEvent
     data class ShuffleAlbum(val album: AlbumResult) : SearchEvent
     object RequestCreateGroup : SearchEvent
+    data class CreateLibraryGroup(val name: String) : SearchEvent
     data class SelectGroup(val groupId: Long) : SearchEvent
     object ResolveConflict : SearchEvent
     object DismissDialog : SearchEvent
@@ -96,21 +96,17 @@ class SearchViewModel @Inject constructor(
     val imageLoader: ImageLoader,
     private val youtubeRepository: YoutubeRepository,
     private val musicServiceConnection: MusicServiceConnection,
-    val playlistManager: PlaylistManager,
-    private val libraryRepository: LibraryRepository,
-    private val songDao: SongDao,
     private val playbackListManager: PlaybackListManager,
-    private val libraryActionsManager: LibraryActionsManager
+    private val libraryActionsManager: LibraryActionsManager,
+    private val playlistActionsManager: PlaylistActionsManager,
+    private val songDao: SongDao
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SearchUiState())
     val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
 
-    val playlistActionHandler = PlaylistActionHandler(playlistManager)
     val dialogState: StateFlow<DialogState> = libraryActionsManager.dialogState
-
-    val allPlaylists: StateFlow<List<Playlist>> = libraryRepository.getAllPlaylists()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val playlistActionState: StateFlow<PlaylistActionState> = playlistActionsManager.state
 
     private val allLocalSongs: StateFlow<List<Song>> = songDao.getAllSongs()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -152,16 +148,34 @@ class SearchViewModel @Inject constructor(
             is SearchEvent.ShowDetailedView -> _uiState.update { it.copy(detailedViewCategory = event.category) }
             is SearchEvent.HideDetailedView -> _uiState.update { it.copy(detailedViewCategory = null) }
             is SearchEvent.AddToLibrary -> libraryActionsManager.addToLibrary(event.result.streamInfo)
-            is SearchEvent.CreatePlaylist -> handlePlaylistCreation(event.name)
+            is SearchEvent.AddToPlaylist -> playlistActionsManager.selectItem(event.result.streamInfo)
             is SearchEvent.PlayNext -> musicServiceConnection.playNext(event.result.streamInfo)
             is SearchEvent.AddToQueue -> musicServiceConnection.addToQueue(event.result.streamInfo)
             is SearchEvent.ShuffleAlbum -> onShuffleAlbum(event.album)
             is SearchEvent.RequestCreateGroup -> libraryActionsManager.requestCreateGroup()
+            is SearchEvent.CreateLibraryGroup -> libraryActionsManager.onCreateGroup(event.name)
             is SearchEvent.SelectGroup -> libraryActionsManager.onGroupSelected(event.groupId)
             is SearchEvent.ResolveConflict -> libraryActionsManager.onResolveConflict()
             is SearchEvent.DismissDialog -> libraryActionsManager.dismissDialog()
         }
     }
+
+    fun onPlaylistActionEvent(event: PlaylistActionState) {
+        when (event) {
+            is PlaylistActionState.CreatePlaylist -> playlistActionsManager.prepareToCreatePlaylist()
+            is PlaylistActionState.Hidden -> playlistActionsManager.dismiss()
+            else -> {}
+        }
+    }
+
+    fun onPlaylistCreateConfirm(name: String) {
+        playlistActionsManager.onCreatePlaylist(name)
+    }
+
+    fun onPlaylistSelected(playlistId: Long) {
+        playlistActionsManager.onPlaylistSelected(playlistId)
+    }
+
 
     private fun refreshResultStatuses() {
         val currentState = _uiState.value
@@ -290,13 +304,6 @@ class SearchViewModel @Inject constructor(
                 playbackListManager.setCurrentListContext(handler, page)
                 musicServiceConnection.playSongList(fullListToPlay, selectedIndex)
             }
-        }
-    }
-
-    private fun handlePlaylistCreation(name: String) {
-        playlistActionHandler.pendingItem?.let {
-            // A default or currently active group ID is needed. Using 0L for now.
-            playlistManager.createPlaylistAndAddItem(name, it, 0L)
         }
     }
 

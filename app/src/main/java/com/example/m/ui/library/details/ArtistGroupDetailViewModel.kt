@@ -148,7 +148,7 @@ class ArtistGroupDetailViewModel @Inject constructor(
             artistDao.updateArtist(artist.copy(downloadAutomatically = isEnabling))
             if (isEnabling) {
                 artistDao.getSongsForArtistSortedByCustom(artist.artistId).forEach { song ->
-                    playlistManager.startDownload(song)
+                    libraryRepository.startDownload(song)
                 }
             }
         }

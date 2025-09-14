@@ -6,7 +6,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.m.data.database.*
 import com.example.m.data.repository.LibraryRepository
-import com.example.m.managers.PlaylistManager
+import com.example.m.managers.PlaylistActionState
+import com.example.m.managers.PlaylistActionsManager
 import com.example.m.playback.MusicServiceConnection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -16,10 +17,6 @@ import javax.inject.Inject
 data class ArtistSongGroupDetailUiState(
     val groupWithSongs: ArtistSongGroupWithSongs? = null,
     val songs: List<Song> = emptyList(),
-    val allPlaylists: List<Playlist> = emptyList(),
-    val itemToAddToPlaylist: Any? = null,
-    val showCreatePlaylistDialog: Boolean = false,
-    val pendingItemForPlaylist: Any? = null,
     val songPendingRemoval: Song? = null
 )
 
@@ -33,12 +30,7 @@ sealed interface ArtistSongGroupDetailEvent {
     data class AddToQueue(val song: Song) : ArtistSongGroupDetailEvent
     data class ShuffleSong(val song: Song) : ArtistSongGroupDetailEvent
     data class GoToArtist(val song: Song) : ArtistSongGroupDetailEvent
-    data class SelectItemForPlaylist(val item: Any) : ArtistSongGroupDetailEvent
-    object DismissAddToPlaylistSheet : ArtistSongGroupDetailEvent
-    data class PlaylistSelectedForAddition(val playlistId: Long) : ArtistSongGroupDetailEvent
-    object PrepareToCreatePlaylist : ArtistSongGroupDetailEvent
-    data class CreatePlaylist(val name: String) : ArtistSongGroupDetailEvent
-    object DismissCreatePlaylistDialog : ArtistSongGroupDetailEvent
+    data class AddToPlaylist(val item: Any) : ArtistSongGroupDetailEvent
 }
 
 @HiltViewModel
@@ -47,12 +39,14 @@ class ArtistSongGroupDetailViewModel @Inject constructor(
     private val musicServiceConnection: MusicServiceConnection,
     private val artistDao: ArtistDao,
     private val libraryRepository: LibraryRepository,
-    private val playlistManager: PlaylistManager
+    private val playlistActionsManager: PlaylistActionsManager
 ) : ViewModel() {
     private val groupId: Long = checkNotNull(savedStateHandle["groupId"])
 
     private val _uiState = MutableStateFlow(ArtistSongGroupDetailUiState())
     val uiState: StateFlow<ArtistSongGroupDetailUiState> = _uiState.asStateFlow()
+
+    val playlistActionState: StateFlow<PlaylistActionState> = playlistActionsManager.state
 
     private val _navigateToArtist = MutableSharedFlow<Long>()
     val navigateToArtist: SharedFlow<Long> = _navigateToArtist.asSharedFlow()
@@ -76,12 +70,6 @@ class ArtistSongGroupDetailViewModel @Inject constructor(
                 ) }
             }
         }
-
-        viewModelScope.launch {
-            libraryRepository.getAllPlaylists().collect { playlists ->
-                _uiState.update { it.copy(allPlaylists = playlists) }
-            }
-        }
     }
 
     fun onEvent(event: ArtistSongGroupDetailEvent) {
@@ -95,14 +83,14 @@ class ArtistSongGroupDetailViewModel @Inject constructor(
             is ArtistSongGroupDetailEvent.AddToQueue -> musicServiceConnection.addToQueue(event.song)
             is ArtistSongGroupDetailEvent.ShuffleSong -> onShuffleSong(event.song)
             is ArtistSongGroupDetailEvent.GoToArtist -> onGoToArtist(event.song)
-            is ArtistSongGroupDetailEvent.SelectItemForPlaylist -> _uiState.update { it.copy(itemToAddToPlaylist = event.item) }
-            is ArtistSongGroupDetailEvent.DismissAddToPlaylistSheet -> _uiState.update { it.copy(itemToAddToPlaylist = null) }
-            is ArtistSongGroupDetailEvent.PlaylistSelectedForAddition -> onPlaylistSelectedForAddition(event.playlistId)
-            is ArtistSongGroupDetailEvent.PrepareToCreatePlaylist -> _uiState.update { it.copy(showCreatePlaylistDialog = true, pendingItemForPlaylist = it.itemToAddToPlaylist, itemToAddToPlaylist = null) }
-            is ArtistSongGroupDetailEvent.CreatePlaylist -> createPlaylistAndAddPendingItem(event.name)
-            is ArtistSongGroupDetailEvent.DismissCreatePlaylistDialog -> _uiState.update { it.copy(showCreatePlaylistDialog = false, pendingItemForPlaylist = null) }
+            is ArtistSongGroupDetailEvent.AddToPlaylist -> playlistActionsManager.selectItem(event.item)
         }
     }
+
+    fun onPlaylistCreateConfirm(name: String) = playlistActionsManager.onCreatePlaylist(name)
+    fun onPlaylistSelected(playlistId: Long) = playlistActionsManager.onPlaylistSelected(playlistId)
+    fun onPlaylistActionDismiss() = playlistActionsManager.dismiss()
+    fun onPrepareToCreatePlaylist() = playlistActionsManager.prepareToCreatePlaylist()
 
     private fun onSongSelected(selectedIndex: Int) {
         val currentSongs = _uiState.value.songs
@@ -148,21 +136,5 @@ class ArtistSongGroupDetailViewModel @Inject constructor(
                 _navigateToArtist.emit(it.artistId)
             }
         }
-    }
-
-    private fun onPlaylistSelectedForAddition(playlistId: Long) {
-        _uiState.value.itemToAddToPlaylist?.let { item ->
-            playlistManager.addItemToPlaylist(playlistId, item)
-        }
-        _uiState.update { it.copy(itemToAddToPlaylist = null) }
-    }
-
-    private fun createPlaylistAndAddPendingItem(name: String) {
-        val item = _uiState.value.pendingItemForPlaylist ?: return
-        val activeGroupId = _uiState.value.groupWithSongs?.songs?.firstOrNull()?.libraryGroupId
-        if (activeGroupId != null) {
-            playlistManager.createPlaylistAndAddItem(name, item, activeGroupId)
-        }
-        _uiState.update { it.copy(showCreatePlaylistDialog = false, pendingItemForPlaylist = null) }
     }
 }

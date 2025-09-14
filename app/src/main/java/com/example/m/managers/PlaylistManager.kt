@@ -1,10 +1,9 @@
+// file: com/example/m/managers/PlaylistManager.kt
 package com.example.m.managers
 
 import android.content.Context
-import android.content.Intent
 import com.example.m.data.database.*
 import com.example.m.data.repository.LibraryRepository
-import com.example.m.download.DownloadService
 import com.example.m.ui.common.getHighQualityThumbnailUrl
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -19,7 +18,6 @@ import javax.inject.Singleton
 class PlaylistManager @Inject constructor(
     private val playlistDao: PlaylistDao,
     private val songDao: SongDao,
-    private val downloadQueueDao: DownloadQueueDao,
     private val libraryRepository: LibraryRepository,
     @ApplicationContext private val context: Context
 ) {
@@ -60,7 +58,7 @@ class PlaylistManager @Inject constructor(
 
         val playlist = playlistDao.getPlaylistById(playlistId)
         if (playlist?.downloadAutomatically == true) {
-            startDownload(song)
+            libraryRepository.startDownload(song)
         }
     }
 
@@ -109,27 +107,6 @@ class PlaylistManager @Inject constructor(
             val finalSong = songDao.upsertSong(newSong)
             libraryRepository.linkSongToArtist(finalSong)
             finalSong
-        }
-    }
-
-    fun startDownload(song: Song) {
-        scope.launch {
-            // Prevent re-queueing if already downloaded or in progress
-            val currentSong = songDao.getSongById(song.songId)
-            if (currentSong?.downloadStatus == DownloadStatus.DOWNLOADED ||
-                currentSong?.downloadStatus == DownloadStatus.QUEUED ||
-                currentSong?.downloadStatus == DownloadStatus.DOWNLOADING) {
-                return@launch
-            }
-
-            // Set status to QUEUED immediately for instant UI feedback
-            songDao.updateDownloadStatus(song.songId, DownloadStatus.QUEUED)
-
-            downloadQueueDao.addItem(DownloadQueueItem(songId = song.songId))
-            val intent = Intent(context, DownloadService::class.java).apply {
-                action = DownloadService.ACTION_PROCESS_QUEUE
-            }
-            context.startService(intent)
         }
     }
 }

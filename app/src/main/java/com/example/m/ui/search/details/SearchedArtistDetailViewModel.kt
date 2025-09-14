@@ -9,6 +9,8 @@ import com.example.m.data.database.*
 import com.example.m.data.repository.YoutubeRepository
 import com.example.m.managers.DialogState
 import com.example.m.managers.LibraryActionsManager
+import com.example.m.managers.PlaylistActionState
+import com.example.m.managers.PlaylistActionsManager
 import com.example.m.playback.MusicServiceConnection
 import com.example.m.ui.search.SearchResult
 import com.example.m.ui.search.SearchResultForList
@@ -37,6 +39,7 @@ sealed interface SearchedArtistDetailEvent {
     object DismissConfirmAddAllToLibraryDialog : SearchedArtistDetailEvent
     object ConfirmAddAllToLibrary : SearchedArtistDetailEvent
     data class AddToLibrary(val streamInfo: StreamInfoItem) : SearchedArtistDetailEvent
+    data class AddToPlaylist(val streamInfo: StreamInfoItem) : SearchedArtistDetailEvent
     data class PlayNext(val streamInfo: StreamInfoItem) : SearchedArtistDetailEvent
     data class AddToQueue(val streamInfo: StreamInfoItem) : SearchedArtistDetailEvent
     data class RequestCreateGroup(val name: String) : SearchedArtistDetailEvent
@@ -53,7 +56,8 @@ class SearchedArtistDetailViewModel @Inject constructor(
     private val musicServiceConnection: MusicServiceConnection,
     private val songDao: SongDao,
     val imageLoader: ImageLoader,
-    private val libraryActionsManager: LibraryActionsManager
+    private val libraryActionsManager: LibraryActionsManager,
+    private val playlistActionsManager: PlaylistActionsManager
 ) : ViewModel() {
 
     private val channelUrl: String = savedStateHandle["channelUrl"]!!
@@ -66,6 +70,7 @@ class SearchedArtistDetailViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val dialogState: StateFlow<DialogState> = libraryActionsManager.dialogState
+    val playlistActionState: StateFlow<PlaylistActionState> = playlistActionsManager.state
 
     init {
         loadArtistDetails()
@@ -84,6 +89,7 @@ class SearchedArtistDetailViewModel @Inject constructor(
             is SearchedArtistDetailEvent.DismissConfirmAddAllToLibraryDialog -> _uiState.update { it.copy(showConfirmAddAllDialog = false) }
             is SearchedArtistDetailEvent.ConfirmAddAllToLibrary -> confirmAddAllToLibrary()
             is SearchedArtistDetailEvent.AddToLibrary -> libraryActionsManager.addToLibrary(event.streamInfo)
+            is SearchedArtistDetailEvent.AddToPlaylist -> playlistActionsManager.selectItem(event.streamInfo)
             is SearchedArtistDetailEvent.PlayNext -> musicServiceConnection.playNext(event.streamInfo)
             is SearchedArtistDetailEvent.AddToQueue -> musicServiceConnection.addToQueue(event.streamInfo)
             is SearchedArtistDetailEvent.RequestCreateGroup -> libraryActionsManager.onCreateGroup(event.name)
@@ -92,6 +98,11 @@ class SearchedArtistDetailViewModel @Inject constructor(
             is SearchedArtistDetailEvent.DismissDialog -> libraryActionsManager.dismissDialog()
         }
     }
+
+    fun onPlaylistCreateConfirm(name: String) = playlistActionsManager.onCreatePlaylist(name)
+    fun onPlaylistSelected(playlistId: Long) = playlistActionsManager.onPlaylistSelected(playlistId)
+    fun onPlaylistActionDismiss() = playlistActionsManager.dismiss()
+    fun onPrepareToCreatePlaylist() = playlistActionsManager.prepareToCreatePlaylist()
 
     private fun refreshSongStatuses() {
         if (_uiState.value.songs.isEmpty()) return

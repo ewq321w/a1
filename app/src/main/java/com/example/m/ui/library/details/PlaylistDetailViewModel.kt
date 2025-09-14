@@ -10,7 +10,8 @@ import com.example.m.data.PreferencesManager
 import com.example.m.data.database.*
 import com.example.m.data.repository.AutoDownloadConflict
 import com.example.m.data.repository.LibraryRepository
-import com.example.m.managers.PlaylistManager
+import com.example.m.managers.PlaylistActionState
+import com.example.m.managers.PlaylistActionsManager
 import com.example.m.playback.MusicServiceConnection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -29,11 +30,7 @@ enum class PlaylistSortOrder {
 data class PlaylistDetailUiState(
     val playlist: Playlist? = null,
     val songs: List<Song> = emptyList(),
-    val allPlaylists: List<Playlist> = emptyList(),
-    val sortOrder: PlaylistSortOrder = PlaylistSortOrder.CUSTOM,
-    val itemToAddToPlaylist: Any? = null,
-    val showCreatePlaylistDialog: Boolean = false,
-    val pendingItemForPlaylist: Any? = null
+    val sortOrder: PlaylistSortOrder = PlaylistSortOrder.CUSTOM
 )
 
 sealed interface PlaylistDetailEvent {
@@ -46,12 +43,7 @@ sealed interface PlaylistDetailEvent {
     object RemoveAllDownloads : PlaylistDetailEvent
     data class DownloadSong(val song: Song) : PlaylistDetailEvent
     data class DeleteDownload(val song: Song) : PlaylistDetailEvent
-    data class SelectItemForPlaylist(val item: Any) : PlaylistDetailEvent
-    object DismissAddToPlaylistSheet : PlaylistDetailEvent
-    data class PlaylistSelectedForAddition(val playlistId: Long) : PlaylistDetailEvent
-    object PrepareToCreatePlaylist : PlaylistDetailEvent
-    data class CreatePlaylist(val name: String) : PlaylistDetailEvent
-    object DismissCreatePlaylistDialog : PlaylistDetailEvent
+    data class AddToPlaylist(val item: Any) : PlaylistDetailEvent
     data class PlayNext(val song: Song) : PlaylistDetailEvent
     data class AddToQueue(val song: Song) : PlaylistDetailEvent
     data class ShuffleSong(val song: Song) : PlaylistDetailEvent
@@ -67,13 +59,15 @@ class PlaylistDetailViewModel @Inject constructor(
     private val songDao: SongDao,
     private val artistDao: ArtistDao,
     @ApplicationContext private val context: Context,
-    private val playlistManager: PlaylistManager,
+    private val playlistActionsManager: PlaylistActionsManager,
     private val preferencesManager: PreferencesManager
 ) : ViewModel() {
     private val playlistId: Long = checkNotNull(savedStateHandle["playlistId"])
 
     private val _uiState = MutableStateFlow(PlaylistDetailUiState())
     val uiState: StateFlow<PlaylistDetailUiState> = _uiState.asStateFlow()
+
+    val playlistActionState: StateFlow<PlaylistActionState> = playlistActionsManager.state
 
     private val _navigateToArtist = MutableSharedFlow<Long>()
     val navigateToArtist: SharedFlow<Long> = _navigateToArtist.asSharedFlow()
@@ -111,18 +105,6 @@ class PlaylistDetailViewModel @Inject constructor(
                 _uiState.update { it.copy(songs = songs) }
             }
         }
-
-        viewModelScope.launch {
-            val activeLibraryGroupId = flow { emit(preferencesManager.activeLibraryGroupId) }
-
-            @OptIn(ExperimentalCoroutinesApi::class)
-            val allPlaylistsFlow = activeLibraryGroupId.flatMapLatest { groupId ->
-                if (groupId == 0L) libraryRepository.getAllPlaylists() else libraryRepository.getPlaylistsByGroupId(groupId)
-            }
-            allPlaylistsFlow.collect { playlists ->
-                _uiState.update { it.copy(allPlaylists = playlists) }
-            }
-        }
     }
 
     fun onEvent(event: PlaylistDetailEvent) {
@@ -134,20 +116,20 @@ class PlaylistDetailViewModel @Inject constructor(
             is PlaylistDetailEvent.DeletePlaylist -> deletePlaylist()
             is PlaylistDetailEvent.AutoDownloadToggled -> onAutoDownloadToggled(event.enable)
             is PlaylistDetailEvent.RemoveAllDownloads -> removeDownloadsForPlaylist()
-            is PlaylistDetailEvent.DownloadSong -> playlistManager.startDownload(event.song)
+            is PlaylistDetailEvent.DownloadSong -> viewModelScope.launch { libraryRepository.startDownload(event.song) }
             is PlaylistDetailEvent.DeleteDownload -> deleteSongDownload(event.song)
-            is PlaylistDetailEvent.SelectItemForPlaylist -> _uiState.update { it.copy(itemToAddToPlaylist = event.item) }
-            is PlaylistDetailEvent.DismissAddToPlaylistSheet -> _uiState.update { it.copy(itemToAddToPlaylist = null) }
-            is PlaylistDetailEvent.PlaylistSelectedForAddition -> onPlaylistSelectedForAddition(event.playlistId)
-            is PlaylistDetailEvent.PrepareToCreatePlaylist -> _uiState.update { it.copy(showCreatePlaylistDialog = true, pendingItemForPlaylist = it.itemToAddToPlaylist, itemToAddToPlaylist = null) }
-            is PlaylistDetailEvent.CreatePlaylist -> createPlaylistAndAddPendingItem(event.name)
-            is PlaylistDetailEvent.DismissCreatePlaylistDialog -> _uiState.update { it.copy(showCreatePlaylistDialog = false, pendingItemForPlaylist = null) }
+            is PlaylistDetailEvent.AddToPlaylist -> playlistActionsManager.selectItem(event.item)
             is PlaylistDetailEvent.PlayNext -> musicServiceConnection.playNext(event.song)
             is PlaylistDetailEvent.AddToQueue -> musicServiceConnection.addToQueue(event.song)
             is PlaylistDetailEvent.ShuffleSong -> onShuffleSong(event.song)
             is PlaylistDetailEvent.GoToArtist -> onGoToArtist(event.song)
         }
     }
+
+    fun onPlaylistCreateConfirm(name: String) = playlistActionsManager.onCreatePlaylist(name)
+    fun onPlaylistSelected(playlistId: Long) = playlistActionsManager.onPlaylistSelected(playlistId)
+    fun onPlaylistActionDismiss() = playlistActionsManager.dismiss()
+    fun onPrepareToCreatePlaylist() = playlistActionsManager.prepareToCreatePlaylist()
 
     private fun onSongSelected(selectedIndex: Int) {
         val currentSongs = _uiState.value.songs
@@ -206,7 +188,7 @@ class PlaylistDetailViewModel @Inject constructor(
             if (isToggledOn) {
                 _uiState.value.songs
                     .filter { it.localFilePath == null || !File(it.localFilePath!!).exists() }
-                    .forEach { song -> playlistManager.startDownload(song) }
+                    .forEach { song -> libraryRepository.startDownload(song) }
             }
         }
     }
@@ -232,22 +214,6 @@ class PlaylistDetailViewModel @Inject constructor(
                 }
             }
         }
-    }
-
-    private fun onPlaylistSelectedForAddition(playlistId: Long) {
-        _uiState.value.itemToAddToPlaylist?.let { item ->
-            playlistManager.addItemToPlaylist(playlistId, item)
-        }
-        _uiState.update { it.copy(itemToAddToPlaylist = null) }
-    }
-
-    private fun createPlaylistAndAddPendingItem(name: String) {
-        val item = _uiState.value.pendingItemForPlaylist ?: return
-        val groupId = _uiState.value.playlist?.libraryGroupId
-        if (groupId != null) {
-            playlistManager.createPlaylistAndAddItem(name, item, groupId)
-        }
-        _uiState.update { it.copy(showCreatePlaylistDialog = false, pendingItemForPlaylist = null) }
     }
 
     private fun onShuffleSong(song: Song) {

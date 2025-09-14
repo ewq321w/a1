@@ -21,13 +21,56 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.example.m.data.database.ArtistGroup
 import com.example.m.data.database.ArtistSongGroup
 import com.example.m.data.database.LibraryGroup
 import com.example.m.data.database.Playlist
 import kotlinx.coroutines.launch
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TextFieldDialog(
+    title: String,
+    label: String,
+    initialValue: String = "",
+    confirmButtonText: String = "Confirm",
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+    content: @Composable (ColumnScope.() -> Unit)? = null
+) {
+    var text by remember(initialValue) { mutableStateOf(initialValue) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                content?.invoke(this)
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text(label) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (text.isNotBlank()) onConfirm(text.trim()) },
+                enabled = text.isNotBlank()
+            ) {
+                Text(confirmButtonText)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,8 +87,11 @@ fun ManageLibraryGroupsDialog(
     val coroutineScope = rememberCoroutineScope()
 
     groupToRename?.let { group ->
-        RenameLibraryGroupDialog(
-            initialName = group.name,
+        TextFieldDialog(
+            title = "Rename Group",
+            label = "Group name",
+            initialValue = group.name,
+            confirmButtonText = "Rename",
             onDismiss = { groupToRename = null },
             onConfirm = { newName ->
                 onRenameGroup(group, newName)
@@ -126,122 +172,6 @@ fun ManageLibraryGroupsDialog(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun RenameLibraryGroupDialog(
-    initialName: String,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit
-) {
-    var text by remember(initialName) { mutableStateOf(initialName) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Rename Group") },
-        text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                label = { Text("Group name") },
-                singleLine = true
-            )
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { if (text.isNotBlank()) onConfirm(text) },
-                enabled = text.isNotBlank()
-            ) {
-                Text("Rename")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun CreateLibraryGroupDialog(
-    onDismiss: () -> Unit,
-    onCreate: (String) -> Unit,
-    isFirstGroup: Boolean = false
-) {
-    var text by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("New Library Group") },
-        text = {
-            Column {
-                if (isFirstGroup) {
-                    Text(
-                        "To start your library, please create a group to add songs to.",
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                }
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    label = { Text("Group name") },
-                    singleLine = true
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { if (text.isNotBlank()) onCreate(text) },
-                enabled = text.isNotBlank()
-            ) {
-                Text("Create")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}
-
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun CreatePlaylistDialog(
-    onDismiss: () -> Unit,
-    onCreate: (String) -> Unit
-) {
-    var text by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("New Playlist") },
-        text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                label = { Text("Playlist name") },
-                singleLine = true
-            )
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { if (text.isNotBlank()) onCreate(text) },
-                enabled = text.isNotBlank()
-            ) {
-                Text("Create")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}
-
 @Composable
 fun ArtistGroupConflictDialog(
     artistName: String,
@@ -284,150 +214,6 @@ fun ArtistGroupConflictDialog(
         }
     )
 }
-
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun CreateArtistGroupDialog(
-    onDismiss: () -> Unit,
-    onCreate: (String) -> Unit
-) {
-    var text by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("New Artist Group") },
-        text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                label = { Text("Group name") },
-                singleLine = true
-            )
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { if (text.isNotBlank()) onCreate(text) },
-                enabled = text.isNotBlank()
-            ) {
-                Text("Create")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun CreateArtistSongGroupDialog(
-    onDismiss: () -> Unit,
-    onCreate: (String) -> Unit
-) {
-    var text by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("New Group") },
-        text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                label = { Text("Group name") },
-                singleLine = true
-            )
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { if (text.isNotBlank()) onCreate(text) },
-                enabled = text.isNotBlank()
-            ) {
-                Text("Create")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun RenameArtistGroupDialog(
-    initialName: String,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit
-) {
-    var text by remember(initialName) { mutableStateOf(initialName) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Rename Artist Group") },
-        text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                label = { Text("Group name") },
-                singleLine = true
-            )
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { if (text.isNotBlank()) onConfirm(text) },
-                enabled = text.isNotBlank()
-            ) {
-                Text("Rename")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun RenameArtistSongGroupDialog(
-    initialName: String,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit
-) {
-    var text by remember(initialName) { mutableStateOf(initialName) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Rename Group") },
-        text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                label = { Text("Group name") },
-                singleLine = true
-            )
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { if (text.isNotBlank()) onConfirm(text) },
-                enabled = text.isNotBlank()
-            ) {
-                Text("Rename")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
