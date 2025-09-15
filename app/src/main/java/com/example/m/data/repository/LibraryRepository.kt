@@ -9,10 +9,12 @@ import androidx.core.net.toUri
 import androidx.room.Transaction
 import com.example.m.data.database.*
 import com.example.m.download.DownloadService
+import com.example.m.ui.common.getHighQualityThumbnailUrl
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import timber.log.Timber
 import java.io.File
 import javax.inject.Inject
@@ -137,6 +139,12 @@ class LibraryRepository @Inject constructor(
     }
 
     suspend fun deleteDownloadedFileForSong(song: Song) {
+        val updatedSong = song.copy(
+            localFilePath = null,
+            downloadStatus = DownloadStatus.NOT_DOWNLOADED,
+            downloadProgress = 0
+        )
+
         song.localFilePath?.let { path ->
             try {
                 val uri = path.toUri()
@@ -146,21 +154,18 @@ class LibraryRepository @Inject constructor(
                     if (File(path).delete()) 1 else 0
                 }
                 if (deletedCount > 0) {
-                    songDao.updateSong(song.copy(localFilePath = null))
+                    songDao.updateSong(updatedSong)
                 }
             } catch (e: Exception) {
                 Timber.e(e, "Failed to delete downloaded file, but unlinking from DB: $path")
                 // If deletion fails (e.g. SecurityException), still unlink from DB
                 // to fix the app's state for the user.
-                songDao.updateSong(song.copy(localFilePath = null))
+                songDao.updateSong(updatedSong)
             }
         }
     }
 
     suspend fun removeDownloadsForPlaylist(playlist: PlaylistWithSongs) {
-        if (playlist.playlist.downloadAutomatically) {
-            playlistDao.updatePlaylist(playlist.playlist.copy(downloadAutomatically = false))
-        }
         playlist.songs.forEach { song ->
             val artist = artistDao.getArtistByName(song.artist)
             if (artist?.downloadAutomatically == true) return@forEach
@@ -170,9 +175,6 @@ class LibraryRepository @Inject constructor(
     }
 
     suspend fun removeDownloadsForArtist(artist: Artist) {
-        if (artist.downloadAutomatically) {
-            artistDao.updateArtist(artist.copy(downloadAutomatically = false))
-        }
         val songs = artistDao.getSongsForArtistSortedByCustom(artist.artistId)
         songs.forEach { song ->
             val autoDownloadPlaylists = playlistDao.getAutoDownloadPlaylistsForSong(song.songId)
@@ -297,6 +299,10 @@ class LibraryRepository @Inject constructor(
                 customOrderPosition = newPosition
             )
         )
+
+        if (artist.downloadAutomatically && song.isInLibrary) {
+            startDownload(song)
+        }
     }
 
     private fun isUriValid(uri: Uri): Boolean {
@@ -328,6 +334,15 @@ class LibraryRepository @Inject constructor(
         artistDao.deleteArtistSongGroup(groupId)
     }
 
+    @Transaction
+    suspend fun deleteArtistSongGroupAndSongs(groupId: Long) {
+        val songsInGroup = artistDao.getSongsInArtistSongGroup(groupId)
+        songsInGroup.forEach { song ->
+            deleteSongFromDeviceAndDb(song)
+        }
+        deleteArtistSongGroup(groupId)
+    }
+
     suspend fun addSongToArtistGroup(groupId: Long, songId: Long) {
         val maxPos = artistDao.getMaxSongPositionInGroup(groupId)
         artistDao.insertSongIntoArtistSongGroup(ArtistSongGroupSongCrossRef(groupId, songId, maxPos + 1))
@@ -335,5 +350,32 @@ class LibraryRepository @Inject constructor(
 
     suspend fun removeSongFromArtistGroup(groupId: Long, songId: Long) {
         artistDao.deleteSongFromArtistSongGroup(groupId, songId)
+    }
+
+    suspend fun getOrCreateSongFromItem(item: Any, libraryGroupId: Long?): Song {
+        return when (item) {
+            is Song -> item
+            is StreamInfoItem -> {
+                val normalizedUrl = item.url?.replace("music.youtube.com", "www.youtube.com")
+                    ?: item.url ?: ""
+                songDao.getSongByUrl(normalizedUrl) ?: run {
+                    val videoId = item.url?.substringAfter("v=")?.substringBefore('&')
+                    val newSong = Song(
+                        videoId = videoId,
+                        youtubeUrl = normalizedUrl,
+                        title = item.name ?: "Unknown Title",
+                        artist = item.uploaderName ?: "Unknown Artist",
+                        duration = item.duration,
+                        thumbnailUrl = getHighQualityThumbnailUrl(videoId),
+                        localFilePath = null,
+                        libraryGroupId = libraryGroupId
+                    )
+                    val finalSong = songDao.upsertSong(newSong)
+                    linkSongToArtist(finalSong)
+                    finalSong
+                }
+            }
+            else -> throw IllegalArgumentException("Unsupported item type for song creation")
+        }
     }
 }

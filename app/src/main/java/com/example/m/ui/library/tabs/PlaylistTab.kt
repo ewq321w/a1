@@ -22,9 +22,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.m.data.database.PlaylistWithSongs
 import com.example.m.managers.ThumbnailProcessor
-import com.example.m.ui.library.DeletableItem
 import com.example.m.ui.library.components.CompositeThumbnailImage
 import com.example.m.ui.library.components.ConfirmDeleteDialog
+import com.example.m.ui.library.components.DisableAutoDownloadConfirmationDialog
 import com.example.m.ui.library.components.EmptyStateMessage
 
 @Composable
@@ -36,12 +36,12 @@ fun PlaylistTabContent(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    uiState.playlistToRemoveDownloads?.let { playlist ->
-        ConfirmDeleteDialog(
-            itemType = "downloads for",
-            itemName = playlist.playlist.name,
-            onDismiss = { viewModel.onEvent(PlaylistTabEvent.CancelRemoveDownloads) },
-            onConfirm = { viewModel.onEvent(PlaylistTabEvent.ConfirmRemoveDownloads) }
+    uiState.playlistPendingDisableAutoDownload?.let { playlist ->
+        DisableAutoDownloadConfirmationDialog(
+            itemType = "playlist",
+            onDismiss = { viewModel.onEvent(PlaylistTabEvent.DismissDisableAutoDownloadDialog) },
+            onConfirmDisableOnly = { viewModel.onEvent(PlaylistTabEvent.DisableAutoDownloadForPlaylist(removeFiles = false)) },
+            onConfirmAndRemove = { viewModel.onEvent(PlaylistTabEvent.DisableAutoDownloadForPlaylist(removeFiles = true)) }
         )
     }
 
@@ -67,8 +67,7 @@ fun PlaylistTabContent(
                     onClick = { onPlaylistClick(p.playlist.playlistId) },
                     onPlay = { viewModel.onEvent(PlaylistTabEvent.PlayPlaylist(p)) },
                     onShuffle = { viewModel.onEvent(PlaylistTabEvent.ShufflePlaylist(p)) },
-                    onToggleAutoDownload = { viewModel.onEvent(PlaylistTabEvent.ToggleAutoDownloadPlaylist(p)) },
-                    onRemoveDownloads = { viewModel.onEvent(PlaylistTabEvent.PrepareToRemoveDownloads(p)) },
+                    onToggleAutoDownload = { viewModel.onEvent(PlaylistTabEvent.PrepareToToggleAutoDownloadPlaylist(p)) },
                     onEdit = { onEditPlaylist(p.playlist.playlistId) },
                     onDelete = { viewModel.onEvent(PlaylistTabEvent.SetItemForDeletion(p)) },
                     thumbnailProcessor = viewModel.thumbnailProcessor
@@ -86,7 +85,6 @@ fun PlaylistItem(
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
     onToggleAutoDownload: () -> Unit,
-    onRemoveDownloads: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     thumbnailProcessor: ThumbnailProcessor,
@@ -122,7 +120,6 @@ fun PlaylistItem(
                     DropdownMenuItem(text = { Text("Edit playlist") }, onClick = { onEdit(); showMenu = false })
                     val toggleText = if (playlistWithSongs.playlist.downloadAutomatically) "Disable auto-download" else "Enable auto-download"
                     DropdownMenuItem(text = { Text(toggleText) }, onClick = { onToggleAutoDownload(); showMenu = false })
-                    DropdownMenuItem(text = { Text("Remove all downloads") }, onClick = { onRemoveDownloads(); showMenu = false })
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                     DropdownMenuItem(text = { Text("Delete playlist") }, onClick = { onDelete(); showMenu = false })
                 }

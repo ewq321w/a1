@@ -52,6 +52,12 @@ class MusicServiceConnection @Inject constructor(
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying
 
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading
+
+    private val _playerState = MutableStateFlow(Player.STATE_IDLE)
+    val playerState: StateFlow<Int> = _playerState
+
     private val _playbackState = MutableStateFlow(PlaybackState())
     val playbackState: StateFlow<PlaybackState> = _playbackState
 
@@ -72,6 +78,8 @@ class MusicServiceConnection @Inject constructor(
                 browser.addListener(playerListener)
                 _nowPlaying.value = browser.mediaMetadata
                 _isPlaying.value = browser.isPlaying
+                _isLoading.value = browser.isLoading
+                _playerState.value = browser.playbackState
                 if (browser.isPlaying) startProgressUpdates()
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to connect to MediaBrowser", e)
@@ -98,6 +106,14 @@ class MusicServiceConnection @Inject constructor(
     private val playerListener = object : Player.Listener {
         override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
             _nowPlaying.value = mediaMetadata
+        }
+
+        override fun onIsLoadingChanged(isLoading: Boolean) {
+            _isLoading.value = isLoading
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            _playerState.value = playbackState
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -337,7 +353,7 @@ class MusicServiceConnection @Inject constructor(
             if (song.localFilePath != null) {
                 val uri = song.localFilePath!!.toUri()
                 if (isUriValid(uri)) {
-                    return@withContext createLocalMediaItem(song, uri)
+                    return@withContext createLocalMediaItem(song)
                 }
             }
             return@withContext createStreamingMediaItem(song)
@@ -345,25 +361,21 @@ class MusicServiceConnection @Inject constructor(
     }
 
     private suspend fun createMediaMetadata(song: Song): MediaMetadata {
-        val artworkBytes = thumbnailProcessor.getCroppedSquareBitmap(song.thumbnailUrl)
-
+        // FIX: The artwork is no longer loaded here to prevent OutOfMemoryErrors.
+        // The MusicService will lazy-load it when the song becomes the current item.
         val builder = MediaMetadata.Builder()
             .setTitle(song.title)
             .setArtist(song.artist)
             .setArtworkUri(song.thumbnailUrl.toUri())
 
-        artworkBytes?.let {
-            builder.setArtworkData(it, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
-        }
-
         return builder.build()
     }
 
-    private suspend fun createLocalMediaItem(song: Song, uri: Uri): MediaItem {
+    private suspend fun createLocalMediaItem(song: Song): MediaItem {
         val mediaMetadata = createMediaMetadata(song)
         return MediaItem.Builder()
-            .setUri(uri)
-            .setMediaId(uri.toString())
+            .setUri(song.localFilePath!!.toUri())
+            .setMediaId(song.localFilePath!!.toUri().toString())
             .setMediaMetadata(mediaMetadata)
             .build()
     }

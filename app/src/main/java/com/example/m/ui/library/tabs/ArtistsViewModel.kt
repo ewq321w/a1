@@ -8,6 +8,7 @@ import com.example.m.data.database.*
 import com.example.m.data.repository.LibraryRepository
 import com.example.m.managers.PlaylistActionState
 import com.example.m.managers.PlaylistActionsManager
+import com.example.m.managers.PlaylistManager
 import com.example.m.managers.ThumbnailProcessor
 import com.example.m.playback.MusicServiceConnection
 import com.example.m.ui.library.DeletableItem
@@ -25,7 +26,7 @@ import javax.inject.Inject
 data class ArtistsUiState(
     val libraryArtistItems: List<LibraryArtistItem> = emptyList(),
     val itemPendingDeletion: DeletableItem.DeletableArtistGroup? = null,
-    val artistToRemoveDownloads: Artist? = null,
+    val artistPendingDisableAutoDownload: Artist? = null,
     val showCreateArtistGroupDialog: Boolean = false,
     val groupToRename: ArtistGroup? = null,
     val artistToMove: Artist? = null,
@@ -39,10 +40,9 @@ sealed interface ArtistTabEvent {
     data class PlayArtist(val artist: Artist) : ArtistTabEvent
     data class ShuffleArtist(val artist: Artist) : ArtistTabEvent
     data class ShuffleUngroupedSongsForArtist(val artist: Artist) : ArtistTabEvent
-    data class ToggleAutoDownloadArtist(val artist: Artist) : ArtistTabEvent
-    data class PrepareToRemoveDownloads(val artist: Artist) : ArtistTabEvent
-    object CancelRemoveDownloads : ArtistTabEvent
-    object ConfirmRemoveDownloads : ArtistTabEvent
+    data class PrepareToToggleAutoDownloadArtist(val artist: Artist) : ArtistTabEvent
+    object DismissDisableAutoDownloadDialog : ArtistTabEvent
+    data class DisableAutoDownloadForArtist(val removeFiles: Boolean) : ArtistTabEvent
     data class HideArtist(val artist: Artist) : ArtistTabEvent
     data class AddToPlaylist(val item: Any) : ArtistTabEvent
     object ShowCreateArtistGroupDialog : ArtistTabEvent
@@ -64,6 +64,7 @@ sealed interface ArtistTabEvent {
 class ArtistsViewModel @Inject constructor(
     private val libraryRepository: LibraryRepository,
     private val musicServiceConnection: MusicServiceConnection,
+    private val playlistManager: PlaylistManager,
     private val artistDao: ArtistDao,
     private val artistGroupDao: ArtistGroupDao,
     private val playlistActionsManager: PlaylistActionsManager,
@@ -127,10 +128,9 @@ class ArtistsViewModel @Inject constructor(
             is ArtistTabEvent.PlayArtist -> playArtist(event.artist)
             is ArtistTabEvent.ShuffleArtist -> shuffleArtist(event.artist)
             is ArtistTabEvent.ShuffleUngroupedSongsForArtist -> shuffleUngroupedSongsForArtist(event.artist)
-            is ArtistTabEvent.ToggleAutoDownloadArtist -> toggleAutoDownloadForArtist(event.artist)
-            is ArtistTabEvent.PrepareToRemoveDownloads -> _uiState.update { it.copy(artistToRemoveDownloads = event.artist) }
-            is ArtistTabEvent.CancelRemoveDownloads -> _uiState.update { it.copy(artistToRemoveDownloads = null) }
-            is ArtistTabEvent.ConfirmRemoveDownloads -> removeDownloadsForArtist()
+            is ArtistTabEvent.PrepareToToggleAutoDownloadArtist -> prepareToToggleAutoDownload(event.artist)
+            is ArtistTabEvent.DismissDisableAutoDownloadDialog -> _uiState.update { it.copy(artistPendingDisableAutoDownload = null) }
+            is ArtistTabEvent.DisableAutoDownloadForArtist -> disableAutoDownload(event.removeFiles)
             is ArtistTabEvent.HideArtist -> hideArtist(event.artist)
             is ArtistTabEvent.AddToPlaylist -> playlistActionsManager.selectItem(event.item)
             is ArtistTabEvent.ShowCreateArtistGroupDialog -> _uiState.update { it.copy(showCreateArtistGroupDialog = true) }
@@ -153,6 +153,7 @@ class ArtistsViewModel @Inject constructor(
     fun onPlaylistActionDismiss() = playlistActionsManager.dismiss()
     fun onPrepareToCreatePlaylist() = playlistActionsManager.prepareToCreatePlaylist()
     fun onCreatePlaylist(name: String) = playlistActionsManager.onCreatePlaylist(name)
+    fun onGroupSelectedForNewPlaylist(groupId: Long) = playlistActionsManager.onGroupSelectedForNewPlaylist(groupId)
 
     private fun shuffleUngroupedArtists() {
         viewModelScope.launch {
@@ -220,11 +221,12 @@ class ArtistsViewModel @Inject constructor(
         }
     }
 
-    private fun toggleAutoDownloadForArtist(artist: Artist) {
-        val isEnabling = !artist.downloadAutomatically
-        viewModelScope.launch(Dispatchers.IO) {
-            artistDao.updateArtist(artist.copy(downloadAutomatically = isEnabling))
-            if (isEnabling) {
+    private fun prepareToToggleAutoDownload(artist: Artist) {
+        if (artist.downloadAutomatically) {
+            _uiState.update { it.copy(artistPendingDisableAutoDownload = artist) }
+        } else {
+            viewModelScope.launch(Dispatchers.IO) {
+                artistDao.updateArtist(artist.copy(downloadAutomatically = true))
                 artistDao.getSongsForArtistSortedByCustom(artist.artistId).forEach { song ->
                     libraryRepository.startDownload(song)
                 }
@@ -232,12 +234,14 @@ class ArtistsViewModel @Inject constructor(
         }
     }
 
-    private fun removeDownloadsForArtist() {
-        _uiState.value.artistToRemoveDownloads?.let { artist ->
-            viewModelScope.launch(Dispatchers.IO) {
+    private fun disableAutoDownload(removeFiles: Boolean) {
+        val artist = _uiState.value.artistPendingDisableAutoDownload ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            artistDao.updateArtist(artist.copy(downloadAutomatically = false))
+            if (removeFiles) {
                 libraryRepository.removeDownloadsForArtist(artist)
-                _uiState.update { it.copy(artistToRemoveDownloads = null) }
             }
+            _uiState.update { it.copy(artistPendingDisableAutoDownload = null) }
         }
     }
 

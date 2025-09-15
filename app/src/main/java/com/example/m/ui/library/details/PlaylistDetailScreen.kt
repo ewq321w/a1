@@ -51,6 +51,15 @@ fun PlaylistDetailScreen(
         }
     }
 
+    if (uiState.showConfirmRemoveDownloadsOnDisableDialog) {
+        DisableAutoDownloadConfirmationDialog(
+            itemType = "playlist",
+            onDismiss = { viewModel.onEvent(PlaylistDetailEvent.DismissDisableAutoDownloadDialog) },
+            onConfirmDisableOnly = { viewModel.onEvent(PlaylistDetailEvent.DisableAutoDownload(removeFiles = false)) },
+            onConfirmAndRemove = { viewModel.onEvent(PlaylistDetailEvent.DisableAutoDownload(removeFiles = true)) }
+        )
+    }
+
     when(val state = playlistActionState) {
         is PlaylistActionState.AddToPlaylist -> {
             val item = state.item
@@ -81,25 +90,23 @@ fun PlaylistDetailScreen(
                 onConfirm = { name -> viewModel.onPlaylistCreateConfirm(name) }
             )
         }
+        is PlaylistActionState.SelectGroupForNewPlaylist -> {
+            SelectLibraryGroupDialog(
+                groups = state.groups,
+                onDismiss = { viewModel.onPlaylistActionDismiss() },
+                onGroupSelected = { groupId -> viewModel.onGroupSelectedForNewPlaylist(groupId) },
+                onCreateNewGroup = {
+                    // This is complex because it can be triggered from multiple viewmodels.
+                    // A direct call or a shared event bus might be better.
+                    // For now, this might require a temporary dismiss and re-trigger.
+                }
+            )
+        }
         is PlaylistActionState.Hidden -> {}
     }
 
 
     uiState.playlist?.let { pl ->
-        var playlistToRemoveDownloads by remember { mutableStateOf<Playlist?>(null) }
-
-        playlistToRemoveDownloads?.let {
-            ConfirmDeleteDialog(
-                itemType = "downloads for",
-                itemName = it.name,
-                onDismiss = { playlistToRemoveDownloads = null },
-                onConfirm = {
-                    viewModel.onEvent(PlaylistDetailEvent.RemoveAllDownloads)
-                    playlistToRemoveDownloads = null
-                }
-            )
-        }
-
         if (showDeleteConfirmation) {
             ConfirmDeleteDialog(
                 itemType = "playlist",
@@ -120,8 +127,7 @@ fun PlaylistDetailScreen(
             snackbarHostState = snackbarHostState,
             onBack = onBack,
             onEdit = { onEditPlaylist(pl.playlistId) },
-            onShowDeleteDialog = { showDeleteConfirmation = true },
-            onRemoveDownloads = { playlistToRemoveDownloads = pl }
+            onShowDeleteDialog = { showDeleteConfirmation = true }
         )
     } ?: run {
         Scaffold(
@@ -149,8 +155,7 @@ private fun PlaylistDetailContent(
     snackbarHostState: SnackbarHostState,
     onBack: () -> Unit,
     onEdit: () -> Unit,
-    onShowDeleteDialog: () -> Unit,
-    onRemoveDownloads: () -> Unit
+    onShowDeleteDialog: () -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
@@ -172,8 +177,7 @@ private fun PlaylistDetailContent(
                             DropdownMenuItem(text = { Text("Shuffle") }, onClick = { onEvent(PlaylistDetailEvent.ShufflePlaylist); showMenu = false })
                             DropdownMenuItem(text = { Text("Edit playlist") }, onClick = { onEdit(); showMenu = false })
                             val toggleText = if (playlist.downloadAutomatically) "Disable auto-download" else "Enable auto-download"
-                            DropdownMenuItem(text = { Text(toggleText) }, onClick = { onEvent(PlaylistDetailEvent.AutoDownloadToggled(!playlist.downloadAutomatically)); showMenu = false })
-                            DropdownMenuItem(text = { Text("Remove all downloads") }, onClick = { onRemoveDownloads(); showMenu = false })
+                            DropdownMenuItem(text = { Text(toggleText) }, onClick = { onEvent(PlaylistDetailEvent.PrepareToToggleAutoDownload); showMenu = false })
                             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                             DropdownMenuItem(text = { Text("Delete playlist") }, onClick = { onShowDeleteDialog(); showMenu = false })
                         }

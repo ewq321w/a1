@@ -12,15 +12,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.ImageLoader
 import coil.compose.AsyncImage
-import com.example.m.R
 import com.example.m.data.database.DownloadStatus
 import com.example.m.data.database.Song
 import com.example.m.ui.common.getThumbnail
@@ -37,7 +37,7 @@ fun SectionHeader(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp, vertical = 2.dp), // Reduced vertical padding
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -63,6 +63,7 @@ fun AlbumOrPlaylistItem(
     imageLoader: ImageLoader,
     onClicked: () -> Unit
 ) {
+    val placeholderColor = MaterialTheme.colorScheme.surfaceVariant
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -78,7 +79,9 @@ fun AlbumOrPlaylistItem(
             modifier = Modifier
                 .size(54.dp)
                 .clip(RoundedCornerShape(3.dp)),
-            contentScale = ContentScale.Crop
+            contentScale = ContentScale.Crop,
+            placeholder = remember { ColorPainter(placeholderColor) },
+            error = remember { ColorPainter(placeholderColor) }
         )
         Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -108,6 +111,7 @@ fun ArtistListItem(
     imageLoader: ImageLoader,
     onArtistClicked: (ArtistResult) -> Unit
 ) {
+    val placeholderColor = MaterialTheme.colorScheme.surfaceVariant
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -122,7 +126,9 @@ fun ArtistListItem(
             contentDescription = artistResult.artistInfo.name,
             modifier = Modifier
                 .size(54.dp)
-                .clip(CircleShape)
+                .clip(CircleShape),
+            placeholder = remember { ColorPainter(placeholderColor) },
+            error = remember { ColorPainter(placeholderColor) }
         )
         Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -153,43 +159,46 @@ fun AlbumItem(
     album: PlaylistInfoItem,
     imageLoader: ImageLoader,
     onClick: () -> Unit,
-    showArtist: Boolean = true
+    showArtist: Boolean = true,
+    itemSize: Dp = 120.dp // Default to the smaller size
 ) {
+    val placeholderColor = MaterialTheme.colorScheme.surfaceVariant
     Column(
         modifier = Modifier
-            .width(180.dp)
+            .width(itemSize)
             .clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.Start // Align content to the left
     ) {
         AsyncImage(
             model = album.getThumbnail(),
             imageLoader = imageLoader,
             contentDescription = album.name,
             modifier = Modifier
-                .size(180.dp)
+                .size(itemSize)
                 .clip(RoundedCornerShape(3.dp)),
             contentScale = ContentScale.Crop,
-            error = painterResource(id = R.drawable.placeholder_gray),
-            placeholder = painterResource(id = R.drawable.placeholder_gray)
+            placeholder = remember { ColorPainter(placeholderColor) },
+            error = remember { ColorPainter(placeholderColor) }
         )
         Text(
             text = album.name ?: "Unknown Album",
             style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center,
             modifier = Modifier
                 .padding(top = 4.dp)
-                .height(36.dp), // Set a fixed height to prevent grid resizing
+                .height(36.dp)
+                .fillMaxWidth(), // Allow text to fill width before aligning
             maxLines = 2,
-            overflow = TextOverflow.Ellipsis
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Start // Align text to the left
         )
         if (showArtist) {
             Text(
                 text = album.uploaderName ?: "Unknown Artist",
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
-                textAlign = TextAlign.Center,
                 overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Start // Align text to the left
             )
         }
     }
@@ -210,7 +219,7 @@ fun SearchResultItem(
 ) {
     var showMenu by remember { mutableStateOf(false) }
     val downloadStatus = localSong?.downloadStatus
-    val isDownloading = downloadStatus == DownloadStatus.DOWNLOADING || downloadStatus == DownloadStatus.QUEUED
+    val placeholderColor = MaterialTheme.colorScheme.surfaceVariant
 
     Row(
         modifier = Modifier
@@ -232,8 +241,8 @@ fun SearchResultItem(
             contentDescription = "Thumbnail for ${result.streamInfo.name}",
             modifier = imageModifier,
             contentScale = ContentScale.Crop,
-            error = painterResource(id = R.drawable.placeholder_gray),
-            placeholder = painterResource(id = R.drawable.placeholder_gray)
+            placeholder = remember { ColorPainter(placeholderColor) },
+            error = remember { ColorPainter(placeholderColor) }
         )
         Spacer(modifier = Modifier.width(16.dp))
 
@@ -246,7 +255,13 @@ fun SearchResultItem(
                 style = MaterialTheme.typography.bodyMedium
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (downloadStatus != null || result.isDownloaded || result.isInLibrary) {
+                val shouldShowStatusIcon = result.isInLibrary ||
+                        downloadStatus == DownloadStatus.DOWNLOADED ||
+                        downloadStatus == DownloadStatus.DOWNLOADING ||
+                        downloadStatus == DownloadStatus.QUEUED ||
+                        downloadStatus == DownloadStatus.FAILED
+
+                if (shouldShowStatusIcon) {
                     Box(modifier = Modifier.width(20.dp), contentAlignment = Alignment.CenterStart) {
                         val iconSize = 16.dp
                         when (downloadStatus) {
@@ -254,7 +269,7 @@ fun SearchResultItem(
                             DownloadStatus.QUEUED -> Icon(imageVector = Icons.Default.HourglassTop, contentDescription = "Queued", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(iconSize))
                             DownloadStatus.FAILED -> Icon(imageVector = Icons.Default.ErrorOutline, contentDescription = "Failed", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(iconSize))
                             DownloadStatus.DOWNLOADED -> Icon(imageVector = Icons.Default.CheckCircle, contentDescription = "Downloaded", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(iconSize))
-                            DownloadStatus.NOT_DOWNLOADED, null -> {
+                            else -> {
                                 if (result.isInLibrary) Icon(imageVector = Icons.Default.Check, contentDescription = "In Library", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(iconSize))
                             }
                         }

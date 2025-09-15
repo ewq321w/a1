@@ -160,21 +160,12 @@ class SearchViewModel @Inject constructor(
         }
     }
 
-    fun onPlaylistActionEvent(event: PlaylistActionState) {
-        when (event) {
-            is PlaylistActionState.CreatePlaylist -> playlistActionsManager.prepareToCreatePlaylist()
-            is PlaylistActionState.Hidden -> playlistActionsManager.dismiss()
-            else -> {}
-        }
-    }
-
-    fun onPlaylistCreateConfirm(name: String) {
-        playlistActionsManager.onCreatePlaylist(name)
-    }
-
-    fun onPlaylistSelected(playlistId: Long) {
-        playlistActionsManager.onPlaylistSelected(playlistId)
-    }
+    fun onPlaylistCreateConfirm(name: String) = playlistActionsManager.onCreatePlaylist(name)
+    fun onPlaylistSelected(playlistId: Long) = playlistActionsManager.onPlaylistSelected(playlistId)
+    fun onPlaylistActionDismiss() = playlistActionsManager.dismiss()
+    fun onPrepareToCreatePlaylist() = playlistActionsManager.prepareToCreatePlaylist()
+    fun onGroupSelectedForNewPlaylist(groupId: Long) = playlistActionsManager.onGroupSelectedForNewPlaylist(groupId)
+    fun onDialogRequestCreateGroup() = libraryActionsManager.requestCreateGroup()
 
 
     private fun refreshResultStatuses() {

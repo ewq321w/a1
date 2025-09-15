@@ -14,12 +14,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import com.example.m.R
 import com.example.m.data.database.DownloadStatus
 import com.example.m.data.database.Song
 import java.text.DecimalFormat
@@ -67,6 +66,7 @@ fun SongItem(
     var showMenu by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     val isDownloading = song.downloadStatus == DownloadStatus.DOWNLOADING || song.downloadStatus == DownloadStatus.QUEUED
+    val placeholderColor = MaterialTheme.colorScheme.surfaceVariant
 
     if (showDeleteConfirmDialog) {
         ConfirmDeleteDialog(
@@ -168,8 +168,8 @@ fun SongItem(
                     .size(54.dp)
                     .clip(RoundedCornerShape(3.dp)),
                 contentScale = ContentScale.Crop,
-                error = painterResource(id = R.drawable.placeholder_gray),
-                placeholder = painterResource(id = R.drawable.placeholder_gray)
+                placeholder = remember { ColorPainter(placeholderColor) },
+                error = remember { ColorPainter(placeholderColor) }
             )
         },
         trailingContent = {
@@ -262,6 +262,7 @@ fun CompositeThumbnailImage(
     modifier: Modifier = Modifier
 ) {
     var finalUrls by remember { mutableStateOf<List<String>?>(null) }
+    val placeholderColor = MaterialTheme.colorScheme.surfaceVariant
 
     LaunchedEffect(key1 = urls) {
         finalUrls = processUrls(urls)
@@ -289,8 +290,8 @@ fun CompositeThumbnailImage(
             contentDescription = contentDescription,
             modifier = modifier,
             contentScale = ContentScale.Crop,
-            error = painterResource(id = R.drawable.placeholder_gray),
-            placeholder = painterResource(id = R.drawable.placeholder_gray)
+            placeholder = remember { ColorPainter(placeholderColor) },
+            error = remember { ColorPainter(placeholderColor) }
         )
     } else {
         Column(modifier = modifier) {
@@ -300,16 +301,16 @@ fun CompositeThumbnailImage(
                     contentDescription = contentDescription,
                     modifier = Modifier.weight(1f),
                     contentScale = ContentScale.Crop,
-                    error = painterResource(id = R.drawable.placeholder_gray),
-                    placeholder = painterResource(id = R.drawable.placeholder_gray)
+                    placeholder = remember { ColorPainter(placeholderColor) },
+                    error = remember { ColorPainter(placeholderColor) }
                 )
                 AsyncImage(
                     model = currentUrls.getOrNull(1),
                     contentDescription = contentDescription,
                     modifier = Modifier.weight(1f),
                     contentScale = ContentScale.Crop,
-                    error = painterResource(id = R.drawable.placeholder_gray),
-                    placeholder = painterResource(id = R.drawable.placeholder_gray)
+                    placeholder = remember { ColorPainter(placeholderColor) },
+                    error = remember { ColorPainter(placeholderColor) }
                 )
             }
             Row(modifier = Modifier.weight(1f)) {
@@ -318,16 +319,16 @@ fun CompositeThumbnailImage(
                     contentDescription = contentDescription,
                     modifier = Modifier.weight(1f),
                     contentScale = ContentScale.Crop,
-                    error = painterResource(id = R.drawable.placeholder_gray),
-                    placeholder = painterResource(id = R.drawable.placeholder_gray)
+                    placeholder = remember { ColorPainter(placeholderColor) },
+                    error = remember { ColorPainter(placeholderColor) }
                 )
                 AsyncImage(
                     model = currentUrls.getOrNull(3),
                     contentDescription = contentDescription,
                     modifier = Modifier.weight(1f),
                     contentScale = ContentScale.Crop,
-                    error = painterResource(id = R.drawable.placeholder_gray),
-                    placeholder = painterResource(id = R.drawable.placeholder_gray)
+                    placeholder = remember { ColorPainter(placeholderColor) },
+                    error = remember { ColorPainter(placeholderColor) }
                 )
             }
         }

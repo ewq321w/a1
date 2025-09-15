@@ -7,9 +7,9 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.m.ui.library.DeletableItem
 import com.example.m.ui.library.components.ConfirmDeleteDialog
 import com.example.m.ui.library.components.SongItem
 
@@ -32,8 +32,8 @@ fun SongsTabContent(
 
     LazyColumn(
         state = listState,
-        modifier = modifier,
-        contentPadding = PaddingValues(bottom = 90.dp)
+        modifier = modifier.testTag("lazyColumn"), // Add this testTag
+        contentPadding = PaddingValues(bottom = 16.dp) // Reduced padding for consistency
     ) {
         itemsIndexed(
             items = uiState.songs,

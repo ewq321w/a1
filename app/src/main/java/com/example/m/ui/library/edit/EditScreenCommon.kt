@@ -1,9 +1,10 @@
+// file: com/example/m/ui/library/edit/EditScreenCommon.kt
 package com.example.m.ui.library.edit
 
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.RemoveCircleOutline
@@ -16,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
@@ -25,7 +27,6 @@ import com.example.m.data.database.Song
 import org.burnoutcrew.reorderable.ReorderableLazyListState
 import org.burnoutcrew.reorderable.detectReorder
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun EditSongItem(
     song: Song,
@@ -34,14 +35,30 @@ fun EditSongItem(
     modifier: Modifier = Modifier
 ) {
     ListItem(
-        modifier = modifier,
-        headlineContent = { Text(song.title, maxLines = 1, modifier = Modifier.basicMarquee()) },
-        supportingContent = { Text(song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        modifier = modifier.defaultMinSize(minHeight = 72.dp),
+        headlineContent = {
+            Text(
+                song.title,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        },
+        supportingContent = {
+            Text(
+                song.artist,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodySmall
+            )
+        },
         leadingContent = {
             AsyncImage(
                 model = song.thumbnailUrl,
                 contentDescription = song.title,
-                modifier = Modifier.size(56.dp),
+                modifier = Modifier
+                    .size(54.dp)
+                    .clip(RoundedCornerShape(3.dp)),
                 contentScale = ContentScale.Crop
             )
         },

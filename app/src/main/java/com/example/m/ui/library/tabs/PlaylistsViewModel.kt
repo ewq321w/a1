@@ -6,7 +6,9 @@ import androidx.lifecycle.viewModelScope
 import com.example.m.data.PreferencesManager
 import com.example.m.data.database.*
 import com.example.m.data.repository.LibraryRepository
+import com.example.m.managers.PlaylistActionState
 import com.example.m.managers.PlaylistActionsManager
+import com.example.m.managers.PlaylistManager
 import com.example.m.managers.ThumbnailProcessor
 import com.example.m.playback.MusicServiceConnection
 import com.example.m.ui.library.DeletableItem
@@ -19,16 +21,15 @@ import javax.inject.Inject
 data class PlaylistsUiState(
     val playlists: List<PlaylistWithSongs> = emptyList(),
     val itemPendingDeletion: DeletableItem.DeletablePlaylist? = null,
-    val playlistToRemoveDownloads: PlaylistWithSongs? = null
+    val playlistPendingDisableAutoDownload: PlaylistWithSongs? = null
 )
 
 sealed interface PlaylistTabEvent {
     data class PlayPlaylist(val playlist: PlaylistWithSongs) : PlaylistTabEvent
     data class ShufflePlaylist(val playlist: PlaylistWithSongs) : PlaylistTabEvent
-    data class ToggleAutoDownloadPlaylist(val playlist: PlaylistWithSongs) : PlaylistTabEvent
-    data class PrepareToRemoveDownloads(val playlist: PlaylistWithSongs) : PlaylistTabEvent
-    object CancelRemoveDownloads : PlaylistTabEvent
-    object ConfirmRemoveDownloads : PlaylistTabEvent
+    data class PrepareToToggleAutoDownloadPlaylist(val playlist: PlaylistWithSongs) : PlaylistTabEvent
+    object DismissDisableAutoDownloadDialog : PlaylistTabEvent
+    data class DisableAutoDownloadForPlaylist(val removeFiles: Boolean) : PlaylistTabEvent
     data class SetItemForDeletion(val playlist: PlaylistWithSongs) : PlaylistTabEvent
     object ClearItemForDeletion : PlaylistTabEvent
     object ConfirmDeletion : PlaylistTabEvent
@@ -40,6 +41,7 @@ class PlaylistsViewModel @Inject constructor(
     private val libraryRepository: LibraryRepository,
     private val musicServiceConnection: MusicServiceConnection,
     private val playlistDao: PlaylistDao,
+    private val playlistManager: PlaylistManager,
     private val playlistActionsManager: PlaylistActionsManager,
     private val preferencesManager: PreferencesManager,
     val thumbnailProcessor: ThumbnailProcessor
@@ -47,6 +49,8 @@ class PlaylistsViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(PlaylistsUiState())
     val uiState: StateFlow<PlaylistsUiState> = _uiState.asStateFlow()
+
+    val playlistActionState: StateFlow<PlaylistActionState> = playlistActionsManager.state
 
     init {
         preferencesManager.getActiveLibraryGroupIdFlow()
@@ -64,10 +68,9 @@ class PlaylistsViewModel @Inject constructor(
         when (event) {
             is PlaylistTabEvent.PlayPlaylist -> playPlaylist(event.playlist)
             is PlaylistTabEvent.ShufflePlaylist -> shufflePlaylist(event.playlist)
-            is PlaylistTabEvent.ToggleAutoDownloadPlaylist -> toggleAutoDownload(event.playlist)
-            is PlaylistTabEvent.PrepareToRemoveDownloads -> _uiState.update { it.copy(playlistToRemoveDownloads = event.playlist) }
-            is PlaylistTabEvent.CancelRemoveDownloads -> _uiState.update { it.copy(playlistToRemoveDownloads = null) }
-            is PlaylistTabEvent.ConfirmRemoveDownloads -> removeDownloadsForPlaylist()
+            is PlaylistTabEvent.PrepareToToggleAutoDownloadPlaylist -> prepareToToggleAutoDownload(event.playlist)
+            is PlaylistTabEvent.DismissDisableAutoDownloadDialog -> _uiState.update { it.copy(playlistPendingDisableAutoDownload = null) }
+            is PlaylistTabEvent.DisableAutoDownloadForPlaylist -> disableAutoDownload(event.removeFiles)
             is PlaylistTabEvent.SetItemForDeletion -> _uiState.update { it.copy(itemPendingDeletion = DeletableItem.DeletablePlaylist(event.playlist)) }
             is PlaylistTabEvent.ClearItemForDeletion -> _uiState.update { it.copy(itemPendingDeletion = null) }
             is PlaylistTabEvent.ConfirmDeletion -> confirmDeletion()
@@ -91,12 +94,13 @@ class PlaylistsViewModel @Inject constructor(
         }
     }
 
-    private fun toggleAutoDownload(playlistWithSongs: PlaylistWithSongs) {
+    private fun prepareToToggleAutoDownload(playlistWithSongs: PlaylistWithSongs) {
         val playlist = playlistWithSongs.playlist
-        val isEnabling = !playlist.downloadAutomatically
-        viewModelScope.launch(Dispatchers.IO) {
-            playlistDao.updatePlaylist(playlist.copy(downloadAutomatically = isEnabling))
-            if (isEnabling) {
+        if (playlist.downloadAutomatically) {
+            _uiState.update { it.copy(playlistPendingDisableAutoDownload = playlistWithSongs) }
+        } else {
+            viewModelScope.launch(Dispatchers.IO) {
+                playlistDao.updatePlaylist(playlist.copy(downloadAutomatically = true))
                 playlistWithSongs.songs.forEach { song ->
                     libraryRepository.startDownload(song)
                 }
@@ -104,12 +108,19 @@ class PlaylistsViewModel @Inject constructor(
         }
     }
 
-    private fun removeDownloadsForPlaylist() {
-        _uiState.value.playlistToRemoveDownloads?.let { playlist ->
-            viewModelScope.launch(Dispatchers.IO) {
-                libraryRepository.removeDownloadsForPlaylist(playlist)
-                _uiState.update { it.copy(playlistToRemoveDownloads = null) }
+    private fun disableAutoDownload(removeFiles: Boolean) {
+        val playlistWithSongs = _uiState.value.playlistPendingDisableAutoDownload ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            // Always disable the flag
+            playlistDao.updatePlaylist(playlistWithSongs.playlist.copy(downloadAutomatically = false))
+
+            // Conditionally remove the files
+            if (removeFiles) {
+                libraryRepository.removeDownloadsForPlaylist(playlistWithSongs)
             }
+
+            // Hide the dialog
+            _uiState.update { it.copy(playlistPendingDisableAutoDownload = null) }
         }
     }
 

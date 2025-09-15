@@ -103,6 +103,9 @@ class SearchedArtistDetailViewModel @Inject constructor(
     fun onPlaylistSelected(playlistId: Long) = playlistActionsManager.onPlaylistSelected(playlistId)
     fun onPlaylistActionDismiss() = playlistActionsManager.dismiss()
     fun onPrepareToCreatePlaylist() = playlistActionsManager.prepareToCreatePlaylist()
+    fun onGroupSelectedForNewPlaylist(groupId: Long) = playlistActionsManager.onGroupSelectedForNewPlaylist(groupId)
+    fun onDialogRequestCreateGroup() = libraryActionsManager.requestCreateGroup()
+
 
     private fun refreshSongStatuses() {
         if (_uiState.value.songs.isEmpty()) return

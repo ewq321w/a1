@@ -122,6 +122,14 @@ fun HistoryScreen(
                 onConfirm = { name -> viewModel.onPlaylistCreateConfirm(name) }
             )
         }
+        is PlaylistActionState.SelectGroupForNewPlaylist -> {
+            SelectLibraryGroupDialog(
+                groups = state.groups,
+                onDismiss = { viewModel.onPlaylistActionDismiss() },
+                onGroupSelected = { groupId -> viewModel.onGroupSelectedForNewPlaylist(groupId) },
+                onCreateNewGroup = { viewModel.onDialogRequestCreateGroup() }
+            )
+        }
         is PlaylistActionState.Hidden -> {}
     }
 

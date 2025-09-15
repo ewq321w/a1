@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.m.data.database.*
 import com.example.m.data.repository.LibraryRepository
+import com.example.m.managers.LibraryActionsManager
 import com.example.m.managers.PlaylistActionState
 import com.example.m.managers.PlaylistActionsManager
 import com.example.m.playback.MusicServiceConnection
@@ -17,7 +18,8 @@ import javax.inject.Inject
 data class ArtistSongGroupDetailUiState(
     val groupWithSongs: ArtistSongGroupWithSongs? = null,
     val songs: List<Song> = emptyList(),
-    val songPendingRemoval: Song? = null
+    val songPendingRemoval: Song? = null,
+    val groupPendingDeletion: ArtistSongGroup? = null
 )
 
 sealed interface ArtistSongGroupDetailEvent {
@@ -26,6 +28,10 @@ sealed interface ArtistSongGroupDetailEvent {
     data class PrepareToRemoveSong(val song: Song) : ArtistSongGroupDetailEvent
     object ConfirmRemoveSong : ArtistSongGroupDetailEvent
     object CancelRemoveSong : ArtistSongGroupDetailEvent
+    object PrepareToDeleteGroup : ArtistSongGroupDetailEvent
+    object ConfirmDeleteGroupOnly : ArtistSongGroupDetailEvent
+    object ConfirmDeleteGroupAndSongs : ArtistSongGroupDetailEvent
+    object CancelDeleteGroup : ArtistSongGroupDetailEvent
     data class PlayNext(val song: Song) : ArtistSongGroupDetailEvent
     data class AddToQueue(val song: Song) : ArtistSongGroupDetailEvent
     data class ShuffleSong(val song: Song) : ArtistSongGroupDetailEvent
@@ -39,7 +45,8 @@ class ArtistSongGroupDetailViewModel @Inject constructor(
     private val musicServiceConnection: MusicServiceConnection,
     private val artistDao: ArtistDao,
     private val libraryRepository: LibraryRepository,
-    private val playlistActionsManager: PlaylistActionsManager
+    private val playlistActionsManager: PlaylistActionsManager,
+    private val libraryActionsManager: LibraryActionsManager
 ) : ViewModel() {
     private val groupId: Long = checkNotNull(savedStateHandle["groupId"])
 
@@ -50,6 +57,9 @@ class ArtistSongGroupDetailViewModel @Inject constructor(
 
     private val _navigateToArtist = MutableSharedFlow<Long>()
     val navigateToArtist: SharedFlow<Long> = _navigateToArtist.asSharedFlow()
+
+    private val _navigateBack = MutableSharedFlow<Unit>()
+    val navigateBack: SharedFlow<Unit> = _navigateBack.asSharedFlow()
 
     init {
         val groupWithSongsFlow = artistDao.getArtistSongGroupWithSongsOrdered(groupId)
@@ -84,6 +94,10 @@ class ArtistSongGroupDetailViewModel @Inject constructor(
             is ArtistSongGroupDetailEvent.ShuffleSong -> onShuffleSong(event.song)
             is ArtistSongGroupDetailEvent.GoToArtist -> onGoToArtist(event.song)
             is ArtistSongGroupDetailEvent.AddToPlaylist -> playlistActionsManager.selectItem(event.item)
+            is ArtistSongGroupDetailEvent.PrepareToDeleteGroup -> _uiState.update { it.copy(groupPendingDeletion = it.groupWithSongs?.group) }
+            is ArtistSongGroupDetailEvent.CancelDeleteGroup -> _uiState.update { it.copy(groupPendingDeletion = null) }
+            is ArtistSongGroupDetailEvent.ConfirmDeleteGroupOnly -> confirmDeleteGroupOnly()
+            is ArtistSongGroupDetailEvent.ConfirmDeleteGroupAndSongs -> confirmDeleteGroupAndSongs()
         }
     }
 
@@ -91,6 +105,9 @@ class ArtistSongGroupDetailViewModel @Inject constructor(
     fun onPlaylistSelected(playlistId: Long) = playlistActionsManager.onPlaylistSelected(playlistId)
     fun onPlaylistActionDismiss() = playlistActionsManager.dismiss()
     fun onPrepareToCreatePlaylist() = playlistActionsManager.prepareToCreatePlaylist()
+    fun onGroupSelectedForNewPlaylist(groupId: Long) = playlistActionsManager.onGroupSelectedForNewPlaylist(groupId)
+    fun onDialogRequestCreateGroup() = libraryActionsManager.requestCreateGroup()
+
 
     private fun onSongSelected(selectedIndex: Int) {
         val currentSongs = _uiState.value.songs
@@ -117,6 +134,26 @@ class ArtistSongGroupDetailViewModel @Inject constructor(
             }
         }
         _uiState.update { it.copy(songPendingRemoval = null) }
+    }
+
+    private fun confirmDeleteGroupOnly() {
+        _uiState.value.groupPendingDeletion?.let { group ->
+            viewModelScope.launch {
+                libraryRepository.deleteArtistSongGroup(group.groupId)
+                _uiState.update { it.copy(groupPendingDeletion = null) }
+                _navigateBack.emit(Unit)
+            }
+        }
+    }
+
+    private fun confirmDeleteGroupAndSongs() {
+        _uiState.value.groupPendingDeletion?.let { group ->
+            viewModelScope.launch {
+                libraryRepository.deleteArtistSongGroupAndSongs(group.groupId)
+                _uiState.update { it.copy(groupPendingDeletion = null) }
+                _navigateBack.emit(Unit)
+            }
+        }
     }
 
     private fun onShuffleSong(song: Song) {

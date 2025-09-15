@@ -123,7 +123,7 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE youtubeUrl IN (:youtubeUrls)")
     suspend fun getSongsByUrls(youtubeUrls: List<String>): List<Song>
 
-    @Query("SELECT * FROM songs WHERE localFilePath IS NOT NULL")
+    @Query("SELECT * FROM songs WHERE downloadStatus = 'DOWNLOADED'")
     suspend fun getAllDownloadedSongsOnce(): List<Song>
 
     @Query("SELECT localFilePath FROM songs WHERE localFilePath IS NOT NULL")
@@ -539,6 +539,9 @@ interface ArtistDao {
 
     @Query("SELECT DISTINCT songId FROM artist_song_group_songs")
     fun getAllSongIdsInGroups(): Flow<List<Long>>
+
+    @Query("SELECT s.* FROM songs s INNER JOIN artist_song_group_songs ags ON s.songId = ags.songId WHERE ags.groupId = :groupId")
+    suspend fun getSongsInArtistSongGroup(groupId: Long): List<Song>
 }
 
 @Dao

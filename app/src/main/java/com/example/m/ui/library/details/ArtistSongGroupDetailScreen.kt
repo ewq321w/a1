@@ -19,6 +19,7 @@ import com.example.m.data.database.Song
 import com.example.m.managers.PlaylistActionState
 import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.library.components.*
+import kotlinx.coroutines.flow.collectLatest
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -34,12 +35,16 @@ fun ArtistSongGroupDetailScreen(
     val groupName = uiState.groupWithSongs?.group?.name ?: "Group"
     var showMenu by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState()
-    var groupToDelete by remember { mutableStateOf<com.example.m.data.database.ArtistSongGroup?>(null) }
-
 
     LaunchedEffect(Unit) {
         viewModel.navigateToArtist.collect { artistId ->
             onArtistClick(artistId)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.navigateBack.collectLatest {
+            onBack()
         }
     }
 
@@ -73,21 +78,24 @@ fun ArtistSongGroupDetailScreen(
                 onConfirm = { name -> viewModel.onPlaylistCreateConfirm(name) }
             )
         }
+        is PlaylistActionState.SelectGroupForNewPlaylist -> {
+            SelectLibraryGroupDialog(
+                groups = state.groups,
+                onDismiss = { viewModel.onPlaylistActionDismiss() },
+                onGroupSelected = { groupId -> viewModel.onGroupSelectedForNewPlaylist(groupId) },
+                onCreateNewGroup = { viewModel.onDialogRequestCreateGroup() }
+            )
+        }
         is PlaylistActionState.Hidden -> {}
     }
 
 
-    groupToDelete?.let { group ->
-        ConfirmDeleteDialog(
-            itemType = "group",
-            itemName = group.name,
-            onDismiss = { groupToDelete = null },
-            onConfirm = {
-                // This requires a new event in the ViewModel
-                // For now, this action is not implemented via events.
-                groupToDelete = null
-                onBack()
-            }
+    uiState.groupPendingDeletion?.let { group ->
+        DeleteGroupWithOptionsDialog(
+            groupName = group.name,
+            onDismiss = { viewModel.onEvent(ArtistSongGroupDetailEvent.CancelDeleteGroup) },
+            onConfirmDeleteOnly = { viewModel.onEvent(ArtistSongGroupDetailEvent.ConfirmDeleteGroupOnly) },
+            onConfirmDeleteAll = { viewModel.onEvent(ArtistSongGroupDetailEvent.ConfirmDeleteGroupAndSongs) }
         )
     }
 
@@ -133,7 +141,7 @@ fun ArtistSongGroupDetailScreen(
                             DropdownMenuItem(
                                 text = { Text("Delete group") },
                                 onClick = {
-                                    groupToDelete = uiState.groupWithSongs?.group
+                                    viewModel.onEvent(ArtistSongGroupDetailEvent.PrepareToDeleteGroup)
                                     showMenu = false
                                 }
                             )

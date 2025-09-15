@@ -5,6 +5,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -12,15 +13,16 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.media3.common.Player
 import coil.compose.AsyncImage
-import com.example.m.R
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -29,6 +31,7 @@ fun MiniPlayer(
     songTitle: String,
     artistName: String,
     isPlaying: Boolean,
+    playerState: Int,
     currentPosition: Long,
     totalDuration: Long,
     onPlayPauseClicked: () -> Unit,
@@ -40,6 +43,7 @@ fun MiniPlayer(
     } else {
         0f
     }
+    val placeholderColor = MaterialTheme.colorScheme.surfaceVariant
 
     Column(
         modifier = modifier
@@ -59,8 +63,8 @@ fun MiniPlayer(
                     .size(48.dp)
                     .clip(RoundedCornerShape(3.dp)),
                 contentScale = ContentScale.Crop,
-                error = painterResource(id = R.drawable.placeholder_gray),
-                placeholder = painterResource(id = R.drawable.placeholder_gray)
+                placeholder = remember { ColorPainter(placeholderColor) },
+                error = remember { ColorPainter(placeholderColor) }
             )
 
             Spacer(modifier = Modifier.width(16.dp))
@@ -83,14 +87,38 @@ fun MiniPlayer(
                 )
             }
 
-            // Play/Pause Button
-            IconButton(onClick = onPlayPauseClicked) {
-                Icon(
-                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = "Play/Pause",
-                    tint = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.size(25.dp)
-                )
+            // Play/Pause Button or Loading Indicator
+            Box(
+                modifier = Modifier.size(48.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                // Show spinner only when the player state is Buffering.
+                if (playerState == Player.STATE_BUFFERING) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(25.dp),
+                        color = MaterialTheme.colorScheme.onBackground,
+                        strokeWidth = 2.dp
+                    )
+                    // This invisible surface consumes clicks, preventing them from
+                    // propagating to the parent and opening the player screen.
+                    Spacer(modifier = Modifier
+                        .matchParentSize()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {}
+                        )
+                    )
+                } else {
+                    IconButton(onClick = onPlayPauseClicked) {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = "Play/Pause",
+                            tint = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.size(25.dp)
+                        )
+                    }
+                }
             }
         }
 

@@ -21,15 +21,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
-import com.example.m.R
 import com.example.m.ui.main.MainEvent
 import com.example.m.ui.main.MainViewModel
 import java.util.concurrent.TimeUnit
@@ -43,6 +42,7 @@ fun PlayerScreen(
     val nowPlaying by viewModel.nowPlaying.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
     val playbackState by viewModel.playbackState.collectAsState()
+    val placeholderColor = MaterialTheme.colorScheme.surfaceVariant
 
     var sliderPosition by remember { mutableStateOf(0f) }
     var userIsDragging by remember { mutableStateOf(false) }
@@ -87,8 +87,8 @@ fun PlayerScreen(
                     .aspectRatio(1f)
                     .clip(RoundedCornerShape(8.dp)),
                 contentScale = ContentScale.Crop,
-                error = painterResource(id = R.drawable.placeholder_gray),
-                placeholder = painterResource(id = R.drawable.placeholder_gray)
+                placeholder = remember { ColorPainter(placeholderColor) },
+                error = remember { ColorPainter(placeholderColor) }
             )
 
             Column(horizontalAlignment = Alignment.CenterHorizontally) {

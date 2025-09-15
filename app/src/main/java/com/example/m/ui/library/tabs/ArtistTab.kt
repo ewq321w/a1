@@ -21,17 +21,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.m.data.database.Artist
 import com.example.m.data.database.ArtistGroup
 import com.example.m.data.database.ArtistWithSongs
-import com.example.m.managers.ThumbnailProcessor
 import com.example.m.ui.library.DeletableItem
 import com.example.m.ui.library.LibraryArtistItem
-import com.example.m.ui.library.components.CompositeThumbnailImage
-import com.example.m.ui.library.components.ConfirmDeleteDialog
-import com.example.m.ui.library.components.EmptyStateMessage
-import com.example.m.ui.library.components.MoveToGroupSheet
-import com.example.m.ui.library.components.TextFieldDialog
+import com.example.m.ui.library.components.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,16 +38,16 @@ fun ArtistsTabContent(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    uiState.artistToRemoveDownloads?.let { artist ->
-        ConfirmDeleteDialog(
-            itemType = "downloads for",
-            itemName = artist.name,
-            onDismiss = { viewModel.onEvent(ArtistTabEvent.CancelRemoveDownloads) },
-            onConfirm = { viewModel.onEvent(ArtistTabEvent.ConfirmRemoveDownloads) }
+    uiState.artistPendingDisableAutoDownload?.let { artist ->
+        DisableAutoDownloadConfirmationDialog(
+            itemType = "artist",
+            onDismiss = { viewModel.onEvent(ArtistTabEvent.DismissDisableAutoDownloadDialog) },
+            onConfirmDisableOnly = { viewModel.onEvent(ArtistTabEvent.DisableAutoDownloadForArtist(removeFiles = false)) },
+            onConfirmAndRemove = { viewModel.onEvent(ArtistTabEvent.DisableAutoDownloadForArtist(removeFiles = true)) }
         )
     }
 
-    (uiState.itemPendingDeletion as? DeletableItem.DeletableArtistGroup)?.let { item ->
+    uiState.itemPendingDeletion?.let { item ->
         ConfirmDeleteDialog(
             itemType = "artist group",
             itemName = item.group.name,
@@ -116,11 +110,10 @@ fun ArtistsTabContent(
                             onShuffle = { viewModel.onEvent(ArtistTabEvent.ShuffleArtist(artist)) },
                             onShuffleUngrouped = { viewModel.onEvent(ArtistTabEvent.ShuffleUngroupedSongsForArtist(artist)) },
                             onEdit = { onEditArtistSongs(artist.artistId) },
-                            onToggleAutoDownload = { viewModel.onEvent(ArtistTabEvent.ToggleAutoDownloadArtist(artist)) },
+                            onToggleAutoDownload = { viewModel.onEvent(ArtistTabEvent.PrepareToToggleAutoDownloadArtist(artist)) },
                             groupAction = "Move to group..." to { viewModel.onEvent(ArtistTabEvent.PrepareToMoveArtist(artist)) },
                             onHideArtist = { viewModel.onEvent(ArtistTabEvent.HideArtist(artist)) },
-                            processUrls = { urls -> viewModel.thumbnailProcessor.process(urls) },
-                            onRemoveDownloads = { viewModel.onEvent(ArtistTabEvent.PrepareToRemoveDownloads(artist)) }
+                            processUrls = { urls -> viewModel.thumbnailProcessor.process(urls) }
                         )
                     }
                     is LibraryArtistItem.GroupItem -> {
@@ -156,7 +149,6 @@ fun ArtistItem(
     processUrls: suspend (List<String>) -> List<String>,
     groupAction: Pair<String, () -> Unit>? = null,
     onHideArtist: (() -> Unit)? = null,
-    onRemoveDownloads: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -196,7 +188,6 @@ fun ArtistItem(
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                     val toggleText = if (artist.downloadAutomatically) "Disable auto-download" else "Enable auto-download"
                     DropdownMenuItem(text = { Text(toggleText) }, onClick = { onToggleAutoDownload(); showMenu = false })
-                    onRemoveDownloads?.let { DropdownMenuItem(text = { Text("Remove all downloads") }, onClick = { it(); showMenu = false }) }
                 }
             }
         },

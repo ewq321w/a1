@@ -1,7 +1,7 @@
+// file: com/example/m/data/database/AppDatabase.kt
 package com.example.m.data.database
 
 import android.content.Context
-import android.util.Log
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
@@ -10,6 +10,7 @@ import androidx.room.TypeConverters
 import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Provider
 
@@ -53,6 +54,8 @@ abstract class AppDatabase : RoomDatabase() {
     }
 
     companion object {
+        private const val DATABASE_NAME = "music_app_database"
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -61,17 +64,21 @@ abstract class AppDatabase : RoomDatabase() {
             callback: AppDatabase.AppDatabaseCallback
         ): AppDatabase {
             return INSTANCE ?: synchronized(this) {
-                val dbFile = context.getDatabasePath("music_app_database")
+                // Get the correct, persistent path for the database.
+                val dbFile = context.getDatabasePath(DATABASE_NAME)
+
+                // Ensure the parent directory exists.
                 val parentDir = dbFile.parentFile
                 if (parentDir != null && !parentDir.exists()) {
                     parentDir.mkdirs()
                 }
-                Log.d("AppDatabase", "Database path determined by system: ${dbFile.absolutePath}")
+                Timber.tag("AppDatabase")
+                    .d("Database path explicitly set to: ${dbFile.absolutePath}")
 
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "music_app_database"
+                    dbFile.absolutePath // Pass the full, absolute path to the builder.
                 )
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .addCallback(callback)

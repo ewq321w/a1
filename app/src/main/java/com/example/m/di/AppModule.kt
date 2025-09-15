@@ -4,6 +4,8 @@ package com.example.m.di
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
 import androidx.annotation.OptIn
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
@@ -11,8 +13,13 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import coil.ImageLoader
+import coil.decode.DataSource
 import coil.disk.DiskCache
+import coil.intercept.Interceptor
+import coil.memory.MemoryCache
 import coil.request.CachePolicy
+import coil.request.ImageResult
+import coil.request.SuccessResult
 import com.example.m.MainActivity
 import com.example.m.data.database.*
 import dagger.Module
@@ -20,17 +27,56 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
-import okhttp3.Cache
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
-import java.io.File
+import timber.log.Timber
+import javax.inject.Inject
 import javax.inject.Named
 import javax.inject.Provider
 import javax.inject.Singleton
 
+@Singleton
+class Rgb565CacheInterceptor @Inject constructor() : Interceptor {
+    override suspend fun intercept(chain: Interceptor.Chain): ImageResult {
+        val request = chain.request
+        val result = chain.proceed(request)
+
+        // We only care about successful network results.
+        if (result !is SuccessResult || result.dataSource != DataSource.NETWORK) {
+            return result
+        }
+
+        val originalBitmap = (result.drawable as? BitmapDrawable)?.bitmap
+
+        // If we can't get a bitmap or it's already RGB_565, we're done.
+        if (originalBitmap == null || originalBitmap.config == Bitmap.Config.RGB_565) {
+            return result
+        }
+
+        // Perform the conversion. This is a suspending function running on a background thread.
+        val convertedBitmap = try {
+            withContext(Dispatchers.Default) {
+                originalBitmap.copy(Bitmap.Config.RGB_565, false)
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to convert bitmap to RGB_565.")
+            return result // Return original on failure
+        }
+
+        // Create a new drawable with the converted bitmap.
+        val newDrawable = BitmapDrawable(request.context.resources, convertedBitmap)
+
+        // Return a new result. Coil will now display and cache this RGB_565 version.
+        return result.copy(drawable = newDrawable)
+    }
+}
+
+
 @UnstableApi
 private class CustomPlayer(player: Player) : ForwardingPlayer(player) {
     companion object {
-        private const val SEEK_TO_PREVIOUS_THRESHOLD_MS = 5000L // 5 seconds
+        private const val SEEK_TO_PREVIOUS_THRESHOLD_MS = 5000L
     }
 
     override fun seekToNext() {
@@ -141,13 +187,8 @@ object AppModule {
     @Singleton
     @Provides
     @Named("Coil")
-    fun provideCoilOkHttpClient(
-        @ApplicationContext context: Context
-    ): OkHttpClient {
-        val cacheSize = 100L * 1024 * 1024 // 100 MB
-        val cache = Cache(File(context.cacheDir, "coil_okhttp_cache"), cacheSize)
+    fun provideCoilOkHttpClient(): OkHttpClient {
         return OkHttpClient.Builder()
-            .cache(cache)
             .retryOnConnectionFailure(true)
             .build()
     }
@@ -156,21 +197,31 @@ object AppModule {
     @Provides
     fun provideImageLoader(
         @ApplicationContext context: Context,
-        @Named("Coil") okHttpClient: OkHttpClient
+        @Named("Coil") okHttpClient: OkHttpClient,
+        interceptor: Rgb565CacheInterceptor
     ): ImageLoader {
         return ImageLoader.Builder(context)
+            .components {
+                add(interceptor)
+            }
             .okHttpClient(okHttpClient)
             .allowRgb565(true)
+            .memoryCache {
+                MemoryCache.Builder(context)
+                    .maxSizePercent(0.25)
+                    .strongReferencesEnabled(true)
+                    .build()
+            }
             .diskCache {
                 DiskCache.Builder()
-                    .directory(context.cacheDir.resolve("image_cache_coil"))
+                    .directory(context.cacheDir.resolve("image_cache_coil_v2"))
                     .maxSizePercent(0.1)
                     .build()
             }
             .diskCachePolicy(CachePolicy.ENABLED)
             .networkCachePolicy(CachePolicy.ENABLED)
             .crossfade(true)
-            .respectCacheHeaders(false)
+            .respectCacheHeaders(false) // Ignore server headers to prevent frequent network validation
             .build()
     }
 }

@@ -33,6 +33,7 @@ fun MainScreen() {
     val navController = rememberNavController()
     val nowPlaying by mainViewModel.nowPlaying.collectAsState()
     val isPlaying by mainViewModel.isPlaying.collectAsState()
+    val playerState by mainViewModel.playerState.collectAsState()
     val playbackState by mainViewModel.playbackState.collectAsState()
     val uiState by mainViewModel.uiState
 
@@ -58,6 +59,7 @@ fun MainScreen() {
                             songTitle = metadata.title.toString(),
                             artistName = metadata.artist?.toString() ?: "Unknown Artist",
                             isPlaying = isPlaying,
+                            playerState = playerState,
                             currentPosition = playbackState.currentPosition,
                             totalDuration = playbackState.totalDuration,
                             onPlayPauseClicked = { mainViewModel.onEvent(MainEvent.TogglePlayPause) },

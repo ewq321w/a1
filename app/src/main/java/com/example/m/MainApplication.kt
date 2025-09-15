@@ -9,6 +9,7 @@ import kotlinx.coroutines.launch
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.downloader.Downloader
 import org.schabi.newpipe.extractor.localization.Localization
+import timber.log.Timber
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Named
@@ -24,6 +25,12 @@ class MainApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+
+        // Initialize Timber
+        if (BuildConfig.DEBUG) {
+            Timber.plant(Timber.DebugTree())
+        }
+
         // Set up the crash handler
         Thread.setDefaultUncaughtExceptionHandler(CrashHandler(this))
 

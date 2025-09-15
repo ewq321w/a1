@@ -10,6 +10,7 @@ import com.example.m.managers.DialogState
 import com.example.m.managers.LibraryActionsManager
 import com.example.m.managers.PlaylistActionState
 import com.example.m.managers.PlaylistActionsManager
+import com.example.m.managers.PlaylistManager
 import com.example.m.playback.MusicServiceConnection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +40,7 @@ sealed interface HistoryEvent {
 class HistoryViewModel @Inject constructor(
     private val listeningHistoryDao: ListeningHistoryDao,
     private val musicServiceConnection: MusicServiceConnection,
+    private val playlistManager: PlaylistManager,
     private val libraryRepository: LibraryRepository,
     private val artistDao: ArtistDao,
     private val songDao: SongDao,
@@ -97,6 +99,14 @@ class HistoryViewModel @Inject constructor(
 
     fun onPrepareToCreatePlaylist() {
         playlistActionsManager.prepareToCreatePlaylist()
+    }
+
+    fun onGroupSelectedForNewPlaylist(groupId: Long) {
+        playlistActionsManager.onGroupSelectedForNewPlaylist(groupId)
+    }
+
+    fun onDialogRequestCreateGroup() {
+        libraryActionsManager.requestCreateGroup()
     }
 
     private fun onSongSelected(selectedIndex: Int) {

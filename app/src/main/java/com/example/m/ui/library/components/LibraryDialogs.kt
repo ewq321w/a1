@@ -361,6 +361,37 @@ fun ConfirmDeleteDialog(
 }
 
 @Composable
+fun DeleteGroupWithOptionsDialog(
+    groupName: String,
+    onDismiss: () -> Unit,
+    onConfirmDeleteOnly: () -> Unit,
+    onConfirmDeleteAll: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete \"$groupName\"") },
+        text = {
+            Text("This group will be permanently deleted. What should happen to the songs inside it?")
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirmDeleteAll) {
+                Text("Delete Group & Songs", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
+                TextButton(onClick = onConfirmDeleteOnly) {
+                    Text("Delete Group Only")
+                }
+            }
+        }
+    )
+}
+
+@Composable
 fun ConfirmRemoveDialog(
     itemType: String,
     itemName: String,
@@ -384,6 +415,36 @@ fun ConfirmRemoveDialog(
         }
     )
 }
+
+@Composable
+fun DisableAutoDownloadConfirmationDialog(
+    itemType: String, // "artist" or "playlist"
+    onDismiss: () -> Unit,
+    onConfirmDisableOnly: () -> Unit,
+    onConfirmAndRemove: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Disable auto-download?") },
+        text = { Text("Do you also want to remove all existing songs downloaded for this $itemType?") },
+        confirmButton = {
+            TextButton(onClick = onConfirmAndRemove) {
+                Text("Remove Downloads")
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
+                TextButton(onClick = onConfirmDisableOnly) {
+                    Text("Just Disable")
+                }
+            }
+        }
+    )
+}
+
 
 @Composable
 fun ConfirmAddAllToLibraryDialog(

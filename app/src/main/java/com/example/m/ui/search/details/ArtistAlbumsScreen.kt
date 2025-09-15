@@ -1,3 +1,4 @@
+// file: com/example/m/ui/search/details/ArtistAlbumsScreen.kt
 package com.example.m.ui.search.details
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -79,7 +80,8 @@ fun ArtistAlbumsScreen(
                             album = album,
                             imageLoader = viewModel.imageLoader,
                             onClick = { album.url?.let { onAlbumClick(uiState.searchType, it) } },
-                            showArtist = false
+                            showArtist = false,
+                            itemSize = 180.dp // Use the larger size on this screen
                         )
                     }
                 }

@@ -1,3 +1,4 @@
+// file: com/example/m/ui/main/MainViewModel.kt
 package com.example.m.ui.main
 
 import android.content.Context
@@ -41,6 +42,8 @@ class MainViewModel @Inject constructor(
 ) : ViewModel() {
     val nowPlaying = musicServiceConnection.nowPlaying
     val isPlaying = musicServiceConnection.isPlaying
+    val isLoading = musicServiceConnection.isLoading
+    val playerState = musicServiceConnection.playerState
     val playbackState = musicServiceConnection.playbackState
 
     private val _uiState = mutableStateOf(MainUiState())

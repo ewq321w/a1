@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Folder
@@ -16,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -55,15 +57,13 @@ fun ArtistDetailScreen(
         }
     }
 
-    if (uiState.showRemoveDownloadsConfirm) {
-        uiState.artist?.let {
-            ConfirmDeleteDialog(
-                itemType = "downloads for",
-                itemName = it.name,
-                onDismiss = { viewModel.onEvent(ArtistDetailEvent.HideRemoveDownloadsConfirm) },
-                onConfirm = { viewModel.onEvent(ArtistDetailEvent.ConfirmRemoveDownloads) }
-            )
-        }
+    if (uiState.showConfirmRemoveDownloadsOnDisableDialog) {
+        DisableAutoDownloadConfirmationDialog(
+            itemType = "artist",
+            onDismiss = { viewModel.onEvent(ArtistDetailEvent.DismissDisableAutoDownloadDialog) },
+            onConfirmDisableOnly = { viewModel.onEvent(ArtistDetailEvent.DisableAutoDownload(removeFiles = false)) },
+            onConfirmAndRemove = { viewModel.onEvent(ArtistDetailEvent.DisableAutoDownload(removeFiles = true)) }
+        )
     }
 
     when(val state = playlistActionState) {
@@ -93,6 +93,18 @@ fun ArtistDetailScreen(
                 onConfirm = { name -> viewModel.onPlaylistCreateConfirm(name) }
             )
         }
+        is PlaylistActionState.SelectGroupForNewPlaylist -> {
+            SelectLibraryGroupDialog(
+                groups = state.groups,
+                onDismiss = { viewModel.onPlaylistActionDismiss() },
+                onGroupSelected = { groupId -> viewModel.onGroupSelectedForNewPlaylist(groupId) },
+                onCreateNewGroup = {
+                    // This is complex because it can be triggered from multiple viewmodels.
+                    // A direct call or a shared event bus might be better.
+                    // For now, this might require a temporary dismiss and re-trigger.
+                }
+            )
+        }
         is PlaylistActionState.Hidden -> {}
     }
 
@@ -118,11 +130,11 @@ fun ArtistDetailScreen(
     }
 
     uiState.groupToDelete?.let { group ->
-        ConfirmDeleteDialog(
-            itemType = "group",
-            itemName = group.name,
+        DeleteGroupWithOptionsDialog(
+            groupName = group.name,
             onDismiss = { viewModel.onEvent(ArtistDetailEvent.CancelDeleteGroup) },
-            onConfirm = { viewModel.onEvent(ArtistDetailEvent.ConfirmDeleteGroup) }
+            onConfirmDeleteOnly = { viewModel.onEvent(ArtistDetailEvent.ConfirmDeleteGroupOnly) },
+            onConfirmDeleteAll = { viewModel.onEvent(ArtistDetailEvent.ConfirmDeleteGroupAndSongs) }
         )
     }
 
@@ -183,16 +195,8 @@ fun ArtistDetailScreen(
                             val toggleText = if (uiState.artist?.downloadAutomatically == true) "Disable auto-download" else "Enable auto-download"
                             DropdownMenuItem(
                                 text = { Text(toggleText) },
-                                onClick = { viewModel.onEvent(ArtistDetailEvent.ToggleAutoDownload); showMenu = false }
+                                onClick = { viewModel.onEvent(ArtistDetailEvent.PrepareToToggleAutoDownload); showMenu = false }
                             )
-                            DropdownMenuItem(
-                                text = { Text("Remove all downloads") },
-                                onClick = {
-                                    viewModel.onEvent(ArtistDetailEvent.ShowRemoveDownloadsConfirm)
-                                    showMenu = false
-                                }
-                            )
-                            HorizontalDivider()
                             DropdownMenuItem(
                                 text = { Text("Create group") },
                                 onClick = {
@@ -239,7 +243,8 @@ fun ArtistDetailScreen(
                                 onShuffleClick = { viewModel.onEvent(ArtistDetailEvent.ShuffleGroup(item.data.group.groupId)) },
                                 onClick = { onGroupClick(item.data.group.groupId) },
                                 onEdit = { onEditGroup(item.data.group.groupId) },
-                                onDelete = { viewModel.onEvent(ArtistDetailEvent.PrepareToDeleteGroup(item.data.group)) }
+                                onDelete = { viewModel.onEvent(ArtistDetailEvent.PrepareToDeleteGroup(item.data.group)) },
+                                processUrls = { urls -> viewModel.thumbnailProcessor.process(urls) }
                             )
                         }
                         is ArtistDetailListItem.SongItem -> {
@@ -272,7 +277,8 @@ fun GroupHeaderItem(
     onShuffleClick: () -> Unit,
     onClick: () -> Unit,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    processUrls: suspend (List<String>) -> List<String>
 ) {
     var showMenu by remember { mutableStateOf(false) }
     ListItem(
@@ -294,6 +300,15 @@ fun GroupHeaderItem(
                     contentDescription = "Group",
                     modifier = Modifier.fillMaxSize(),
                     tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
+                )
+                CompositeThumbnailImage(
+                    urls = data.thumbnailUrls,
+                    contentDescription = "Thumbnails for ${data.group.name}",
+                    processUrls = processUrls,
+                    modifier = Modifier
+                        .fillMaxSize(0.65f)
+                        .padding(top = 4.dp)
+                        .clip(RoundedCornerShape(3.dp))
                 )
             }
         },

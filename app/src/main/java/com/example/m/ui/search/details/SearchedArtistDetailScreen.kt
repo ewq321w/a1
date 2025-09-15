@@ -18,14 +18,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
-import com.example.m.R
 import com.example.m.data.database.Song
 import com.example.m.managers.DialogState
 import com.example.m.managers.PlaylistActionState
@@ -38,7 +37,6 @@ import com.example.m.ui.search.SearchResultItem
 import com.example.m.ui.search.formatSubscriberCount
 import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
-import java.text.DecimalFormat
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -120,6 +118,14 @@ fun SearchedArtistDetailScreen(
                 onConfirm = { name -> viewModel.onPlaylistCreateConfirm(name) }
             )
         }
+        is PlaylistActionState.SelectGroupForNewPlaylist -> {
+            SelectLibraryGroupDialog(
+                groups = state.groups,
+                onDismiss = { viewModel.onPlaylistActionDismiss() },
+                onGroupSelected = { groupId -> viewModel.onGroupSelectedForNewPlaylist(groupId) },
+                onCreateNewGroup = { viewModel.onDialogRequestCreateGroup() }
+            )
+        }
         is PlaylistActionState.Hidden -> {}
     }
 
@@ -135,17 +141,23 @@ fun SearchedArtistDetailScreen(
     Scaffold { paddingValues ->
         when {
             uiState.isLoading -> {
-                Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
+                Box(modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
             }
             uiState.errorMessage != null -> {
-                Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
+                Box(modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues), contentAlignment = Alignment.Center) {
                     Text(uiState.errorMessage!!)
                 }
             }
             else -> {
-                LazyColumn(modifier = Modifier.padding(paddingValues).fillMaxSize()) {
+                LazyColumn(modifier = Modifier
+                    .padding(paddingValues)
+                    .fillMaxSize()) {
                     item {
                         ArtistHeader(
                             onBack = onBack,
@@ -160,7 +172,10 @@ fun SearchedArtistDetailScreen(
                         item {
                             Column {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 4.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp)
+                                        .padding(bottom = 4.dp),
                                     verticalAlignment = Alignment.Bottom,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
@@ -201,7 +216,10 @@ fun SearchedArtistDetailScreen(
                         item {
                             Column {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 4.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp)
+                                        .padding(bottom = 4.dp),
                                     verticalAlignment = Alignment.Bottom,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
@@ -244,29 +262,38 @@ fun SearchedArtistDetailScreen(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ArtistHeader(onBack: () -> Unit, bannerUrl: String?, avatarUrl: String?, artistName: String, subscriberCount: Long) {
+    val placeholderColor = MaterialTheme.colorScheme.surfaceVariant
     Column(modifier = Modifier.fillMaxWidth()) {
         Box {
             AsyncImage(
                 model = bannerUrl,
                 contentDescription = "Artist Banner",
-                modifier = Modifier.fillMaxWidth().aspectRatio(1060f / 175f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1060f / 175f),
                 contentScale = ContentScale.Crop,
-                error = painterResource(id = R.drawable.placeholder_gray),
-                placeholder = painterResource(id = R.drawable.placeholder_gray)
+                placeholder = remember { ColorPainter(placeholderColor) },
+                error = remember { ColorPainter(placeholderColor) }
             )
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start, verticalAlignment = Alignment.Top) {
-                IconButton(onClick = onBack, modifier = Modifier.padding(12.dp).background(Color.Black.copy(alpha = 0.5f), CircleShape)) {
+                IconButton(onClick = onBack, modifier = Modifier
+                    .padding(12.dp)
+                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)) {
                     Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
                 }
             }
         }
-        Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(modifier = Modifier
+            .fillMaxWidth()
+            .padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(
                 model = avatarUrl,
                 contentDescription = "Artist Avatar",
-                modifier = Modifier.size(70.dp).clip(CircleShape),
-                placeholder = painterResource(id = R.drawable.placeholder_gray),
-                error = painterResource(id = R.drawable.placeholder_gray)
+                modifier = Modifier
+                    .size(70.dp)
+                    .clip(CircleShape),
+                placeholder = remember { ColorPainter(placeholderColor) },
+                error = remember { ColorPainter(placeholderColor) }
             )
             Spacer(modifier = Modifier.width(16.dp))
             Column(verticalArrangement = Arrangement.Center) {

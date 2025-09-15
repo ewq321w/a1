@@ -111,7 +111,7 @@ fun SearchScreen(
             val thumbnailUrl = (item as? Song)?.thumbnailUrl ?: (item as? StreamInfoItem)?.getHighQualityThumbnailUrl() ?: ""
 
             ModalBottomSheet(
-                onDismissRequest = { viewModel.onPlaylistActionEvent(PlaylistActionState.Hidden) },
+                onDismissRequest = { viewModel.onPlaylistActionDismiss() },
                 sheetState = sheetState
             ) {
                 AddToPlaylistSheet(
@@ -120,7 +120,7 @@ fun SearchScreen(
                     songThumbnailUrl = thumbnailUrl,
                     playlists = state.playlists,
                     onPlaylistSelected = { playlistId -> viewModel.onPlaylistSelected(playlistId) },
-                    onCreateNewPlaylist = { viewModel.onPlaylistActionEvent(PlaylistActionState.CreatePlaylist(null)) }
+                    onCreateNewPlaylist = { viewModel.onPrepareToCreatePlaylist() }
                 )
             }
         }
@@ -129,8 +129,16 @@ fun SearchScreen(
                 title = "New Playlist",
                 label = "Playlist name",
                 confirmButtonText = "Create",
-                onDismiss = { viewModel.onPlaylistActionEvent(PlaylistActionState.Hidden) },
+                onDismiss = { viewModel.onPlaylistActionDismiss() },
                 onConfirm = { name -> viewModel.onPlaylistCreateConfirm(name) }
+            )
+        }
+        is PlaylistActionState.SelectGroupForNewPlaylist -> {
+            SelectLibraryGroupDialog(
+                groups = state.groups,
+                onDismiss = { viewModel.onPlaylistActionDismiss() },
+                onGroupSelected = { groupId -> viewModel.onGroupSelectedForNewPlaylist(groupId) },
+                onCreateNewGroup = { viewModel.onDialogRequestCreateGroup() }
             )
         }
         is PlaylistActionState.Hidden -> {}
@@ -331,16 +339,11 @@ private fun DetailedView(
                 SearchCategory.ALBUMS, SearchCategory.PLAYLISTS -> {
                     val items = if (category == SearchCategory.ALBUMS) uiState.albums else uiState.playlists
                     itemsIndexed(items, key = { index, item -> (item.albumInfo.url ?: "") + index }) { _, item ->
-                        Row(modifier = Modifier.fillMaxWidth().clickable { onAlbumClicked(item) }.height(72.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            AsyncImage(model = item.albumInfo.getThumbnail(), imageLoader = imageLoader, contentDescription = item.albumInfo.name, modifier = Modifier.size(54.dp).aspectRatio(1f), contentScale = ContentScale.Crop)
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(text = item.albumInfo.name ?: "", maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
-                                if (item.albumInfo.uploaderName != null) {
-                                    Text(text = item.albumInfo.uploaderName!!, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
-                        }
+                        AlbumOrPlaylistItem(
+                            item = item.albumInfo,
+                            imageLoader = imageLoader,
+                            onClicked = { onAlbumClicked(item) }
+                        )
                     }
                 }
                 SearchCategory.ARTISTS, SearchCategory.CHANNELS -> {

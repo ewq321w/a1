@@ -19,6 +19,7 @@ import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
 import org.schabi.newpipe.extractor.search.SearchInfo
 import org.schabi.newpipe.extractor.stream.StreamInfo
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
+import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -64,7 +65,7 @@ class YoutubeRepository @Inject constructor() {
                 val playlistInfo = PlaylistInfo.getInfo(service, playlistUrl)
                 PlaylistPage(playlistInfo, playlistInfo.nextPage)
             } catch (e: Exception) {
-                e.printStackTrace()
+                Timber.e(e, "Failed to get playlist details for URL: $playlistUrl")
                 null
             }
         }
@@ -78,7 +79,7 @@ class YoutubeRepository @Inject constructor() {
                 val items = page.items.filterIsInstance<StreamInfoItem>()
                 MorePlaylistItemsResult(items, page.nextPage)
             } catch (e: Exception) {
-                e.printStackTrace()
+                Timber.e(e, "Failed to get more playlist items for URL: $playlistUrl")
                 null
             }
         }
@@ -106,7 +107,7 @@ class YoutubeRepository @Inject constructor() {
                 val searchInfo = SearchInfo.getInfo(service, queryHandler)
                 SearchPage(searchInfo.relatedItems, searchInfo.nextPage, queryHandler)
             } catch (e: Exception) {
-                e.printStackTrace()
+                Timber.e(e, "Search failed for query: $query")
                 null
             }
         }
@@ -120,7 +121,7 @@ class YoutubeRepository @Inject constructor() {
             try {
                 SearchInfo.getMoreItems(ServiceList.YouTube, queryHandler, page)
             } catch (e: Exception) {
-                e.printStackTrace()
+                Timber.e(e, "Failed to get more search results.")
                 null
             }
         }
@@ -136,7 +137,7 @@ class YoutubeRepository @Inject constructor() {
                 streamInfoCache.put(url, result)
                 result
             } catch (e: Exception) {
-                e.printStackTrace()
+                Timber.e(e, "Failed to get stream info for URL: $url")
                 null
             }
         }
@@ -147,7 +148,7 @@ class YoutubeRepository @Inject constructor() {
             try {
                 ChannelTabInfo.getMoreItems(ServiceList.YouTube, handler, nextPage)
             } catch (e: Exception) {
-                e.printStackTrace()
+                Timber.e(e, "Failed to get more artist songs.")
                 null
             }
         }
@@ -166,7 +167,7 @@ class YoutubeRepository @Inject constructor() {
                 songs = tabInfo.relatedItems.filterIsInstance<StreamInfoItem>()
                 songsNextPage = tabInfo.nextPage
                 songsTabHandler = tracksTabHandler
-            } catch (e: Exception) { e.printStackTrace() }
+            } catch (e: Exception) { Timber.e(e) }
         }
 
         if (songs.isEmpty()) {
@@ -177,7 +178,7 @@ class YoutubeRepository @Inject constructor() {
                     songs = tabInfo.relatedItems.filterIsInstance<StreamInfoItem>()
                     songsNextPage = tabInfo.nextPage
                     songsTabHandler = videosTabHandler
-                } catch (e: Exception) { e.printStackTrace() }
+                } catch (e: Exception) { Timber.e(e) }
             }
         }
         return Triple(songs, songsNextPage, songsTabHandler)
@@ -252,7 +253,7 @@ class YoutubeRepository @Inject constructor() {
                             }
                         }
                     } catch (e: Exception) {
-                        e.printStackTrace()
+                        Timber.e(e)
                     }
                 }
 
@@ -279,7 +280,7 @@ class YoutubeRepository @Inject constructor() {
                 ArtistDetails(channelInfo, songs, albums, songsNextPage, null)
 
             } catch (e: Exception) {
-                e.printStackTrace()
+                Timber.e(e, "Failed to get music artist details for URL: $channelUrl")
                 null
             }
         }
@@ -307,12 +308,12 @@ class YoutubeRepository @Inject constructor() {
                             nextPage = page.nextPage
                         }
                         playlists = playlistItems
-                    } catch (e: Exception) { e.printStackTrace() }
+                    } catch (e: Exception) { Timber.e(e) }
                 }
 
                 ArtistDetails(channelInfo, songs, playlists, songsNextPage, songsTabHandler)
             } catch (e: Exception) {
-                e.printStackTrace()
+                Timber.e(e, "Failed to get video creator details for URL: $channelUrl")
                 null
             }
         }

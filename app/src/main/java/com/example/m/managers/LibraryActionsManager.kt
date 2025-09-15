@@ -33,7 +33,6 @@ sealed interface DialogState {
 @Singleton
 class LibraryActionsManager @Inject constructor(
     private val libraryRepository: LibraryRepository,
-    private val playlistManager: PlaylistManager,
     private val preferencesManager: PreferencesManager,
     private val libraryGroupDao: LibraryGroupDao,
     private val songDao: SongDao,
@@ -69,7 +68,6 @@ class LibraryActionsManager @Inject constructor(
         scope.launch {
             proceedWithAction(groupId)
         }
-        dismissDialog()
     }
 
     fun onCreateGroup(groupName: String) {
@@ -78,7 +76,6 @@ class LibraryActionsManager @Inject constructor(
             preferencesManager.activeLibraryGroupId = newGroupId
             proceedWithAction(newGroupId)
         }
-        dismissDialog()
     }
 
     fun requestCreateGroup() {
@@ -104,7 +101,7 @@ class LibraryActionsManager @Inject constructor(
 
     private suspend fun proceedWithAction(groupId: Long) {
         val item = pendingItem ?: return
-        val song = playlistManager.getSongForItem(item, groupId)
+        val song = libraryRepository.getOrCreateSongFromItem(item, groupId)
         if (song.isInLibrary) {
             dismissDialog()
             return

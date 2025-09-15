@@ -25,7 +25,7 @@ class PlaylistManager @Inject constructor(
 
     fun addItemToPlaylist(playlistId: Long, item: Any) {
         scope.launch {
-            val song = getSongForItem(item, null)
+            val song = libraryRepository.getOrCreateSongFromItem(item, null)
             addSongToPlaylistInternal(song, playlistId)
         }
     }
@@ -33,7 +33,7 @@ class PlaylistManager @Inject constructor(
     fun createPlaylistAndAddItem(playlistName: String, item: Any, groupId: Long) {
         scope.launch {
             val newPlaylistId = playlistDao.insertPlaylist(Playlist(name = playlistName.trim(), libraryGroupId = groupId))
-            val song = getSongForItem(item, groupId)
+            val song = libraryRepository.getOrCreateSongFromItem(item, groupId)
             addSongToPlaylistInternal(song, newPlaylistId)
         }
     }
@@ -59,33 +59,6 @@ class PlaylistManager @Inject constructor(
         val playlist = playlistDao.getPlaylistById(playlistId)
         if (playlist?.downloadAutomatically == true) {
             libraryRepository.startDownload(song)
-        }
-    }
-
-    suspend fun getSongForItem(item: Any, libraryGroupId: Long?): Song {
-        return when (item) {
-            is Song -> item
-            is StreamInfoItem -> {
-                val normalizedUrl = item.url?.replace("music.youtube.com", "www.youtube.com")
-                    ?: item.url ?: ""
-                songDao.getSongByUrl(normalizedUrl) ?: run {
-                    val videoId = item.url?.substringAfter("v=")?.substringBefore('&')
-                    val newSong = Song(
-                        videoId = videoId,
-                        youtubeUrl = normalizedUrl,
-                        title = item.name ?: "Unknown Title",
-                        artist = item.uploaderName ?: "Unknown Artist",
-                        duration = item.duration,
-                        thumbnailUrl = getHighQualityThumbnailUrl(videoId),
-                        localFilePath = null,
-                        libraryGroupId = libraryGroupId
-                    )
-                    val finalSong = songDao.upsertSong(newSong)
-                    libraryRepository.linkSongToArtist(finalSong)
-                    finalSong
-                }
-            }
-            else -> throw IllegalArgumentException("Unsupported item type for playlist addition")
         }
     }
 

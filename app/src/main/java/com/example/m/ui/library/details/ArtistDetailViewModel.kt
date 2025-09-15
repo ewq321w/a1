@@ -11,8 +11,8 @@ import com.example.m.data.repository.LibraryRepository
 import com.example.m.managers.PlaylistActionState
 import com.example.m.managers.PlaylistActionsManager
 import com.example.m.managers.PlaylistManager
+import com.example.m.managers.ThumbnailProcessor
 import com.example.m.playback.MusicServiceConnection
-import com.example.m.ui.library.SongSortOrder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -46,7 +46,7 @@ data class ArtistDetailUiState(
     val pendingSongForNewGroup: Song? = null,
     val groupToRename: ArtistSongGroup? = null,
     val groupToDelete: ArtistSongGroup? = null,
-    val showRemoveDownloadsConfirm: Boolean = false
+    val showConfirmRemoveDownloadsOnDisableDialog: Boolean = false
 )
 
 sealed interface ArtistDetailEvent {
@@ -58,10 +58,9 @@ sealed interface ArtistDetailEvent {
     object ShuffleUngrouped : ArtistDetailEvent
     data class PlayGroup(val groupId: Long) : ArtistDetailEvent
     data class ShuffleGroup(val groupId: Long) : ArtistDetailEvent
-    object ToggleAutoDownload : ArtistDetailEvent
-    object ShowRemoveDownloadsConfirm : ArtistDetailEvent
-    object HideRemoveDownloadsConfirm : ArtistDetailEvent
-    object ConfirmRemoveDownloads : ArtistDetailEvent
+    object PrepareToToggleAutoDownload : ArtistDetailEvent
+    object DismissDisableAutoDownloadDialog : ArtistDetailEvent
+    data class DisableAutoDownload(val removeFiles: Boolean) : ArtistDetailEvent
     data class SetSortOrder(val order: ArtistSortOrder) : ArtistDetailEvent
     data class SetItemForDeletion(val song: Song) : ArtistDetailEvent
     object ClearItemForDeletion : ArtistDetailEvent
@@ -79,7 +78,8 @@ sealed interface ArtistDetailEvent {
     data class ConfirmRenameGroup(val newName: String) : ArtistDetailEvent
     data class PrepareToDeleteGroup(val group: ArtistSongGroup) : ArtistDetailEvent
     object CancelDeleteGroup : ArtistDetailEvent
-    object ConfirmDeleteGroup : ArtistDetailEvent
+    object ConfirmDeleteGroupOnly : ArtistDetailEvent
+    object ConfirmDeleteGroupAndSongs : ArtistDetailEvent
     data class PlayNext(val song: Song) : ArtistDetailEvent
     data class AddToQueue(val song: Song) : ArtistDetailEvent
     data class ShuffleSong(val song: Song) : ArtistDetailEvent
@@ -94,8 +94,10 @@ class ArtistDetailViewModel @Inject constructor(
     private val musicServiceConnection: MusicServiceConnection,
     private val songDao: SongDao,
     private val artistDao: ArtistDao,
+    private val playlistManager: PlaylistManager,
     private val playlistActionsManager: PlaylistActionsManager,
-    private val preferencesManager: PreferencesManager
+    private val preferencesManager: PreferencesManager,
+    val thumbnailProcessor: ThumbnailProcessor
 ) : ViewModel() {
     private val artistId: Long = checkNotNull(savedStateHandle["artistId"])
 
@@ -184,10 +186,9 @@ class ArtistDetailViewModel @Inject constructor(
             is ArtistDetailEvent.ShuffleUngrouped -> shuffleUngrouped()
             is ArtistDetailEvent.PlayGroup -> playGroup(event.groupId)
             is ArtistDetailEvent.ShuffleGroup -> shuffleGroup(event.groupId)
-            is ArtistDetailEvent.ToggleAutoDownload -> toggleAutoDownload()
-            is ArtistDetailEvent.ShowRemoveDownloadsConfirm -> _uiState.update { it.copy(showRemoveDownloadsConfirm = true) }
-            is ArtistDetailEvent.HideRemoveDownloadsConfirm -> _uiState.update { it.copy(showRemoveDownloadsConfirm = false) }
-            is ArtistDetailEvent.ConfirmRemoveDownloads -> removeDownloadsForArtist()
+            is ArtistDetailEvent.PrepareToToggleAutoDownload -> prepareToToggleAutoDownload()
+            is ArtistDetailEvent.DismissDisableAutoDownloadDialog -> _uiState.update { it.copy(showConfirmRemoveDownloadsOnDisableDialog = false) }
+            is ArtistDetailEvent.DisableAutoDownload -> disableAutoDownload(event.removeFiles)
             is ArtistDetailEvent.SetSortOrder -> setSortOrder(event.order)
             is ArtistDetailEvent.SetItemForDeletion -> _uiState.update { it.copy(itemPendingDeletion = event.song) }
             is ArtistDetailEvent.ClearItemForDeletion -> _uiState.update { it.copy(itemPendingDeletion = null) }
@@ -205,7 +206,8 @@ class ArtistDetailViewModel @Inject constructor(
             is ArtistDetailEvent.ConfirmRenameGroup -> confirmRenameGroup(event.newName)
             is ArtistDetailEvent.PrepareToDeleteGroup -> _uiState.update { it.copy(groupToDelete = event.group) }
             is ArtistDetailEvent.CancelDeleteGroup -> _uiState.update { it.copy(groupToDelete = null) }
-            is ArtistDetailEvent.ConfirmDeleteGroup -> confirmDeleteGroup()
+            is ArtistDetailEvent.ConfirmDeleteGroupOnly -> confirmDeleteGroupOnly()
+            is ArtistDetailEvent.ConfirmDeleteGroupAndSongs -> confirmDeleteGroupAndSongs()
             is ArtistDetailEvent.PlayNext -> musicServiceConnection.playNext(event.song)
             is ArtistDetailEvent.AddToQueue -> musicServiceConnection.addToQueue(event.song)
             is ArtistDetailEvent.ShuffleSong -> onShuffleSong(event.song)
@@ -217,6 +219,7 @@ class ArtistDetailViewModel @Inject constructor(
     fun onPlaylistSelected(playlistId: Long) = playlistActionsManager.onPlaylistSelected(playlistId)
     fun onPlaylistActionDismiss() = playlistActionsManager.dismiss()
     fun onPrepareToCreatePlaylist() = playlistActionsManager.prepareToCreatePlaylist()
+    fun onGroupSelectedForNewPlaylist(groupId: Long) = playlistActionsManager.onGroupSelectedForNewPlaylist(groupId)
 
     private fun onSongSelected(clickedSong: Song) {
         val ungroupedSongs = _uiState.value.displayList
@@ -304,27 +307,31 @@ class ArtistDetailViewModel @Inject constructor(
         }
     }
 
-    private fun toggleAutoDownload() {
-        _uiState.value.artist?.let { artist ->
+    private fun prepareToToggleAutoDownload() {
+        val artist = _uiState.value.artist ?: return
+        if (artist.downloadAutomatically) {
+            // If currently enabled, show dialog to confirm disabling.
+            _uiState.update { it.copy(showConfirmRemoveDownloadsOnDisableDialog = true) }
+        } else {
+            // If currently disabled, just enable it and start downloading.
             viewModelScope.launch(Dispatchers.IO) {
-                val isEnabling = !artist.downloadAutomatically
-                artistDao.updateArtist(artist.copy(downloadAutomatically = isEnabling))
-                if (isEnabling) {
-                    val songsToDownload = _uiState.value.displayList
-                        .mapNotNull { (it as? ArtistDetailListItem.SongItem)?.song }
-                    songsToDownload.forEach { libraryRepository.startDownload(it) }
-                }
+                artistDao.updateArtist(artist.copy(downloadAutomatically = true))
+                val songsToDownload = _uiState.value.displayList
+                    .mapNotNull { (it as? ArtistDetailListItem.SongItem)?.song }
+                songsToDownload.forEach { libraryRepository.startDownload(it) }
             }
         }
     }
 
-    private fun removeDownloadsForArtist() {
-        _uiState.value.artist?.let { artist ->
-            viewModelScope.launch(Dispatchers.IO) {
+    private fun disableAutoDownload(removeFiles: Boolean) {
+        val artist = _uiState.value.artist ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            artistDao.updateArtist(artist.copy(downloadAutomatically = false))
+            if (removeFiles) {
                 libraryRepository.removeDownloadsForArtist(artist)
             }
         }
-        _uiState.update { it.copy(showRemoveDownloadsConfirm = false) }
+        _uiState.update { it.copy(showConfirmRemoveDownloadsOnDisableDialog = false) }
     }
 
     private fun setSortOrder(order: ArtistSortOrder) {
@@ -369,10 +376,19 @@ class ArtistDetailViewModel @Inject constructor(
         _uiState.update { it.copy(groupToRename = null) }
     }
 
-    private fun confirmDeleteGroup() {
+    private fun confirmDeleteGroupOnly() {
         _uiState.value.groupToDelete?.let { group ->
             viewModelScope.launch {
                 libraryRepository.deleteArtistSongGroup(group.groupId)
+            }
+        }
+        _uiState.update { it.copy(groupToDelete = null) }
+    }
+
+    private fun confirmDeleteGroupAndSongs() {
+        _uiState.value.groupToDelete?.let { group ->
+            viewModelScope.launch {
+                libraryRepository.deleteArtistSongGroupAndSongs(group.groupId)
             }
         }
         _uiState.update { it.copy(groupToDelete = null) }

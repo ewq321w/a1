@@ -36,7 +36,6 @@ fun LibraryScreen(
     val mainViewModel: MainViewModel = hiltViewModel(activity)
     val libraryViewModel: LibraryViewModel = hiltViewModel()
 
-    // Each tab now has its own ViewModel, retrieved here
     val playlistsViewModel: PlaylistsViewModel = hiltViewModel()
     val artistsViewModel: ArtistsViewModel = hiltViewModel()
     val songsViewModel: SongsViewModel = hiltViewModel()
@@ -44,14 +43,17 @@ fun LibraryScreen(
     val uiState by libraryViewModel.uiState.collectAsState()
     val isDoingMaintenance by mainViewModel.isDoingMaintenance
 
-    // States from the new, smaller ViewModels are collected here
     val songsDialogState by songsViewModel.dialogState.collectAsState()
-    val songsPlaylistActionState by songsViewModel.playlistActionState.collectAsState()
     val artistsPlaylistActionState by artistsViewModel.playlistActionState.collectAsState()
+    val songsPlaylistActionState by songsViewModel.playlistActionState.collectAsState()
+    val playlistsPlaylistActionState by playlistsViewModel.playlistActionState.collectAsState()
 
-    // Since multiple ViewModels can now trigger dialogs, we check them in order of priority.
     val finalDialogState = songsDialogState
-    val finalPlaylistActionState = if (artistsPlaylistActionState is PlaylistActionState.Hidden) songsPlaylistActionState else artistsPlaylistActionState
+    val finalPlaylistActionState = when {
+        artistsPlaylistActionState !is PlaylistActionState.Hidden -> artistsPlaylistActionState
+        songsPlaylistActionState !is PlaylistActionState.Hidden -> songsPlaylistActionState
+        else -> playlistsPlaylistActionState
+    }
 
     LaunchedEffect(Unit) {
         songsViewModel.navigateToArtist.collect { artistId ->
@@ -138,6 +140,17 @@ fun LibraryScreen(
                 confirmButtonText = "Create",
                 onDismiss = { artistsViewModel.onPlaylistActionDismiss() },
                 onConfirm = { name -> artistsViewModel.onCreatePlaylist(name) }
+            )
+        }
+        is PlaylistActionState.SelectGroupForNewPlaylist -> {
+            SelectLibraryGroupDialog(
+                groups = state.groups,
+                onDismiss = { artistsViewModel.onPlaylistActionDismiss() },
+                onGroupSelected = { groupId -> artistsViewModel.onGroupSelectedForNewPlaylist(groupId) },
+                onCreateNewGroup = {
+                    artistsViewModel.onPlaylistActionDismiss()
+                    songsViewModel.onDialogRequestCreateGroup()
+                }
             )
         }
         is PlaylistActionState.Hidden -> {}

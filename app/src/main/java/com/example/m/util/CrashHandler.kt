@@ -3,6 +3,7 @@ package com.example.m.util
 import android.content.Context
 import android.os.Build
 import android.os.Environment
+import timber.log.Timber
 import java.io.File
 import java.io.FileWriter
 import java.io.PrintWriter
@@ -54,7 +55,7 @@ class CrashHandler(private val context: Context) : Thread.UncaughtExceptionHandl
             writer.close()
             printWriter.close()
         } catch (e: Exception) {
-            e.printStackTrace()
+            Timber.e(e, "Failed to write crash log to file.")
         }
 
         // Let the default handler do its thing before exiting.

@@ -12,6 +12,7 @@ import com.example.m.data.repository.AutoDownloadConflict
 import com.example.m.data.repository.LibraryRepository
 import com.example.m.managers.PlaylistActionState
 import com.example.m.managers.PlaylistActionsManager
+import com.example.m.managers.PlaylistManager
 import com.example.m.playback.MusicServiceConnection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -30,7 +31,8 @@ enum class PlaylistSortOrder {
 data class PlaylistDetailUiState(
     val playlist: Playlist? = null,
     val songs: List<Song> = emptyList(),
-    val sortOrder: PlaylistSortOrder = PlaylistSortOrder.CUSTOM
+    val sortOrder: PlaylistSortOrder = PlaylistSortOrder.CUSTOM,
+    val showConfirmRemoveDownloadsOnDisableDialog: Boolean = false
 )
 
 sealed interface PlaylistDetailEvent {
@@ -39,8 +41,9 @@ sealed interface PlaylistDetailEvent {
     data class SetSortOrder(val order: PlaylistSortOrder) : PlaylistDetailEvent
     object ShufflePlaylist : PlaylistDetailEvent
     object DeletePlaylist : PlaylistDetailEvent
-    data class AutoDownloadToggled(val enable: Boolean) : PlaylistDetailEvent
-    object RemoveAllDownloads : PlaylistDetailEvent
+    object PrepareToToggleAutoDownload : PlaylistDetailEvent
+    object DismissDisableAutoDownloadDialog : PlaylistDetailEvent
+    data class DisableAutoDownload(val removeFiles: Boolean) : PlaylistDetailEvent
     data class DownloadSong(val song: Song) : PlaylistDetailEvent
     data class DeleteDownload(val song: Song) : PlaylistDetailEvent
     data class AddToPlaylist(val item: Any) : PlaylistDetailEvent
@@ -114,8 +117,9 @@ class PlaylistDetailViewModel @Inject constructor(
             is PlaylistDetailEvent.SetSortOrder -> setSortOrder(event.order)
             is PlaylistDetailEvent.ShufflePlaylist -> shufflePlaylist()
             is PlaylistDetailEvent.DeletePlaylist -> deletePlaylist()
-            is PlaylistDetailEvent.AutoDownloadToggled -> onAutoDownloadToggled(event.enable)
-            is PlaylistDetailEvent.RemoveAllDownloads -> removeDownloadsForPlaylist()
+            is PlaylistDetailEvent.PrepareToToggleAutoDownload -> prepareToToggleAutoDownload()
+            is PlaylistDetailEvent.DismissDisableAutoDownloadDialog -> _uiState.update { it.copy(showConfirmRemoveDownloadsOnDisableDialog = false) }
+            is PlaylistDetailEvent.DisableAutoDownload -> disableAutoDownload(event.removeFiles)
             is PlaylistDetailEvent.DownloadSong -> viewModelScope.launch { libraryRepository.startDownload(event.song) }
             is PlaylistDetailEvent.DeleteDownload -> deleteSongDownload(event.song)
             is PlaylistDetailEvent.AddToPlaylist -> playlistActionsManager.selectItem(event.item)
@@ -130,6 +134,7 @@ class PlaylistDetailViewModel @Inject constructor(
     fun onPlaylistSelected(playlistId: Long) = playlistActionsManager.onPlaylistSelected(playlistId)
     fun onPlaylistActionDismiss() = playlistActionsManager.dismiss()
     fun onPrepareToCreatePlaylist() = playlistActionsManager.prepareToCreatePlaylist()
+    fun onGroupSelectedForNewPlaylist(groupId: Long) = playlistActionsManager.onGroupSelectedForNewPlaylist(groupId)
 
     private fun onSongSelected(selectedIndex: Int) {
         val currentSongs = _uiState.value.songs
@@ -181,39 +186,28 @@ class PlaylistDetailViewModel @Inject constructor(
         }
     }
 
-    private fun onAutoDownloadToggled(isToggledOn: Boolean) {
-        val currentPlaylist = _uiState.value.playlist ?: return
-        viewModelScope.launch(Dispatchers.IO) {
-            playlistDao.updatePlaylist(currentPlaylist.copy(downloadAutomatically = isToggledOn))
-            if (isToggledOn) {
-                _uiState.value.songs
-                    .filter { it.localFilePath == null || !File(it.localFilePath!!).exists() }
-                    .forEach { song -> libraryRepository.startDownload(song) }
+    private fun prepareToToggleAutoDownload() {
+        val playlist = _uiState.value.playlist ?: return
+        if (playlist.downloadAutomatically) {
+            _uiState.update { it.copy(showConfirmRemoveDownloadsOnDisableDialog = true) }
+        } else {
+            viewModelScope.launch(Dispatchers.IO) {
+                playlistDao.updatePlaylist(playlist.copy(downloadAutomatically = true))
+                _uiState.value.songs.forEach { song -> libraryRepository.startDownload(song) }
             }
         }
     }
 
-    private fun removeDownloadsForPlaylist() {
-        val currentPlaylist = _uiState.value.playlist ?: return
+    private fun disableAutoDownload(removeFiles: Boolean) {
+        val playlist = _uiState.value.playlist ?: return
+        val playlistWithSongs = PlaylistWithSongs(playlist, _uiState.value.songs)
         viewModelScope.launch(Dispatchers.IO) {
-            if (currentPlaylist.downloadAutomatically) {
-                playlistDao.updatePlaylist(currentPlaylist.copy(downloadAutomatically = false))
-            }
-            _uiState.value.songs.forEach { song ->
-                val artist = artistDao.getArtistByName(song.artist)
-                if (artist?.downloadAutomatically == true) return@forEach
-                if (song.localFilePath != null) {
-                    try {
-                        val uri = song.localFilePath!!.toUri()
-                        if (uri.scheme == "content") context.contentResolver.delete(uri, null, null)
-                        else File(song.localFilePath!!).delete()
-                        songDao.updateSong(song.copy(localFilePath = null))
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }
+            playlistDao.updatePlaylist(playlist.copy(downloadAutomatically = false))
+            if (removeFiles) {
+                libraryRepository.removeDownloadsForPlaylist(playlistWithSongs)
             }
         }
+        _uiState.update { it.copy(showConfirmRemoveDownloadsOnDisableDialog = false) }
     }
 
     private fun onShuffleSong(song: Song) {

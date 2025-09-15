@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import javax.inject.Inject
@@ -88,7 +89,7 @@ class ThumbnailProcessor @Inject constructor(
             squaredBitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
             stream.toByteArray()
         } catch (e: Exception) {
-            e.printStackTrace()
+            Timber.e(e, "Failed to crop square bitmap for URL: $imageUrl")
             null
         }
     }

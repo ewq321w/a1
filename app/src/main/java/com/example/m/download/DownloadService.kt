@@ -13,6 +13,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import okhttp3.OkHttpClient
 import okhttp3.Request as OkHttpRequest
+import timber.log.Timber
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
@@ -167,7 +168,7 @@ class DownloadService : Service() {
                 }
 
             } catch (e: Exception) {
-                e.printStackTrace()
+                Timber.e(e, "Download attempt $attempt for song '${song.title}' failed.")
                 if (attempt < MAX_RETRIES) {
                     delay(RETRY_DELAY_MS)
                 }
