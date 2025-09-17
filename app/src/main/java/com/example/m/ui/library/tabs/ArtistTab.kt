@@ -177,7 +177,7 @@ fun ArtistItem(
         trailingContent = {
             Box {
                 IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More options") }
-                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                TranslucentDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(text = { Text("Play") }, onClick = { onPlay(); showMenu = false })
                     DropdownMenuItem(text = { Text("Shuffle All") }, onClick = { onShuffle(); showMenu = false })
                     DropdownMenuItem(text = { Text("Shuffle Ungrouped") }, onClick = { onShuffleUngrouped(); showMenu = false })
@@ -228,7 +228,7 @@ fun GroupItem(
         trailingContent = {
             Box {
                 IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More options") }
-                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                TranslucentDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(text = { Text("Play") }, onClick = { onPlayClick(); showMenu = false })
                     DropdownMenuItem(text = { Text("Shuffle") }, onClick = { onShuffleClick(); showMenu = false })
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))

@@ -42,36 +42,11 @@ private val DarkColorScheme = darkColorScheme(
     onTertiaryContainer = DarkOnSurfaceVariant
 )
 
-private val LightColorScheme = lightColorScheme(
-    primary = Primary,       // Main accent color
-    onPrimary = LightOnPrimary, // Text/icons on primary color
-    secondary = LightSurface,   // Secondary containers
-    onSecondary = LightOnSurface, // Text/icons on secondary color
-    tertiary = LightSurfaceVariant, // Tertiary elements
-    onTertiary = LightOnSurfaceVariant, // Text/icons on tertiary color
 
-    background = LightBackground, // Main screen background
-    onBackground = LightOnBackground, // Text/icons on main background
-    surface = LightSurface,     // Default surface for cards, dialogs, app bars
-    onSurface = LightOnSurface, // Text/icons on surface
-    surfaceVariant = LightSurfaceVariant, // Used for MiniPlayer, NavigationBar
-    onSurfaceVariant = LightOnSurfaceVariant, // Text/icons on surface variant
-
-    error = ErrorRed,           // Error state color
-    onError = OnErrorWhite,     // Text/icons on error color
-    outline = LightOutline,      // For outlined elements, disabled states
-
-    primaryContainer = LightRedContainer,
-    onPrimaryContainer = LightOnRedContainer,
-    secondaryContainer = LightSurfaceVariant,
-    onSecondaryContainer = LightOnSurfaceVariant,
-    tertiaryContainer = LightSurfaceVariant,
-    onTertiaryContainer = LightOnSurfaceVariant
-)
 
 @Composable
 fun MTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = true,
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
@@ -81,7 +56,7 @@ fun MTheme(
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
         darkTheme -> DarkColorScheme
-        else -> LightColorScheme
+        else -> DarkColorScheme
     }
 
     val view = LocalView.current

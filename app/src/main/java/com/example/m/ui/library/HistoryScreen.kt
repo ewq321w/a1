@@ -1,6 +1,7 @@
 // file: com/example/m/ui/library/HistoryScreen.kt
 package com.example.m.ui.library
 
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -12,13 +13,18 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.m.data.database.Song
 import com.example.m.managers.DialogState
 import com.example.m.managers.PlaylistActionState
+import com.example.m.ui.common.GradientBackground
 import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.library.components.*
+import com.example.m.ui.main.MainViewModel
 import kotlinx.coroutines.flow.collectLatest
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
@@ -37,6 +43,11 @@ fun HistoryScreen(
     var clearActionPending by remember { mutableStateOf<ClearAction?>(null) }
     val dialogState by viewModel.dialogState.collectAsState()
     val playlistActionState by viewModel.playlistActionState.collectAsState()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(rememberTopAppBarState())
+    val activity = LocalContext.current as ComponentActivity
+    val mainViewModel: MainViewModel = hiltViewModel(activity)
+    val (gradientColor1, gradientColor2) = mainViewModel.randomGradientColors.value
+
 
     LaunchedEffect(Unit) {
         viewModel.navigateToArtist.collect { artistId ->
@@ -156,58 +167,68 @@ fun HistoryScreen(
         )
     }
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            TopAppBar(
-                title = { Text("History") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    var showMenu by remember { mutableStateOf(false) }
-                    Box {
-                        IconButton(onClick = { showMenu = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "More options")
+    GradientBackground(gradientColor1 = gradientColor1, gradientColor2 = gradientColor2) {
+        Scaffold(
+            modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            topBar = {
+                TopAppBar(
+                    title = { Text("History") },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
-                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                            DropdownMenuItem(text = { Text("Keep last 50 plays") }, onClick = { clearActionPending = ClearAction.KEEP_50; showMenu = false })
-                            DropdownMenuItem(text = { Text("Keep last 100 plays") }, onClick = { clearActionPending = ClearAction.KEEP_100; showMenu = false })
-                            HorizontalDivider()
-                            DropdownMenuItem(text = { Text("Clear all history") }, onClick = { clearActionPending = ClearAction.ALL; showMenu = false })
+                    },
+                    actions = {
+                        var showMenu by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton(onClick = { showMenu = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                            }
+                            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                                DropdownMenuItem(text = { Text("Keep last 50 plays") }, onClick = { clearActionPending = ClearAction.KEEP_50; showMenu = false })
+                                DropdownMenuItem(text = { Text("Keep last 100 plays") }, onClick = { clearActionPending = ClearAction.KEEP_100; showMenu = false })
+                                HorizontalDivider()
+                                DropdownMenuItem(text = { Text("Clear all history") }, onClick = { clearActionPending = ClearAction.ALL; showMenu = false })
+                            }
                         }
-                    }
-                },
-                windowInsets = TopAppBarDefaults.windowInsets
-            )
-        },
-        containerColor = MaterialTheme.colorScheme.background
-    ) { innerScaffoldPadding ->
-        if (uiState.history.isEmpty()) {
-            EmptyStateMessage(message = "Your listening history will appear here.")
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .padding(innerScaffoldPadding)
-                    .fillMaxSize()
-            ) {
-                itemsIndexed(uiState.history, key = { _, item -> item.logId }) { index, item ->
-                    val song = item.song
-                    SongItem(
-                        song = song,
-                        onClick = { viewModel.onEvent(HistoryEvent.SongSelected(index)) },
-                        onAddToPlaylistClick = { viewModel.onEvent(HistoryEvent.AddToPlaylist(song)) },
-                        onPlayNextClick = { viewModel.onEvent(HistoryEvent.PlayNext(song)) },
-                        onAddToQueueClick = { viewModel.onEvent(HistoryEvent.AddToQueue(song)) },
-                        onGoToArtistClick = { viewModel.onEvent(HistoryEvent.GoToArtist(song)) },
-                        onShuffleClick = { viewModel.onEvent(HistoryEvent.Shuffle(song)) },
-                        onAddToLibraryClick = { viewModel.onEvent(HistoryEvent.AddToLibrary(song)) },
-                        onDownloadClick = { viewModel.onEvent(HistoryEvent.Download(song)) },
-                        onDeleteDownloadClick = { viewModel.onEvent(HistoryEvent.DeleteDownload(song)) },
-                        onDeleteFromHistoryClick = { viewModel.onEvent(HistoryEvent.DeleteFromHistory(item)) }
+                    },
+                    scrollBehavior = scrollBehavior,
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.1f),
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                        actionIconContentColor = MaterialTheme.colorScheme.onSurface
                     )
+                )
+            },
+            containerColor = Color.Transparent
+        ) { innerScaffoldPadding ->
+            if (uiState.history.isEmpty()) {
+                EmptyStateMessage(message = "Your listening history will appear here.")
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .padding(innerScaffoldPadding)
+                        .fillMaxSize()
+                ) {
+                    itemsIndexed(uiState.history, key = { _, item -> item.logId }) { index, item ->
+                        val song = item.song
+                        SongItem(
+                            song = song,
+                            onClick = { viewModel.onEvent(HistoryEvent.SongSelected(index)) },
+                            onAddToPlaylistClick = { viewModel.onEvent(HistoryEvent.AddToPlaylist(song)) },
+                            onPlayNextClick = { viewModel.onEvent(HistoryEvent.PlayNext(song)) },
+                            onAddToQueueClick = { viewModel.onEvent(HistoryEvent.AddToQueue(song)) },
+                            onGoToArtistClick = { viewModel.onEvent(HistoryEvent.GoToArtist(song)) },
+                            onShuffleClick = { viewModel.onEvent(HistoryEvent.Shuffle(song)) },
+                            onAddToLibraryClick = { viewModel.onEvent(HistoryEvent.AddToLibrary(song)) },
+                            onDownloadClick = { viewModel.onEvent(HistoryEvent.Download(song)) },
+                            onDeleteDownloadClick = { viewModel.onEvent(HistoryEvent.DeleteDownload(song)) },
+                            onDeleteFromHistoryClick = { viewModel.onEvent(HistoryEvent.DeleteFromHistory(item)) }
+                        )
+                    }
                 }
             }
         }

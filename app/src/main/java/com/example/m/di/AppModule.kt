@@ -35,6 +35,7 @@ import javax.inject.Inject
 import javax.inject.Named
 import javax.inject.Provider
 import javax.inject.Singleton
+import androidx.core.graphics.drawable.toDrawable
 
 @Singleton
 class Rgb565CacheInterceptor @Inject constructor() : Interceptor {
@@ -65,7 +66,7 @@ class Rgb565CacheInterceptor @Inject constructor() : Interceptor {
         }
 
         // Create a new drawable with the converted bitmap.
-        val newDrawable = BitmapDrawable(request.context.resources, convertedBitmap)
+        val newDrawable = convertedBitmap.toDrawable(request.context.resources)
 
         // Return a new result. Coil will now display and cache this RGB_565 version.
         return result.copy(drawable = newDrawable)

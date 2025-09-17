@@ -1,3 +1,5 @@
+// build.gradle.kts
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -5,7 +7,6 @@ plugins {
     id("com.google.devtools.ksp")
     id("kotlin-kapt")
     id("com.google.dagger.hilt.android")
-    id("androidx.baselineprofile")
 }
 
 android {
@@ -84,12 +85,12 @@ dependencies {
     implementation(libs.androidx.media3.session)
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.material.icons.extended)
+    implementation(libs.androidx.palette.ktx)
 
     implementation(libs.androidx.navigation.compose)
 
     implementation(libs.reorderable)
     implementation(libs.timber)
-
 
 }
 

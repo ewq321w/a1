@@ -479,8 +479,17 @@ interface ArtistDao {
     @Query("SELECT COUNT(songId) FROM artist_song_cross_ref WHERE artistId = :artistId")
     suspend fun getArtistSongCount(artistId: Long): Int
 
+    @Query("DELETE FROM artist_song_cross_ref WHERE songId NOT IN (SELECT songId FROM songs)")
+    suspend fun deleteOrphanedArtistSongCrossRefs(): Int
+
     @Query("DELETE FROM artists WHERE artistId NOT IN (SELECT DISTINCT artistId FROM artist_song_cross_ref)")
-    suspend fun deleteOrphanedArtists(): Int
+    suspend fun deleteOrphanedArtistsInternal(): Int
+
+    @Transaction
+    suspend fun deleteOrphanedArtists(): Int {
+        deleteOrphanedArtistSongCrossRefs()
+        return deleteOrphanedArtistsInternal()
+    }
 
     @Query("SELECT IFNULL(MAX(customOrderPosition), -1) FROM artist_song_cross_ref WHERE artistId = :artistId")
     suspend fun getMaxArtistSongPosition(artistId: Long): Int

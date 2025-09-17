@@ -4,12 +4,12 @@ package com.example.m.playback
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
-import android.util.Log
 import androidx.core.net.toUri
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.session.MediaBrowser
 import androidx.media3.session.SessionToken
 import com.example.m.data.database.*
@@ -24,6 +24,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
+import timber.log.Timber
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -61,6 +62,12 @@ class MusicServiceConnection @Inject constructor(
     private val _playbackState = MutableStateFlow(PlaybackState())
     val playbackState: StateFlow<PlaybackState> = _playbackState
 
+    private val _queue = MutableStateFlow<List<MediaItem>>(emptyList())
+    val queue: StateFlow<List<MediaItem>> = _queue
+
+    private val _currentMediaItemIndex = MutableStateFlow(0)
+    val currentMediaItemIndex: StateFlow<Int> = _currentMediaItemIndex
+
     private var progressUpdateJob: Job? = null
     private var coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -80,9 +87,13 @@ class MusicServiceConnection @Inject constructor(
                 _isPlaying.value = browser.isPlaying
                 _isLoading.value = browser.isLoading
                 _playerState.value = browser.playbackState
-                if (browser.isPlaying) startProgressUpdates()
+                _currentMediaItemIndex.value = browser.currentMediaItemIndex
+                updateQueue()
+                if (browser.playbackState == Player.STATE_READY || browser.isPlaying) {
+                    startProgressUpdates()
+                }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to connect to MediaBrowser", e)
+                Timber.tag(TAG).e(e, "Failed to connect to MediaBrowser")
             }
         }, MoreExecutors.directExecutor())
     }
@@ -97,7 +108,8 @@ class MusicServiceConnection @Inject constructor(
                     val connectedBrowser = mediaBrowserFuture.get()
                     command(connectedBrowser)
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to execute command; MediaBrowser connection failed", e)
+                    Timber.tag(TAG)
+                        .e(e, "Failed to execute command; MediaBrowser connection failed")
                 }
             }, MoreExecutors.directExecutor())
         }
@@ -108,20 +120,31 @@ class MusicServiceConnection @Inject constructor(
             _nowPlaying.value = mediaMetadata
         }
 
+        override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+            updateQueue()
+        }
+
         override fun onIsLoadingChanged(isLoading: Boolean) {
             _isLoading.value = isLoading
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             _playerState.value = playbackState
+            if (playbackState == Player.STATE_READY) {
+                startProgressUpdates()
+            } else if (playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED) {
+                stopProgressUpdates()
+                _playbackState.value = PlaybackState()
+            }
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             super.onMediaItemTransition(mediaItem, reason)
 
             val mediaId = mediaItem?.mediaId ?: return
-            Log.d(TAG, "Media item changed. Media ID from player: '$mediaId'")
+            Timber.tag(TAG).d("Media item changed. Media ID from player: '$mediaId'")
 
+            _currentMediaItemIndex.value = mediaBrowser?.currentMediaItemIndex ?: 0
             isCurrentSongLogged = false
             prefetchNextTrackStream()
             savePlaybackState()
@@ -142,7 +165,8 @@ class MusicServiceConnection @Inject constructor(
                             withContext(Dispatchers.Main) {
                                 runPlayerCommand { browser ->
                                     browser.addMediaItems(newMediaItems)
-                                    Log.d(TAG, "Added ${newMediaItems.size} prefetched items to the queue.")
+                                    Timber.tag(TAG)
+                                        .d("Added ${newMediaItems.size} prefetched items to the queue.")
                                 }
                             }
                         }
@@ -154,16 +178,43 @@ class MusicServiceConnection @Inject constructor(
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _isPlaying.value = isPlaying
-            if (isPlaying) {
-                startProgressUpdates()
-                prefetchNextTrackStream()
-            } else {
-                stopProgressUpdates()
+            if (!isPlaying) {
                 savePlaybackState()
             }
         }
     }
 
+    private fun updateQueue() {
+        runPlayerCommand { browser ->
+            val mediaItems = (0 until browser.mediaItemCount).map { browser.getMediaItemAt(it) }
+            _queue.value = mediaItems
+            _currentMediaItemIndex.value = browser.currentMediaItemIndex
+        }
+    }
+
+    fun removeQueueItem(index: Int) {
+        runPlayerCommand { browser ->
+            if (index >= 0 && index < browser.mediaItemCount) {
+                browser.removeMediaItem(index)
+            }
+        }
+    }
+
+    fun moveQueueItem(from: Int, to: Int) {
+        runPlayerCommand { browser ->
+            if (from >= 0 && from < browser.mediaItemCount && to >= 0 && to < browser.mediaItemCount) {
+                browser.moveMediaItem(from, to)
+            }
+        }
+    }
+
+    fun skipToQueueItem(index: Int) {
+        runPlayerCommand { browser ->
+            if (index >= 0 && index < browser.mediaItemCount) {
+                browser.seekTo(index, C.TIME_UNSET)
+            }
+        }
+    }
 
     private fun savePlaybackState() {
         if (MusicService.isRestoring.value) {
@@ -195,7 +246,7 @@ class MusicServiceConnection @Inject constructor(
                             isPlaying = playing
                         )
                         playbackStateDao.saveState(state)
-                        Log.d(TAG, "Playback state saved.")
+                        Timber.tag(TAG).d("Playback state saved.")
                     }
                 }
             }
@@ -318,7 +369,7 @@ class MusicServiceConnection @Inject constructor(
             runPlayerCommand { browser ->
                 val nextIndex = if (browser.mediaItemCount == 0) 0 else browser.currentMediaItemIndex + 1
                 browser.addMediaItem(nextIndex, mediaItem)
-                Log.d(TAG, "Added to play next: ${mediaItem.mediaMetadata.title}")
+                Timber.tag(TAG).d("Added to play next: ${mediaItem.mediaMetadata.title}")
             }
         }
     }
@@ -328,7 +379,7 @@ class MusicServiceConnection @Inject constructor(
             val mediaItem = createMediaItemForItem(item) ?: return@launch
             runPlayerCommand { browser ->
                 browser.addMediaItem(mediaItem)
-                Log.d(TAG, "Added to end of queue: ${mediaItem.mediaMetadata.title}")
+                Timber.tag(TAG).d("Added to end of queue: ${mediaItem.mediaMetadata.title}")
             }
         }
     }
@@ -437,7 +488,7 @@ class MusicServiceConnection @Inject constructor(
 
                 if (!isCurrentSongLogged && currentPosition >= 30000) {
                     currentSongId?.let { songId ->
-                        Log.d(TAG, "LOGGING PLAY for song ID: $songId")
+                        Timber.tag(TAG).d("LOGGING PLAY for song ID: $songId")
                         withContext(Dispatchers.IO) {
                             listeningHistoryDao.insertPlayLog(
                                 ListeningHistory(songId = songId, timestamp = System.currentTimeMillis())

@@ -1,6 +1,7 @@
 // file: com/example/m/ui/library/details/PlaylistDetailScreen.kt
 package com.example.m.ui.library.details
 
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Box
@@ -15,13 +16,18 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.m.data.database.Playlist
 import com.example.m.data.database.Song
 import com.example.m.managers.PlaylistActionState
+import com.example.m.ui.common.GradientBackground
 import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.library.components.*
+import com.example.m.ui.main.MainViewModel
 import kotlinx.coroutines.flow.collectLatest
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
@@ -38,6 +44,10 @@ fun PlaylistDetailScreen(
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val sheetState = rememberModalBottomSheetState()
+
+    val activity = LocalContext.current as ComponentActivity
+    val mainViewModel: MainViewModel = hiltViewModel(activity)
+    val (gradientColor1, gradientColor2) = mainViewModel.randomGradientColors.value
 
     LaunchedEffect(Unit) {
         viewModel.navigateToArtist.collect { artistId ->
@@ -105,41 +115,50 @@ fun PlaylistDetailScreen(
         is PlaylistActionState.Hidden -> {}
     }
 
-
-    uiState.playlist?.let { pl ->
-        if (showDeleteConfirmation) {
-            ConfirmDeleteDialog(
-                itemType = "playlist",
-                itemName = pl.name,
-                onDismiss = { showDeleteConfirmation = false },
-                onConfirm = {
-                    onBack()
-                    viewModel.onEvent(PlaylistDetailEvent.DeletePlaylist)
-                }
-            )
-        }
-
-        PlaylistDetailContent(
-            playlist = pl,
-            songs = uiState.songs,
-            onEvent = viewModel::onEvent,
-            sortOrder = uiState.sortOrder,
-            snackbarHostState = snackbarHostState,
-            onBack = onBack,
-            onEdit = { onEditPlaylist(pl.playlistId) },
-            onShowDeleteDialog = { showDeleteConfirmation = true }
-        )
-    } ?: run {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("Loading...") },
-                    navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } }
+    GradientBackground(gradientColor1 = gradientColor1, gradientColor2 = gradientColor2) {
+        uiState.playlist?.let { pl ->
+            if (showDeleteConfirmation) {
+                ConfirmDeleteDialog(
+                    itemType = "playlist",
+                    itemName = pl.name,
+                    onDismiss = { showDeleteConfirmation = false },
+                    onConfirm = {
+                        onBack()
+                        viewModel.onEvent(PlaylistDetailEvent.DeletePlaylist)
+                    }
                 )
             }
-        ) { paddingValues ->
-            Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+            val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(rememberTopAppBarState())
+            PlaylistDetailContent(
+                playlist = pl,
+                songs = uiState.songs,
+                onEvent = viewModel::onEvent,
+                sortOrder = uiState.sortOrder,
+                snackbarHostState = snackbarHostState,
+                onBack = onBack,
+                onEdit = { onEditPlaylist(pl.playlistId) },
+                onShowDeleteDialog = { showDeleteConfirmation = true },
+                scrollBehavior = scrollBehavior
+            )
+        } ?: run {
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Text("Loading...") },
+                        navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = Color.Transparent,
+                            scrolledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.1f),
+                            titleContentColor = MaterialTheme.colorScheme.onSurface,
+                            navigationIconContentColor = MaterialTheme.colorScheme.onSurface
+                        )
+                    )
+                },
+                containerColor = Color.Transparent
+            ) { paddingValues ->
+                Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
             }
         }
     }
@@ -155,11 +174,13 @@ private fun PlaylistDetailContent(
     snackbarHostState: SnackbarHostState,
     onBack: () -> Unit,
     onEdit: () -> Unit,
-    onShowDeleteDialog: () -> Unit
+    onShowDeleteDialog: () -> Unit,
+    scrollBehavior: TopAppBarScrollBehavior
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
@@ -182,10 +203,18 @@ private fun PlaylistDetailContent(
                             DropdownMenuItem(text = { Text("Delete playlist") }, onClick = { onShowDeleteDialog(); showMenu = false })
                         }
                     }
-                }
+                },
+                scrollBehavior = scrollBehavior,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.1f),
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                    actionIconContentColor = MaterialTheme.colorScheme.onSurface
+                )
             )
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = Color.Transparent
     ) { paddingValues ->
         if (songs.isEmpty()) {
             EmptyStateMessage(message = "This playlist is empty.")

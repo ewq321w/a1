@@ -24,6 +24,7 @@ import coil.compose.AsyncImage
 import com.example.m.data.database.DownloadStatus
 import com.example.m.data.database.Song
 import com.example.m.ui.common.getThumbnail
+import com.example.m.ui.library.components.TranslucentDropdownMenu
 import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
 import java.text.DecimalFormat
 
@@ -284,7 +285,7 @@ fun SearchResultItem(
             IconButton(onClick = { showMenu = true }) {
                 Icon(Icons.Default.MoreVert, contentDescription = "More options", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            TranslucentDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                 DropdownMenuItem(text = { Text("Play next") }, onClick = { onPlayNext(); showMenu = false })
                 DropdownMenuItem(text = { Text("Add to queue") }, onClick = { onAddToQueue(); showMenu = false })
                 DropdownMenuItem(text = { Text(if (result.isInLibrary) "In Library" else "Add to Library") }, enabled = !result.isInLibrary, onClick = { onAddToLibrary(); showMenu = false })

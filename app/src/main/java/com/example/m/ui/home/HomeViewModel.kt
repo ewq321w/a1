@@ -1,6 +1,5 @@
 package com.example.m.ui.home
 
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.m.data.database.ListeningHistoryDao
@@ -14,6 +13,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
+import timber.log.Timber
 import javax.inject.Inject
 
 private const val TAG = "HomeViewModel"
@@ -60,7 +60,7 @@ class HomeViewModel @Inject constructor(
     }
 
     private suspend fun generateRecommendations(topRecentPlays: List<RecentPlay>) {
-        Log.d(TAG, "Generating recommendations...")
+        Timber.tag(TAG).d("Generating recommendations...")
         val recentSongIds = topRecentPlays.map { it.songId }
         val recentSongs = libraryRepository.getSongsByIds(recentSongIds)
         val orderedRecentSongs = recentSongIds.mapNotNull { id -> recentSongs.find { it.songId == id } }
@@ -70,7 +70,7 @@ class HomeViewModel @Inject constructor(
         val seedSong = orderedRecentSongs.firstOrNull()
         if (seedSong != null) {
             val discoveryQuery = "${seedSong.artist} songs"
-            Log.d(TAG, "Discovery Mix seed artist: ${seedSong.artist}")
+            Timber.tag(TAG).d("Discovery Mix seed artist: ${seedSong.artist}")
 
             val searchResults = youtubeRepository.search(discoveryQuery, "music_songs")
             val downloadedVideoIds = orderedRecentSongs.map { it.videoId }.toSet()
@@ -83,7 +83,8 @@ class HomeViewModel @Inject constructor(
         } else {
             _uiState.update { it.copy(discoveryMix = emptyList()) }
         }
-        Log.d(TAG, "Recommendations generated. RecentMix: ${uiState.value.recentMix.size}, DiscoveryMix: ${uiState.value.discoveryMix.size}")
+        Timber.tag(TAG)
+            .d("Recommendations generated. RecentMix: ${uiState.value.recentMix.size}, DiscoveryMix: ${uiState.value.discoveryMix.size}")
     }
 
     private fun playRecentMix(selectedIndex: Int) {

@@ -2,8 +2,8 @@ package com.example.m.ui.library.components
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import com.example.m.ui.library.SongSortOrder
@@ -18,9 +18,9 @@ fun SongSortMenu(
     var showSortMenu by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { showSortMenu = true }) {
-            Icon(Icons.Default.Sort, contentDescription = "Sort Options")
+            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort Options")
         }
-        DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
+        TranslucentDropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
             DropdownMenuItem(
                 text = { Text("Artist") },
                 onClick = { onSortOrderSelected(SongSortOrder.ARTIST); showSortMenu = false },
@@ -53,9 +53,9 @@ fun PlaylistSortMenu(
     var showSortMenu by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { showSortMenu = true }) {
-            Icon(Icons.Default.Sort, contentDescription = "Sort Options")
+            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort Options")
         }
-        DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
+        TranslucentDropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
             DropdownMenuItem(
                 text = { Text("Custom Order") },
                 onClick = { onSortOrderSelected(PlaylistSortOrder.CUSTOM); showSortMenu = false },
@@ -93,9 +93,9 @@ fun ArtistSortMenu(
     var showSortMenu by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { showSortMenu = true }) {
-            Icon(Icons.Default.Sort, contentDescription = "Sort Options")
+            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort Options")
         }
-        DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
+        TranslucentDropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
             DropdownMenuItem(
                 text = { Text("Custom") },
                 onClick = { onSortOrderSelected(ArtistSortOrder.CUSTOM); showSortMenu = false },

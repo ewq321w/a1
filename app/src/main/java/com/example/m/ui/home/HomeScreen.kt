@@ -1,5 +1,6 @@
 package com.example.m.ui.home
 
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -13,7 +14,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -22,7 +26,9 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.example.m.R
+import com.example.m.ui.common.GradientBackground
 import com.example.m.ui.common.getHighQualityThumbnailUrl
+import com.example.m.ui.main.MainViewModel
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -31,43 +37,54 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
+    val activity = LocalContext.current as ComponentActivity
+    val mainViewModel: MainViewModel = hiltViewModel(activity)
+    val (gradientColor1, gradientColor2) = mainViewModel.randomGradientColors.value
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Home") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface
-                ),
-                windowInsets = TopAppBarDefaults.windowInsets
-            )
-        },
-        containerColor = MaterialTheme.colorScheme.background
-    ) { paddingValues ->
-        LazyColumn(
-            modifier = Modifier
-                .padding(paddingValues)
-                .fillMaxSize(),
-            contentPadding = PaddingValues(vertical = 16.dp)
-        ) {
-            item {
-                RecommendationSection(
-                    title = "Your Recent Mix",
-                    items = uiState.recentMix,
-                    onItemClick = { index ->
-                        viewModel.onEvent(HomeEvent.PlayRecentMix(index))
-                    }
+    GradientBackground(
+        gradientColor1 = gradientColor1,
+        gradientColor2 = gradientColor2
+    ) {
+        Scaffold(
+            modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+            topBar = {
+                TopAppBar(
+                    title = { Text("Home") },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = Color.Transparent,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface
+                    ),
+                    scrollBehavior = scrollBehavior
                 )
-            }
-            item {
-                RecommendationSection(
-                    title = "Discovery Mix",
-                    items = uiState.discoveryMix,
-                    onItemClick = { index ->
-                        viewModel.onEvent(HomeEvent.PlayDiscoveryMix(index))
-                    }
-                )
+            },
+            containerColor = Color.Transparent
+        ) { paddingValues ->
+            LazyColumn(
+                modifier = Modifier
+                    .padding(paddingValues)
+                    .fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 16.dp)
+            ) {
+                item {
+                    RecommendationSection(
+                        title = "Your Recent Mix",
+                        items = uiState.recentMix,
+                        onItemClick = { index ->
+                            viewModel.onEvent(HomeEvent.PlayRecentMix(index))
+                        }
+                    )
+                }
+                item {
+                    RecommendationSection(
+                        title = "Discovery Mix",
+                        items = uiState.discoveryMix,
+                        onItemClick = { index ->
+                            viewModel.onEvent(HomeEvent.PlayDiscoveryMix(index))
+                        }
+                    )
+                }
             }
         }
     }

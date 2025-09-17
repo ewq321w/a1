@@ -8,6 +8,8 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -15,6 +17,7 @@ import com.example.m.data.database.LibraryGroup
 import com.example.m.data.database.Song
 import com.example.m.managers.DialogState
 import com.example.m.managers.PlaylistActionState
+import com.example.m.ui.common.GradientBackground
 import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.library.components.*
 import com.example.m.ui.library.tabs.*
@@ -42,6 +45,8 @@ fun LibraryScreen(
 
     val uiState by libraryViewModel.uiState.collectAsState()
     val isDoingMaintenance by mainViewModel.isDoingMaintenance
+    val (gradientColor1, gradientColor2) = mainViewModel.randomGradientColors.value
+
 
     val songsDialogState by songsViewModel.dialogState.collectAsState()
     val artistsPlaylistActionState by artistsViewModel.playlistActionState.collectAsState()
@@ -156,73 +161,95 @@ fun LibraryScreen(
         is PlaylistActionState.Hidden -> {}
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Library") },
-                actions = {
-                    LibraryGroupSelectorMenu(
-                        groups = uiState.libraryGroups,
-                        activeGroupId = uiState.activeLibraryGroupId,
-                        onGroupSelected = { libraryViewModel.onEvent(LibraryEvent.SetActiveLibraryGroup(it)) },
-                        onManageGroups = { libraryViewModel.onEvent(LibraryEvent.ManageGroupsClicked) }
-                    )
-                    IconButton(onClick = onGoToHistory) { Icon(Icons.Default.History, contentDescription = "History") }
-                    if (uiState.selectedView == "Songs") {
-                        val songsUiState by songsViewModel.uiState.collectAsState()
-                        SongSortMenu(
-                            currentSortOrder = songsUiState.sortOrder,
-                            onSortOrderSelected = { songsViewModel.onEvent(SongsTabEvent.SetSortOrder(it)) }
+    val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
+
+    GradientBackground(
+        gradientColor1 = gradientColor1,
+        gradientColor2 = gradientColor2
+    ) {
+        Scaffold(
+            modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+            containerColor = Color.Transparent,
+            topBar = {
+                TopAppBar(
+                    title = { Text("Library") },
+                    actions = {
+                        LibraryGroupSelectorMenu(
+                            groups = uiState.libraryGroups,
+                            activeGroupId = uiState.activeLibraryGroupId,
+                            onGroupSelected = { libraryViewModel.onEvent(LibraryEvent.SetActiveLibraryGroup(it)) },
+                            onManageGroups = { libraryViewModel.onEvent(LibraryEvent.ManageGroupsClicked) }
                         )
-                    }
-                    OptionsOverflowMenu(
-                        selectedView = uiState.selectedView,
-                        mainViewModel = mainViewModel,
-                        songsViewModel = songsViewModel,
-                        isDoingMaintenance = isDoingMaintenance,
-                        onGoToHiddenArtists = onGoToHiddenArtists
+                        IconButton(onClick = onGoToHistory) { Icon(Icons.Default.History, contentDescription = "History") }
+                        if (uiState.selectedView == "Songs") {
+                            val songsUiState by songsViewModel.uiState.collectAsState()
+                            SongSortMenu(
+                                currentSortOrder = songsUiState.sortOrder,
+                                onSortOrderSelected = { songsViewModel.onEvent(SongsTabEvent.SetSortOrder(it)) }
+                            )
+                        }
+                        OptionsOverflowMenu(
+                            selectedView = uiState.selectedView,
+                            mainViewModel = mainViewModel,
+                            songsViewModel = songsViewModel,
+                            isDoingMaintenance = isDoingMaintenance,
+                            onGoToHiddenArtists = onGoToHiddenArtists
+                        )
+                    },
+                    scrollBehavior = scrollBehavior,
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = Color.Transparent,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        actionIconContentColor = MaterialTheme.colorScheme.onSurface
                     )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface, titleContentColor = MaterialTheme.colorScheme.onSurface),
-                windowInsets = TopAppBarDefaults.windowInsets
-            )
-        },
-        floatingActionButton = {
-            when (uiState.selectedView) {
-                "Playlists" -> FloatingActionButton(onClick = { playlistsViewModel.onEvent(PlaylistTabEvent.CreateEmptyPlaylist) }, modifier = Modifier.navigationBarsPadding(), containerColor = MaterialTheme.colorScheme.primary) { Icon(Icons.Default.Add, contentDescription = "Create Playlist") }
-                "Artists" -> FloatingActionButton(onClick = { artistsViewModel.onEvent(ArtistTabEvent.ShowCreateArtistGroupDialog) }, modifier = Modifier.navigationBarsPadding(), containerColor = MaterialTheme.colorScheme.primary) { Icon(Icons.Default.CreateNewFolder, contentDescription = "Create Artist Group") }
-            }
-        },
-        containerColor = MaterialTheme.colorScheme.background
-    ) { innerPadding ->
-        Column(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                listOf("Playlists", "Artists", "Songs").forEachIndexed { index, label ->
-                    SegmentedButton(
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = 3),
-                        onClick = { libraryViewModel.onEvent(LibraryEvent.SetSelectedView(label)) },
-                        selected = uiState.selectedView == label
-                    ) { Text(label) }
+                )
+            },
+            floatingActionButton = {
+                when (uiState.selectedView) {
+                    "Playlists" -> FloatingActionButton(onClick = { playlistsViewModel.onEvent(PlaylistTabEvent.CreateEmptyPlaylist) }, modifier = Modifier.navigationBarsPadding(), containerColor = MaterialTheme.colorScheme.primary) { Icon(Icons.Default.Add, contentDescription = "Create Playlist") }
+                    "Artists" -> FloatingActionButton(onClick = { artistsViewModel.onEvent(ArtistTabEvent.ShowCreateArtistGroupDialog) }, modifier = Modifier.navigationBarsPadding(), containerColor = MaterialTheme.colorScheme.primary) { Icon(Icons.Default.CreateNewFolder, contentDescription = "Create Artist Group") }
                 }
             }
-            when (uiState.selectedView) {
-                "Playlists" -> PlaylistTabContent(
-                    viewModel = playlistsViewModel,
-                    onPlaylistClick = onPlaylistClick,
-                    onEditPlaylist = onEditPlaylist,
-                    modifier = Modifier.weight(1f)
+        ) { innerPadding ->
+            Column(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
+                val segmentedButtonColors = SegmentedButtonDefaults.colors(
+                    activeContainerColor = Color.White.copy(alpha = 0.15f),
+                    inactiveContainerColor = Color.White.copy(alpha = 0.05f),
+                    activeContentColor = Color.White,
+                    inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    activeBorderColor = Color.White.copy(alpha = 0.2f),
+                    inactiveBorderColor = Color.White.copy(alpha = 0.2f)
                 )
-                "Artists" -> ArtistsTabContent(
-                    viewModel = artistsViewModel,
-                    onArtistClick = onArtistClick,
-                    onGoToArtistGroup = onGoToArtistGroup,
-                    onEditArtistSongs = onEditArtistSongs,
-                    modifier = Modifier.weight(1f)
-                )
-                "Songs" -> SongsTabContent(
-                    viewModel = songsViewModel,
-                    modifier = Modifier.weight(1f)
-                )
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    listOf("Playlists", "Artists", "Songs").forEachIndexed { index, label ->
+                        SegmentedButton(
+                            shape = SegmentedButtonDefaults.itemShape(index = index, count = 3),
+                            onClick = { libraryViewModel.onEvent(LibraryEvent.SetSelectedView(label)) },
+                            selected = uiState.selectedView == label,
+                            colors = segmentedButtonColors
+                        ) { Text(label) }
+                    }
+                }
+                when (uiState.selectedView) {
+                    "Playlists" -> PlaylistTabContent(
+                        viewModel = playlistsViewModel,
+                        onPlaylistClick = onPlaylistClick,
+                        onEditPlaylist = onEditPlaylist,
+                        modifier = Modifier.weight(1f)
+                    )
+                    "Artists" -> ArtistsTabContent(
+                        viewModel = artistsViewModel,
+                        onArtistClick = onArtistClick,
+                        onGoToArtistGroup = onGoToArtistGroup,
+                        onEditArtistSongs = onEditArtistSongs,
+                        modifier = Modifier.weight(1f)
+                    )
+                    "Songs" -> SongsTabContent(
+                        viewModel = songsViewModel,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
     }
@@ -234,10 +261,10 @@ private fun LibraryGroupSelectorMenu(groups: List<LibraryGroup>, activeGroupId: 
     val activeGroupName = if (activeGroupId == 0L) "All Music" else groups.find { it.groupId == activeGroupId }?.name ?: "All Music"
     Box {
         TextButton(onClick = { showMenu = true }) {
-            Text(activeGroupName, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Icon(Icons.Default.ArrowDropDown, contentDescription = "Select Library Group", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(activeGroupName, color = MaterialTheme.colorScheme.onSurface)
+            Icon(Icons.Default.ArrowDropDown, contentDescription = "Select Library Group", tint = MaterialTheme.colorScheme.onSurface)
         }
-        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+        TranslucentDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
             DropdownMenuItem(text = { Text("All Music") }, onClick = { onGroupSelected(0L); showMenu = false }, trailingIcon = { if (activeGroupId == 0L) Icon(Icons.Default.Check, "Selected") })
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
             groups.forEach { group ->
@@ -262,7 +289,7 @@ private fun OptionsOverflowMenu(
 
     Box {
         IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More options") }
-        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+        TranslucentDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
             if (selectedView == "Songs") {
                 DropdownMenuItem(text = { Text("Shuffle") }, onClick = { songsViewModel.onEvent(SongsTabEvent.ShuffleFilteredSongs); showMenu = false }, leadingIcon = { Icon(Icons.Default.Shuffle, contentDescription = "Shuffle") })
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))

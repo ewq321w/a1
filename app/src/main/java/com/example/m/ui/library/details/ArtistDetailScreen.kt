@@ -1,6 +1,7 @@
 // file: com/example/m/ui/library/details/ArtistDetailScreen.kt
 package com.example.m.ui.library.details
 
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
@@ -18,13 +19,18 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.m.data.database.Song
 import com.example.m.managers.PlaylistActionState
+import com.example.m.ui.common.GradientBackground
 import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.library.components.*
+import com.example.m.ui.main.MainViewModel
 import kotlinx.coroutines.flow.collectLatest
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
@@ -44,6 +50,11 @@ fun ArtistDetailScreen(
     var showMenu by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val sheetState = rememberModalBottomSheetState()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(rememberTopAppBarState())
+
+    val activity = LocalContext.current as ComponentActivity
+    val mainViewModel: MainViewModel = hiltViewModel(activity)
+    val (gradientColor1, gradientColor2) = mainViewModel.randomGradientColors.value
 
     LaunchedEffect(Unit) {
         viewModel.navigateToArtist.collect { artistId ->
@@ -160,108 +171,119 @@ fun ArtistDetailScreen(
         )
     }
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            TopAppBar(
-                title = { Text(artistName, maxLines = 1, modifier = Modifier.basicMarquee()) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    ArtistSortMenu(
-                        currentSortOrder = uiState.sortOrder,
-                        onSortOrderSelected = { viewModel.onEvent(ArtistDetailEvent.SetSortOrder(it)) }
+    GradientBackground(gradientColor1 = gradientColor1, gradientColor2 = gradientColor2) {
+        Scaffold(
+            modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            topBar = {
+                TopAppBar(
+                    title = { Text(artistName, maxLines = 1, modifier = Modifier.basicMarquee()) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        ArtistSortMenu(
+                            currentSortOrder = uiState.sortOrder,
+                            onSortOrderSelected = { viewModel.onEvent(ArtistDetailEvent.SetSortOrder(it)) }
+                        )
+                        Box {
+                            IconButton(onClick = { showMenu = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                            }
+                            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("Play All") },
+                                    onClick = { viewModel.onEvent(ArtistDetailEvent.PlayAll); showMenu = false }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Shuffle All") },
+                                    onClick = { viewModel.onEvent(ArtistDetailEvent.ShuffleAll); showMenu = false }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Shuffle Ungrouped") },
+                                    onClick = { viewModel.onEvent(ArtistDetailEvent.ShuffleUngrouped); showMenu = false }
+                                )
+                                val toggleText = if (uiState.artist?.downloadAutomatically == true) "Disable auto-download" else "Enable auto-download"
+                                DropdownMenuItem(
+                                    text = { Text(toggleText) },
+                                    onClick = { viewModel.onEvent(ArtistDetailEvent.PrepareToToggleAutoDownload); showMenu = false }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Create group") },
+                                    onClick = {
+                                        viewModel.onEvent(ArtistDetailEvent.PrepareToCreateSongGroup)
+                                        showMenu = false
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Edit song order") },
+                                    onClick = {
+                                        uiState.artist?.artistId?.let(onEditArtistSongs)
+                                        showMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    },
+                    scrollBehavior = scrollBehavior,
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.1f),
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                        actionIconContentColor = MaterialTheme.colorScheme.onSurface
                     )
-                    Box {
-                        IconButton(onClick = { showMenu = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "More options")
-                        }
-                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                            DropdownMenuItem(
-                                text = { Text("Play All") },
-                                onClick = { viewModel.onEvent(ArtistDetailEvent.PlayAll); showMenu = false }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Shuffle All") },
-                                onClick = { viewModel.onEvent(ArtistDetailEvent.ShuffleAll); showMenu = false }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Shuffle Ungrouped") },
-                                onClick = { viewModel.onEvent(ArtistDetailEvent.ShuffleUngrouped); showMenu = false }
-                            )
-                            val toggleText = if (uiState.artist?.downloadAutomatically == true) "Disable auto-download" else "Enable auto-download"
-                            DropdownMenuItem(
-                                text = { Text(toggleText) },
-                                onClick = { viewModel.onEvent(ArtistDetailEvent.PrepareToToggleAutoDownload); showMenu = false }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Create group") },
-                                onClick = {
-                                    viewModel.onEvent(ArtistDetailEvent.PrepareToCreateSongGroup)
-                                    showMenu = false
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Edit song order") },
-                                onClick = {
-                                    uiState.artist?.artistId?.let(onEditArtistSongs)
-                                    showMenu = false
-                                }
-                            )
-                        }
-                    }
-                }
-            )
-        },
-        containerColor = MaterialTheme.colorScheme.background
-    ) { paddingValues ->
-        if (uiState.displayList.isEmpty()) {
-            EmptyStateMessage(message = "No songs found for this artist.")
-        } else {
-            val listState = rememberLazyListState()
+                )
+            },
+            containerColor = Color.Transparent
+        ) { paddingValues ->
+            if (uiState.displayList.isEmpty()) {
+                EmptyStateMessage(message = "No songs found for this artist.")
+            } else {
+                val listState = rememberLazyListState()
 
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .padding(paddingValues)
-                    .fillMaxSize()
-            ) {
-                items(uiState.displayList, key = { item ->
-                    when (item) {
-                        is ArtistDetailListItem.GroupHeader -> "group-${item.data.group.groupId}"
-                        is ArtistDetailListItem.SongItem -> "song-${item.song.songId}"
-                    }
-                }) { item ->
-                    when (item) {
-                        is ArtistDetailListItem.GroupHeader -> {
-                            GroupHeaderItem(
-                                data = item.data,
-                                onPlayClick = { viewModel.onEvent(ArtistDetailEvent.PlayGroup(item.data.group.groupId)) },
-                                onShuffleClick = { viewModel.onEvent(ArtistDetailEvent.ShuffleGroup(item.data.group.groupId)) },
-                                onClick = { onGroupClick(item.data.group.groupId) },
-                                onEdit = { onEditGroup(item.data.group.groupId) },
-                                onDelete = { viewModel.onEvent(ArtistDetailEvent.PrepareToDeleteGroup(item.data.group)) },
-                                processUrls = { urls -> viewModel.thumbnailProcessor.process(urls) }
-                            )
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .padding(paddingValues)
+                        .fillMaxSize()
+                ) {
+                    items(uiState.displayList, key = { item ->
+                        when (item) {
+                            is ArtistDetailListItem.GroupHeader -> "group-${item.data.group.groupId}"
+                            is ArtistDetailListItem.SongItem -> "song-${item.song.songId}"
                         }
-                        is ArtistDetailListItem.SongItem -> {
-                            val song = item.song
-                            SongItem(
-                                song = song,
-                                onClick = { viewModel.onEvent(ArtistDetailEvent.SongSelected(song)) },
-                                onAddToPlaylistClick = { viewModel.onEvent(ArtistDetailEvent.AddToPlaylist(song)) },
-                                onDeleteClick = { viewModel.onEvent(ArtistDetailEvent.SetItemForDeletion(song)) },
-                                onPlayNextClick = { viewModel.onEvent(ArtistDetailEvent.PlayNext(song)) },
-                                onAddToQueueClick = { viewModel.onEvent(ArtistDetailEvent.AddToQueue(song)) },
-                                onShuffleClick = { viewModel.onEvent(ArtistDetailEvent.ShuffleSong(song)) },
-                                onGoToArtistClick = { viewModel.onEvent(ArtistDetailEvent.GoToArtist(song)) },
-                                onDownloadClick = { viewModel.onEvent(ArtistDetailEvent.DownloadSong(song)) },
-                                onDeleteDownloadClick = { viewModel.onEvent(ArtistDetailEvent.DeleteDownload(song)) },
-                                onAddToGroupClick = { viewModel.onEvent(ArtistDetailEvent.SelectSongToAddToGroup(song)) }
-                            )
+                    }) { item ->
+                        when (item) {
+                            is ArtistDetailListItem.GroupHeader -> {
+                                GroupHeaderItem(
+                                    data = item.data,
+                                    onPlayClick = { viewModel.onEvent(ArtistDetailEvent.PlayGroup(item.data.group.groupId)) },
+                                    onShuffleClick = { viewModel.onEvent(ArtistDetailEvent.ShuffleGroup(item.data.group.groupId)) },
+                                    onClick = { onGroupClick(item.data.group.groupId) },
+                                    onEdit = { onEditGroup(item.data.group.groupId) },
+                                    onDelete = { viewModel.onEvent(ArtistDetailEvent.PrepareToDeleteGroup(item.data.group)) },
+                                    processUrls = { urls -> viewModel.thumbnailProcessor.process(urls) }
+                                )
+                            }
+                            is ArtistDetailListItem.SongItem -> {
+                                val song = item.song
+                                SongItem(
+                                    song = song,
+                                    onClick = { viewModel.onEvent(ArtistDetailEvent.SongSelected(song)) },
+                                    onAddToPlaylistClick = { viewModel.onEvent(ArtistDetailEvent.AddToPlaylist(song)) },
+                                    onDeleteClick = { viewModel.onEvent(ArtistDetailEvent.SetItemForDeletion(song)) },
+                                    onPlayNextClick = { viewModel.onEvent(ArtistDetailEvent.PlayNext(song)) },
+                                    onAddToQueueClick = { viewModel.onEvent(ArtistDetailEvent.AddToQueue(song)) },
+                                    onShuffleClick = { viewModel.onEvent(ArtistDetailEvent.ShuffleSong(song)) },
+                                    onGoToArtistClick = { viewModel.onEvent(ArtistDetailEvent.GoToArtist(song)) },
+                                    onDownloadClick = { viewModel.onEvent(ArtistDetailEvent.DownloadSong(song)) },
+                                    onDeleteDownloadClick = { viewModel.onEvent(ArtistDetailEvent.DeleteDownload(song)) },
+                                    onAddToGroupClick = { viewModel.onEvent(ArtistDetailEvent.SelectSongToAddToGroup(song)) }
+                                )
+                            }
                         }
                     }
                 }

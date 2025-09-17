@@ -26,6 +26,7 @@ import com.example.m.ui.library.components.CompositeThumbnailImage
 import com.example.m.ui.library.components.ConfirmDeleteDialog
 import com.example.m.ui.library.components.DisableAutoDownloadConfirmationDialog
 import com.example.m.ui.library.components.EmptyStateMessage
+import com.example.m.ui.library.components.TranslucentDropdownMenu
 
 @Composable
 fun PlaylistTabContent(
@@ -114,7 +115,7 @@ fun PlaylistItem(
         trailingContent = {
             Box {
                 IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More options") }
-                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                TranslucentDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(text = { Text("Play") }, onClick = { onPlay(); showMenu = false })
                     DropdownMenuItem(text = { Text("Shuffle") }, onClick = { onShuffle(); showMenu = false })
                     DropdownMenuItem(text = { Text("Edit playlist") }, onClick = { onEdit(); showMenu = false })

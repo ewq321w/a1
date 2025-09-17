@@ -2,7 +2,6 @@
 package com.example.m.ui.library.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,6 +17,7 @@ import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupProperties
 import coil.compose.AsyncImage
 import com.example.m.data.database.DownloadStatus
 import com.example.m.data.database.Song
@@ -177,7 +177,7 @@ fun SongItem(
                 IconButton(onClick = { showMenu = true }) {
                     Icon(Icons.Default.MoreVert, contentDescription = "More options")
                 }
-                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                TranslucentDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(text = { Text("Play next") }, onClick = { onPlayNextClick(); showMenu = false })
                     DropdownMenuItem(text = { Text("Add to queue") }, onClick = { onAddToQueueClick(); showMenu = false })
                     DropdownMenuItem(text = { Text("Shuffle") }, onClick = { onShuffleClick(); showMenu = false })
@@ -332,5 +332,33 @@ fun CompositeThumbnailImage(
                 )
             }
         }
+    }
+}
+
+@Composable
+fun TranslucentDropdownMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+    offset: androidx.compose.ui.unit.DpOffset = androidx.compose.ui.unit.DpOffset(0.dp, 0.dp),
+    properties: PopupProperties = PopupProperties(focusable = true),
+    content: @Composable ColumnScope.() -> Unit
+) {
+    // This theme makes the DropdownMenu's default surface have a "very dark translucent" tint.
+    val newColorScheme = MaterialTheme.colorScheme.copy(
+        surface = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+        onSurface = Color.White,
+        onSurfaceVariant = Color.White.copy(alpha = 0.9f)
+    )
+
+    MaterialTheme(colorScheme = newColorScheme) {
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = onDismissRequest,
+            modifier = modifier,
+            offset = offset,
+            properties = properties,
+            content = content
+        )
     }
 }
