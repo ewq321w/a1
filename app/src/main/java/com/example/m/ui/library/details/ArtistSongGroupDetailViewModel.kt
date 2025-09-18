@@ -19,7 +19,8 @@ data class ArtistSongGroupDetailUiState(
     val groupWithSongs: ArtistSongGroupWithSongs? = null,
     val songs: List<Song> = emptyList(),
     val songPendingRemoval: Song? = null,
-    val groupPendingDeletion: ArtistSongGroup? = null
+    val groupPendingDeletion: ArtistSongGroup? = null,
+    val nowPlayingMediaId: String? = null
 )
 
 sealed interface ArtistSongGroupDetailEvent {
@@ -78,6 +79,12 @@ class ArtistSongGroupDetailViewModel @Inject constructor(
                     groupWithSongs = group,
                     songs = group?.songs ?: emptyList()
                 ) }
+            }
+        }
+
+        viewModelScope.launch {
+            musicServiceConnection.currentMediaId.collect { mediaId ->
+                _uiState.update { it.copy(nowPlayingMediaId = mediaId) }
             }
         }
     }

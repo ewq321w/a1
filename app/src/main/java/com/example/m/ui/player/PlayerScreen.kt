@@ -3,6 +3,7 @@ package com.example.m.ui.player
 
 import android.annotation.SuppressLint
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -11,16 +12,46 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
+import androidx.compose.material.icons.filled.Comment
+import androidx.compose.material.icons.filled.PauseCircleFilled
+import androidx.compose.material.icons.filled.PlayCircleFilled
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.ripple.LocalRippleTheme
+import androidx.compose.material.ripple.RippleTheme
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,6 +82,20 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
+private object WhiteRippleTheme : RippleTheme {
+    @Composable
+    override fun defaultColor() = RippleTheme.defaultRippleColor(
+        contentColor = Color.White,
+        lightTheme = !isSystemInDarkTheme()
+    )
+
+    @Composable
+    override fun rippleAlpha() = RippleTheme.defaultRippleAlpha(
+        contentColor = Color.White,
+        lightTheme = !isSystemInDarkTheme()
+    )
+}
+
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerScreen(
@@ -58,13 +103,29 @@ fun PlayerScreen(
     viewModel: MainViewModel = hiltViewModel()
 ) {
     val nowPlaying by viewModel.nowPlaying.collectAsState()
-    val isPlaying by viewModel.isPlaying.collectAsState()
-    val playbackState by viewModel.playbackState.collectAsState()
+    val uiState by viewModel.uiState
     val placeholderColor = MaterialTheme.colorScheme.surfaceVariant
     val (gradientColor1, gradientColor2) = viewModel.playerGradientColors.value
 
     var showPlayerHub by remember { mutableStateOf(false) }
+    var isShowingComments by remember { mutableStateOf(false) }
     val hubSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var hubContentReady by remember { mutableStateOf(false) }
+
+    // Defer content composition until the sheet animation is complete.
+    val isSettledAndExpanded by remember {
+        derivedStateOf { hubSheetState.isVisible && hubSheetState.currentValue == SheetValue.Expanded }
+    }
+    LaunchedEffect(isSettledAndExpanded) {
+        if (isSettledAndExpanded) {
+            hubContentReady = true
+        }
+    }
+
+    // Reset content visibility when the sheet is hidden to re-trigger the deferral next time.
+    LaunchedEffect(hubSheetState.isVisible) {
+        if (!hubSheetState.isVisible) { hubContentReady = false }
+    }
 
     // Sync showing the sheet
     LaunchedEffect(showPlayerHub) {
@@ -91,10 +152,10 @@ fun PlayerScreen(
         radialGradientAlpha = 0.4f
     ) {
         BackHandler {
-            if (showPlayerHub) {
-                showPlayerHub = false
-            } else {
-                onDismiss()
+            when {
+                isShowingComments -> isShowingComments = false
+                showPlayerHub -> showPlayerHub = false
+                else -> onDismiss()
             }
         }
 
@@ -106,62 +167,71 @@ fun PlayerScreen(
                     .fillMaxSize()
                     .padding(padding)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Spacer(modifier = Modifier.height(100.dp))
+                Crossfade(targetState = isShowingComments, label = "Player/Comments Crossfade", animationSpec = tween(200)) { isCommentsVisible ->
+                    if (isCommentsVisible) {
+                        PlayerCommentsScreen(onBack = { isShowingComments = false })
+                    } else {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Spacer(modifier = Modifier.height(100.dp))
 
-                    AsyncImage(
-                        model = nowPlaying?.artworkUri,
-                        contentDescription = "Album Art",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1f)
-                            .clip(RoundedCornerShape(10.dp)),
-                        contentScale = ContentScale.Crop,
-                        placeholder = remember { ColorPainter(placeholderColor) },
-                        error = remember { ColorPainter(placeholderColor) }
-                    )
+                            AsyncImage(
+                                model = nowPlaying?.artworkUri,
+                                contentDescription = "Album Art",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(1f)
+                                    .clip(RoundedCornerShape(10.dp)),
+                                contentScale = ContentScale.Crop,
+                                placeholder = remember { ColorPainter(placeholderColor) },
+                                error = remember { ColorPainter(placeholderColor) }
+                            )
 
-                    Spacer(modifier = Modifier.weight(1f))
+                            Spacer(modifier = Modifier.weight(1f))
 
-                    PlayerControls(
-                        viewModel = viewModel,
-                        playbackState = playbackState,
-                        onShowQueue = { showPlayerHub = true }
-                    )
+                            PlayerControls(
+                                viewModel = viewModel,
+                                onShowQueue = { showPlayerHub = true },
+                                onShowComments = { isShowingComments = true }
+                            )
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                            Spacer(modifier = Modifier.height(16.dp))
+                        }
+                    }
                 }
 
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(8.dp)
-                ) {
-                    val iconColor = MaterialTheme.colorScheme.onBackground
-                    Canvas(
-                        modifier = Modifier.size(30.dp)
+
+                if (!isShowingComments) {
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(8.dp)
                     ) {
-                        val strokeWidth = 1.0.dp.toPx()
-                        val width = size.width
-                        val height = size.height
+                        val iconColor = MaterialTheme.colorScheme.onBackground
+                        Canvas(
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            val strokeWidth = 1.0.dp.toPx()
+                            val width = size.width
+                            val height = size.height
 
-                        val path = Path().apply {
-                            moveTo(width * 0.3f, height * 0.4f)
-                            lineTo(width * 0.5f, height * 0.6f)
-                            lineTo(width * 0.7f, height * 0.4f)
+                            val path = Path().apply {
+                                moveTo(width * 0.3f, height * 0.4f)
+                                lineTo(width * 0.5f, height * 0.6f)
+                                lineTo(width * 0.7f, height * 0.4f)
+                            }
+
+                            drawPath(
+                                path = path,
+                                color = iconColor,
+                                style = Stroke(width = strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                            )
                         }
-
-                        drawPath(
-                            path = path,
-                            color = iconColor,
-                            style = Stroke(width = strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round)
-                        )
                     }
                 }
 
@@ -175,8 +245,8 @@ fun PlayerScreen(
                         windowInsets = WindowInsets(0)
                     ) {
                         PlayerHubScreen(
-                            viewModel = viewModel,
-                            onDismiss = { showPlayerHub = false }
+                            onDismiss = { showPlayerHub = false },
+                            isContentReady = hubContentReady
                         )
                     }
                 }
@@ -189,10 +259,11 @@ fun PlayerScreen(
 @Composable
 private fun PlayerControls(
     viewModel: MainViewModel,
-    playbackState: com.example.m.playback.PlaybackState,
-    onShowQueue: () -> Unit
+    onShowQueue: () -> Unit,
+    onShowComments: () -> Unit
 ) {
     val isPlaying by viewModel.isPlaying.collectAsState()
+    val playbackState by viewModel.playbackState.collectAsState()
 
     var localSliderProgress by remember { mutableStateOf(0f) }
     var isUserInteracting by remember { mutableStateOf(false) }
@@ -229,6 +300,22 @@ private fun PlayerControls(
             )
         }
 
+        // Comment Button with translucent circle background
+        IconButton(
+            onClick = onShowComments,
+            modifier = Modifier
+                .padding(top = 8.dp)
+                .size(48.dp) // Make the touch target a bit larger
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f)) // Translucent background
+        ) {
+            Icon(
+                imageVector = Icons.Default.Comment,
+                contentDescription = "Show Comments",
+                tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+            )
+        }
+
         CustomPlayerSlider(
             value = localSliderProgress,
             isDragging = isUserInteracting,
@@ -241,7 +328,7 @@ private fun PlayerControls(
                 viewModel.onEvent(MainEvent.SeekTo(newPosition))
                 isUserInteracting = false
             },
-            modifier = Modifier.padding(top = 16.dp)
+            modifier = Modifier
         )
 
 
@@ -252,12 +339,12 @@ private fun PlayerControls(
         ) {
             Text(
                 text = formatDuration(displayedPosition),
-                color =  MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
                 fontSize = 12.sp
             )
             Text(
                 text = formatDuration(playbackState.totalDuration),
-                color =  MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
                 fontSize = 12.sp
             )
         }
@@ -293,8 +380,10 @@ private fun PlayerControls(
 
         Spacer(modifier = Modifier.height(40.dp))
 
-        TextButton(onClick = onShowQueue) {
-            Text("UP NEXT", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f))
+        CompositionLocalProvider(LocalRippleTheme provides WhiteRippleTheme) {
+            TextButton(onClick = onShowQueue) {
+                Text("UP NEXT", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f))
+            }
         }
     }
 }

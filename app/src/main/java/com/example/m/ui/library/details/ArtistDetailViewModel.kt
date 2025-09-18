@@ -46,7 +46,8 @@ data class ArtistDetailUiState(
     val pendingSongForNewGroup: Song? = null,
     val groupToRename: ArtistSongGroup? = null,
     val groupToDelete: ArtistSongGroup? = null,
-    val showConfirmRemoveDownloadsOnDisableDialog: Boolean = false
+    val showConfirmRemoveDownloadsOnDisableDialog: Boolean = false,
+    val nowPlayingMediaId: String? = null
 )
 
 sealed interface ArtistDetailEvent {
@@ -172,6 +173,12 @@ class ArtistDetailViewModel @Inject constructor(
 
             displayListFlow.collect { list ->
                 _uiState.update { it.copy(displayList = list) }
+            }
+        }
+
+        viewModelScope.launch {
+            musicServiceConnection.currentMediaId.collect { mediaId ->
+                _uiState.update { it.copy(nowPlayingMediaId = mediaId) }
             }
         }
     }

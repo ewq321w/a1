@@ -1,3 +1,4 @@
+// file: com/example/m/ui/search/VideoSearchLayout.kt
 package com.example.m.ui.search
 
 import androidx.compose.foundation.layout.PaddingValues
@@ -14,6 +15,7 @@ import coil.ImageLoader
 fun VideoSearchLayout(
     uiState: SearchUiState,
     videoStreamsWithStatus: List<SearchResultForList>,
+    nowPlayingMediaId: String?,
     imageLoader: ImageLoader,
     onVideoClick: (Int) -> Unit,
     onPlaylistClick: (AlbumResult) -> Unit,
@@ -37,9 +39,12 @@ fun VideoSearchLayout(
                 )
             }
             itemsIndexed(videoStreamsWithStatus.take(4), key = { index, item -> (item.result.streamInfo.url ?: "") + index }) { index, item ->
+                val normalizedUrl = item.result.streamInfo.url?.replace("music.youtube.com", "www.youtube.com")
+                val isPlaying = normalizedUrl == nowPlayingMediaId || item.localSong?.localFilePath == nowPlayingMediaId
                 SearchResultItem(
                     result = item.result,
                     localSong = item.localSong,
+                    isPlaying = isPlaying,
                     isSong = false,
                     imageLoader = imageLoader,
                     onPlay = { onVideoClick(index) },

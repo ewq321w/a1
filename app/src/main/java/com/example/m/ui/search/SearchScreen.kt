@@ -160,6 +160,7 @@ fun SearchScreen(
             uiState = uiState,
             songsWithStatus = songsWithStatus,
             videoStreamsWithStatus = videoStreamsWithStatus,
+            nowPlayingMediaId = uiState.nowPlayingMediaId,
             imageLoader = viewModel.imageLoader,
             onBack = { viewModel.onEvent(SearchEvent.HideDetailedView) },
             onSongClicked = { index -> viewModel.onEvent(SearchEvent.SongSelected(index)) },
@@ -275,6 +276,7 @@ fun SearchScreen(
                             MusicSearchLayout(
                                 uiState = uiState,
                                 songsWithStatus = songsWithStatus,
+                                nowPlayingMediaId = uiState.nowPlayingMediaId,
                                 imageLoader = viewModel.imageLoader,
                                 onSongClicked = { index -> viewModel.onEvent(SearchEvent.SongSelected(index)) },
                                 onAlbumClicked = { albumResult ->
@@ -296,6 +298,7 @@ fun SearchScreen(
                             VideoSearchLayout(
                                 uiState = uiState,
                                 videoStreamsWithStatus = videoStreamsWithStatus,
+                                nowPlayingMediaId = uiState.nowPlayingMediaId,
                                 imageLoader = viewModel.imageLoader,
                                 onVideoClick = { index -> viewModel.onEvent(SearchEvent.SongSelected(index)) },
                                 onPlaylistClick = { albumResult ->
@@ -327,6 +330,7 @@ private fun DetailedView(
     uiState: SearchUiState,
     songsWithStatus: List<SearchResultForList>,
     videoStreamsWithStatus: List<SearchResultForList>,
+    nowPlayingMediaId: String?,
     imageLoader: ImageLoader,
     onBack: () -> Unit,
     onSongClicked: (Int) -> Unit,
@@ -363,9 +367,12 @@ private fun DetailedView(
                 SearchCategory.SONGS, SearchCategory.VIDEOS -> {
                     val itemsToShow = if (category == SearchCategory.SONGS) songsWithStatus else videoStreamsWithStatus
                     itemsIndexed(itemsToShow, key = { index, item -> (item.result.streamInfo.url ?: "") + index }) { index, item ->
+                        val normalizedUrl = item.result.streamInfo.url?.replace("music.youtube.com", "www.youtube.com")
+                        val isPlaying = normalizedUrl == nowPlayingMediaId
                         SearchResultItem(
                             result = item.result,
                             localSong = item.localSong,
+                            isPlaying = isPlaying,
                             isSong = category == SearchCategory.SONGS,
                             imageLoader = imageLoader,
                             onPlay = { onSongClicked(index) },

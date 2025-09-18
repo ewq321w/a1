@@ -32,7 +32,8 @@ data class PlaylistDetailUiState(
     val playlist: Playlist? = null,
     val songs: List<Song> = emptyList(),
     val sortOrder: PlaylistSortOrder = PlaylistSortOrder.CUSTOM,
-    val showConfirmRemoveDownloadsOnDisableDialog: Boolean = false
+    val showConfirmRemoveDownloadsOnDisableDialog: Boolean = false,
+    val nowPlayingMediaId: String? = null
 )
 
 sealed interface PlaylistDetailEvent {
@@ -106,6 +107,12 @@ class PlaylistDetailViewModel @Inject constructor(
             }
             songsFlow.collect { songs ->
                 _uiState.update { it.copy(songs = songs) }
+            }
+        }
+
+        viewModelScope.launch {
+            musicServiceConnection.currentMediaId.collect { mediaId ->
+                _uiState.update { it.copy(nowPlayingMediaId = mediaId) }
             }
         }
     }

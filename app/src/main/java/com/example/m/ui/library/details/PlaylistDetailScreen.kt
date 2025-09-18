@@ -132,6 +132,7 @@ fun PlaylistDetailScreen(
             PlaylistDetailContent(
                 playlist = pl,
                 songs = uiState.songs,
+                nowPlayingMediaId = uiState.nowPlayingMediaId,
                 onEvent = viewModel::onEvent,
                 sortOrder = uiState.sortOrder,
                 snackbarHostState = snackbarHostState,
@@ -169,6 +170,7 @@ fun PlaylistDetailScreen(
 private fun PlaylistDetailContent(
     playlist: Playlist,
     songs: List<Song>,
+    nowPlayingMediaId: String?,
     onEvent: (PlaylistDetailEvent) -> Unit,
     sortOrder: PlaylistSortOrder,
     snackbarHostState: SnackbarHostState,
@@ -225,8 +227,10 @@ private fun PlaylistDetailContent(
                     .fillMaxSize()
             ) {
                 itemsIndexed(songs, key = { _, item -> item.songId }) { index, item ->
+                    val isPlaying = item.youtubeUrl == nowPlayingMediaId || item.localFilePath == nowPlayingMediaId
                     SongItem(
                         song = item,
+                        isPlaying = isPlaying,
                         onClick = { onEvent(PlaylistDetailEvent.SongSelected(index)) },
                         onAddToPlaylistClick = { onEvent(PlaylistDetailEvent.AddToPlaylist(item)) },
                         onRemoveFromPlaylistClick = { onEvent(PlaylistDetailEvent.RemoveSong(item.songId)) },

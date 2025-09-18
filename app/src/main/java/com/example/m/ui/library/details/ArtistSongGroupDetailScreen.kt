@@ -180,8 +180,10 @@ fun ArtistSongGroupDetailScreen(
                         .fillMaxSize()
                 ) {
                     itemsIndexed(uiState.songs, key = { _, item -> item.songId }) { index, item ->
+                        val isPlaying = item.youtubeUrl == uiState.nowPlayingMediaId || item.localFilePath == uiState.nowPlayingMediaId
                         SongItem(
                             song = item,
+                            isPlaying = isPlaying,
                             onClick = { viewModel.onEvent(ArtistSongGroupDetailEvent.SongSelected(index)) },
                             onAddToPlaylistClick = { viewModel.onEvent(ArtistSongGroupDetailEvent.AddToPlaylist(item)) },
                             onPlayNextClick = { viewModel.onEvent(ArtistSongGroupDetailEvent.PlayNext(item)) },

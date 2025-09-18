@@ -1,4 +1,4 @@
-// file: com/example.m/ui/main/MainViewModel.kt
+// file: com/example/m/ui/main/MainViewModel.kt
 package com.example.m.ui.main
 
 import android.content.Context
@@ -14,6 +14,8 @@ import androidx.palette.graphics.Palette
 import coil.ImageLoader
 import coil.request.ImageRequest
 import com.example.m.data.database.DownloadQueueDao
+import com.example.m.data.database.Song
+import com.example.m.data.database.SongDao
 import com.example.m.data.repository.LibraryRepository
 import com.example.m.download.DownloadService
 import com.example.m.playback.MusicServiceConnection
@@ -22,10 +24,13 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import javax.inject.Inject
 import android.graphics.Color as AndroidColor
 
@@ -47,6 +52,7 @@ class MainViewModel @Inject constructor(
     private val musicServiceConnection: MusicServiceConnection,
     private val downloadQueueDao: DownloadQueueDao,
     private val libraryRepository: LibraryRepository,
+    private val songDao: SongDao,
     @ApplicationContext private val context: Context,
     private val imageLoader: ImageLoader
 ) : ViewModel() {
@@ -57,6 +63,10 @@ class MainViewModel @Inject constructor(
     val playbackState = musicServiceConnection.playbackState
     val queue = musicServiceConnection.queue
     val currentMediaItemIndex = musicServiceConnection.currentMediaItemIndex
+    val currentMediaId = musicServiceConnection.currentMediaId
+
+    private val _queueSongs = MutableStateFlow<List<Pair<String, Song?>>>(emptyList())
+    val queueSongs: StateFlow<List<Pair<String, Song?>>> = _queueSongs
 
     private val _uiState = mutableStateOf(MainUiState())
     val uiState: State<MainUiState> = _uiState
@@ -89,11 +99,54 @@ class MainViewModel @Inject constructor(
                 updatePlayerColors(uri)
             }
         }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            musicServiceConnection.queue.collect { itemsWithUid ->
+                if (itemsWithUid.isEmpty()) {
+                    _queueSongs.value = emptyList()
+                    return@collect
+                }
+
+                val mediaIds = itemsWithUid.map { it.second.mediaId }
+                val urls = mediaIds.filter { it.startsWith("http") }
+                val paths = mediaIds.filterNot { it.startsWith("http") }
+
+                val songsFromUrls = if (urls.isNotEmpty()) songDao.getSongsByUrls(urls) else emptyList()
+                val songsFromPaths = if (paths.isNotEmpty()) songDao.getSongsByFilePaths(paths) else emptyList()
+
+                val songMap = (songsFromUrls.associateBy { it.youtubeUrl }) + (songsFromPaths.associateBy { it.localFilePath })
+
+                val songsWithStableIds = itemsWithUid.map { (uid, mediaItem) ->
+                    uid to songMap[mediaItem.mediaId]
+                }
+                _queueSongs.value = songsWithStableIds
+            }
+        }
     }
 
     fun removeQueueItem(index: Int) = musicServiceConnection.removeQueueItem(index)
-    fun moveQueueItem(from: Int, to: Int) = musicServiceConnection.moveQueueItem(from, to)
+
+    fun moveQueueItem(from: Int, to: Int) {
+        // Perform an immediate, optimistic update on the local state for a smooth UI.
+        val currentQueue = _queueSongs.value.toMutableList()
+        if (from >= 0 && from < currentQueue.size && to >= 0 && to < currentQueue.size) {
+            val movedItem = currentQueue.removeAt(from)
+            currentQueue.add(to, movedItem)
+            _queueSongs.value = currentQueue
+        }
+
+        // Then, perform the actual move command. The subsequent update from the service
+        // should result in the same state, making the change seamless.
+        musicServiceConnection.moveQueueItem(from, to)
+    }
+
     fun skipToQueueItem(index: Int) = musicServiceConnection.skipToQueueItem(index)
+
+    fun playSingleSong(item: Any) {
+        viewModelScope.launch {
+            musicServiceConnection.playSingleSong(item)
+        }
+    }
 
     private fun generateHarmoniousVibrantColors(): Pair<Color, Color> {
         val random = java.util.Random()

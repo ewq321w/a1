@@ -47,6 +47,7 @@ internal fun formatPlayCount(count: Int): String {
 @Composable
 fun SongItem(
     song: Song,
+    isPlaying: Boolean,
     onClick: () -> Unit,
     onAddToPlaylistClick: () -> Unit,
     onPlayNextClick: () -> Unit,
@@ -80,14 +81,10 @@ fun SongItem(
         )
     }
 
-    val displayTitle = remember(song.title) {
-        song.title.replace(" (Remastered)", "")
-    }
-
     ListItem(
         headlineContent = {
             Text(
-                displayTitle,
+                song.title,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyMedium
@@ -231,7 +228,7 @@ fun SongItem(
             }
         },
         colors = ListItemDefaults.colors(
-            containerColor = Color.Transparent,
+            containerColor = if (isPlaying) Color.White.copy(alpha = 0.1f) else Color.Transparent,
             headlineColor = MaterialTheme.colorScheme.onSurface,
             supportingColor = MaterialTheme.colorScheme.onSurfaceVariant,
             trailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant

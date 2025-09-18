@@ -12,6 +12,8 @@ import org.schabi.newpipe.extractor.channel.ChannelInfo
 import org.schabi.newpipe.extractor.channel.ChannelInfoItem
 import org.schabi.newpipe.extractor.channel.tabs.ChannelTabInfo
 import org.schabi.newpipe.extractor.channel.tabs.ChannelTabs
+import org.schabi.newpipe.extractor.comments.CommentsInfo
+import org.schabi.newpipe.extractor.comments.CommentsInfoItem
 import org.schabi.newpipe.extractor.linkhandler.ListLinkHandler
 import org.schabi.newpipe.extractor.linkhandler.SearchQueryHandler
 import org.schabi.newpipe.extractor.playlist.PlaylistInfo
@@ -138,6 +140,40 @@ class YoutubeRepository @Inject constructor() {
                 result
             } catch (e: Exception) {
                 Timber.e(e, "Failed to get stream info for URL: $url")
+                null
+            }
+        }
+    }
+
+    suspend fun getRelatedStreams(videoUrl: String): List<StreamInfoItem>? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val streamInfo = getStreamInfo(videoUrl)
+                streamInfo?.relatedStreams?.filterIsInstance<StreamInfoItem>()
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to get related streams for URL: $videoUrl")
+                null
+            }
+        }
+    }
+
+    suspend fun getComments(url: String): CommentsInfo? {
+        return withContext(Dispatchers.IO) {
+            try {
+                CommentsInfo.getInfo(ServiceList.YouTube, url)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to get comments for URL: $url")
+                null
+            }
+        }
+    }
+
+    suspend fun getMoreComments(commentsInfo: CommentsInfo, page: Page): ListExtractor.InfoItemsPage<CommentsInfoItem>? {
+        return withContext(Dispatchers.IO) {
+            try {
+                CommentsInfo.getMoreItems(ServiceList.YouTube, commentsInfo, page)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to get more comments")
                 null
             }
         }

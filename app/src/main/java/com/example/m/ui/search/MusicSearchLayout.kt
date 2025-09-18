@@ -1,3 +1,4 @@
+// file: com/example/m/ui/search/MusicSearchLayout.kt
 package com.example.m.ui.search
 
 import androidx.compose.foundation.layout.PaddingValues
@@ -14,6 +15,7 @@ import coil.ImageLoader
 fun MusicSearchLayout(
     uiState: SearchUiState,
     songsWithStatus: List<SearchResultForList>,
+    nowPlayingMediaId: String?,
     imageLoader: ImageLoader,
     onSongClicked: (Int) -> Unit,
     onAlbumClicked: (AlbumResult) -> Unit,
@@ -38,9 +40,12 @@ fun MusicSearchLayout(
                 )
             }
             itemsIndexed(songsWithStatus.take(4), key = { index, item -> (item.result.streamInfo.url ?: "") + index }) { index, item ->
+                val normalizedUrl = item.result.streamInfo.url?.replace("music.youtube.com", "www.youtube.com")
+                val isPlaying = normalizedUrl == nowPlayingMediaId || item.localSong?.localFilePath == nowPlayingMediaId
                 SearchResultItem(
                     result = item.result,
                     localSong = item.localSong,
+                    isPlaying = isPlaying,
                     isSong = true,
                     imageLoader = imageLoader,
                     onPlay = { onSongClicked(index) },

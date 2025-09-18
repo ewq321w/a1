@@ -1,6 +1,8 @@
+// file: com/example/m/ui/search/SearchItems.kt
 package com.example.m.ui.search
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -12,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -210,6 +213,7 @@ fun AlbumItem(
 fun SearchResultItem(
     result: SearchResult,
     localSong: Song?,
+    isPlaying: Boolean,
     isSong: Boolean,
     imageLoader: ImageLoader,
     onPlay: () -> Unit,
@@ -225,6 +229,7 @@ fun SearchResultItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .background(if (isPlaying) Color.White.copy(alpha = 0.1f) else Color.Transparent)
             .clickable(onClick = onPlay)
             .height(72.dp)
             .padding(horizontal = 16.dp),

@@ -21,7 +21,9 @@ private const val TAG = "HomeViewModel"
 data class HomeUiState(
     val recentMix: List<StreamInfoItem> = emptyList(),
     val discoveryMix: List<StreamInfoItem> = emptyList(),
-    internal val recentMixSongs: List<Song> = emptyList() // Internal state for playback
+    internal val recentMixSongs: List<Song> = emptyList(), // Internal state for playback
+    val nowPlayingMediaId: String? = null,
+    val isPlaying: Boolean = false
 )
 
 sealed interface HomeEvent {
@@ -48,6 +50,17 @@ class HomeViewModel @Inject constructor(
                 } else {
                     _uiState.update { it.copy(recentMix = emptyList(), discoveryMix = emptyList(), recentMixSongs = emptyList()) }
                 }
+            }
+        }
+
+        viewModelScope.launch {
+            musicServiceConnection.currentMediaId.collect { mediaId ->
+                _uiState.update { it.copy(nowPlayingMediaId = mediaId) }
+            }
+        }
+        viewModelScope.launch {
+            musicServiceConnection.isPlaying.collect { isPlaying ->
+                _uiState.update { it.copy(isPlaying = isPlaying) }
             }
         }
     }

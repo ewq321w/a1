@@ -1,17 +1,22 @@
 package com.example.m.ui.home
 
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -73,7 +78,9 @@ fun HomeScreen(
                         items = uiState.recentMix,
                         onItemClick = { index ->
                             viewModel.onEvent(HomeEvent.PlayRecentMix(index))
-                        }
+                        },
+                        nowPlayingMediaId = uiState.nowPlayingMediaId,
+                        isPlaying = uiState.isPlaying
                     )
                 }
                 item {
@@ -82,7 +89,9 @@ fun HomeScreen(
                         items = uiState.discoveryMix,
                         onItemClick = { index ->
                             viewModel.onEvent(HomeEvent.PlayDiscoveryMix(index))
-                        }
+                        },
+                        nowPlayingMediaId = uiState.nowPlayingMediaId,
+                        isPlaying = uiState.isPlaying
                     )
                 }
             }
@@ -94,7 +103,9 @@ fun HomeScreen(
 fun RecommendationSection(
     title: String,
     items: List<StreamInfoItem>,
-    onItemClick: (Int) -> Unit
+    onItemClick: (Int) -> Unit,
+    nowPlayingMediaId: String?,
+    isPlaying: Boolean
 ) {
     if (items.isNotEmpty()) {
         Column {
@@ -111,9 +122,13 @@ fun RecommendationSection(
             ) {
                 itemsIndexed(items) { index, item ->
                     val rememberedOnClick = remember { { onItemClick(index) } }
+                    val normalizedUrl = item.url?.replace("music.youtube.com", "www.youtube.com")
+                    val isCurrentlyPlayingItem = normalizedUrl == nowPlayingMediaId
                     RecommendationItem(
                         item = item,
-                        onClick = rememberedOnClick
+                        onClick = rememberedOnClick,
+                        isCurrentlyPlaying = isCurrentlyPlayingItem,
+                        isPlaying = isPlaying
                     )
                 }
             }
@@ -124,7 +139,9 @@ fun RecommendationSection(
 @Composable
 fun RecommendationItem(
     item: StreamInfoItem,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    isCurrentlyPlaying: Boolean,
+    isPlaying: Boolean
 ) {
     Column(
         modifier = Modifier
@@ -133,16 +150,37 @@ fun RecommendationItem(
     ) {
         val highQualityThumbnailUrl = item.getHighQualityThumbnailUrl()
 
-        AsyncImage(
-            model = highQualityThumbnailUrl,
-            contentDescription = item.name,
-            modifier = Modifier
-                .size(120.dp)
-                .clip(RoundedCornerShape(3.dp)),
-            contentScale = ContentScale.Crop,
-            error = painterResource(id = R.drawable.placeholder_gray),
-            placeholder = painterResource(id = R.drawable.placeholder_gray)
-        )
+        Box {
+            AsyncImage(
+                model = highQualityThumbnailUrl,
+                contentDescription = item.name,
+                modifier = Modifier
+                    .size(120.dp)
+                    .clip(RoundedCornerShape(3.dp)),
+                contentScale = ContentScale.Crop,
+                error = painterResource(id = R.drawable.placeholder_gray),
+                placeholder = painterResource(id = R.drawable.placeholder_gray)
+            )
+
+            if (isCurrentlyPlaying) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(
+                            Color.Black.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(3.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = if (isPlaying) "Pause" else "Play",
+                        tint = Color.White,
+                        modifier = Modifier.size(48.dp)
+                    )
+                }
+            }
+        }
         Text(
             text = item.name ?: "Unknown",
             color = MaterialTheme.colorScheme.onBackground,

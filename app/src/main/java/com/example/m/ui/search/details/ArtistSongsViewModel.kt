@@ -38,7 +38,8 @@ data class ArtistSongsUiState(
     val searchType: String = "video",
     val nextPage: Page? = null,
     val songsTabHandler: ListLinkHandler? = null,
-    val searchHandler: SearchQueryHandler? = null
+    val searchHandler: SearchQueryHandler? = null,
+    val nowPlayingMediaId: String? = null
 )
 
 sealed interface ArtistSongsEvent {
@@ -84,6 +85,11 @@ class ArtistSongsViewModel @Inject constructor(
         viewModelScope.launch {
             allLocalSongs.drop(1).collect {
                 refreshSongStatuses()
+            }
+        }
+        viewModelScope.launch {
+            musicServiceConnection.currentMediaId.collect { mediaId ->
+                _uiState.update { it.copy(nowPlayingMediaId = mediaId) }
             }
         }
     }

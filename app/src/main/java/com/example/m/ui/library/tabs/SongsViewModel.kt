@@ -26,7 +26,8 @@ data class SongsUiState(
     val playlistFilter: PlaylistFilter = PlaylistFilter.ALL,
     val groupingFilter: GroupingFilter = GroupingFilter.ALL,
     val itemPendingDeletion: Song? = null,
-    val sortOrder: SongSortOrder = SongSortOrder.ARTIST
+    val sortOrder: SongSortOrder = SongSortOrder.ARTIST,
+    val nowPlayingMediaId: String? = null
 )
 
 sealed interface SongsTabEvent {
@@ -112,6 +113,12 @@ class SongsViewModel @Inject constructor(
         }.onEach { songs ->
             _uiState.update { it.copy(songs = songs) }
         }.launchIn(viewModelScope)
+
+        viewModelScope.launch {
+            musicServiceConnection.currentMediaId.collect { mediaId ->
+                _uiState.update { it.copy(nowPlayingMediaId = mediaId) }
+            }
+        }
     }
 
     private fun getSortedSongsFlow(order: SongSortOrder, groupId: Long): Flow<List<Song>> {

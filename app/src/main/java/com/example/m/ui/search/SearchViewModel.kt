@@ -68,7 +68,8 @@ data class SearchUiState(
     val playlistsHandler: SearchQueryHandler? = null,
     val artistsHandler: SearchQueryHandler? = null,
     val videoStreamsHandler: SearchQueryHandler? = null,
-    val videoChannelsHandler: SearchQueryHandler? = null
+    val videoChannelsHandler: SearchQueryHandler? = null,
+    val nowPlayingMediaId: String? = null
 )
 
 sealed interface SearchEvent {
@@ -134,6 +135,12 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch {
             allLocalSongs.drop(1).collect {
                 refreshResultStatuses()
+            }
+        }
+
+        viewModelScope.launch {
+            musicServiceConnection.currentMediaId.collect { mediaId ->
+                _uiState.update { it.copy(nowPlayingMediaId = mediaId) }
             }
         }
     }

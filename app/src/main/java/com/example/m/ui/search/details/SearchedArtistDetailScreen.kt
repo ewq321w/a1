@@ -198,9 +198,12 @@ fun SearchedArtistDetailScreen(
                         }
                         items(uiState.songs.take(5)) { item ->
                             val index = uiState.songs.indexOf(item)
+                            val normalizedUrl = item.result.streamInfo.url?.replace("music.youtube.com", "www.youtube.com")
+                            val isPlaying = normalizedUrl == uiState.nowPlayingMediaId || item.localSong?.localFilePath == uiState.nowPlayingMediaId
                             SearchResultItem(
                                 result = item.result,
                                 localSong = item.localSong,
+                                isPlaying = isPlaying,
                                 isSong = uiState.searchType == "music",
                                 imageLoader = viewModel.imageLoader,
                                 onPlay = { viewModel.onEvent(SearchedArtistDetailEvent.SongSelected(index)) },

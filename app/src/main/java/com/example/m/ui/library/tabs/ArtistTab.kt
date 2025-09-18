@@ -79,9 +79,11 @@ fun ArtistsTabContent(
 
     uiState.artistToMove?.let { artist ->
         ModalBottomSheet(onDismissRequest = { viewModel.onEvent(ArtistTabEvent.DismissMoveArtistSheet) }) {
+            // Filter out the artist's current group, if they are in one.
+            val availableGroups = uiState.allArtistGroups.filter { it.groupId != artist.parentGroupId }
             MoveToGroupSheet(
                 artistName = artist.name,
-                groups = uiState.allArtistGroups,
+                groups = availableGroups, // Use the filtered list
                 onGroupSelected = { groupId -> viewModel.onEvent(ArtistTabEvent.MoveArtistToGroup(groupId)) }
             )
         }

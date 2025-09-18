@@ -9,7 +9,7 @@ val Primary = Color(0xFF4F90E7) // YouTube's iconic red
 // --- Dark Theme Colors (YouTube Music inspired) ---
 val DarkBackground = Color(0xFF050505) // Very dark background
 val DarkSurface = Color(0xFF0F0F0F)    // Slightly lighter dark gray for surfaces/cards
-val DarkSurfaceVariant = Color(0xFF141414) // Even lighter dark gray for distinct components (e.g., mini-player, nav bar)
+val DarkSurfaceVariant = Color(0xFF171717) // Even lighter dark gray for distinct components (e.g., mini-player, nav bar)
 val DarkOnPrimary = Color(0xFFFFFFFF)  // Text/icons on primary (red)
 val DarkOnBackground = Color(0xFFFFFFFF) // Text/icons on background
 val DarkOnSurface = Color(0xFFFFFFFF)  // Text/icons on surface

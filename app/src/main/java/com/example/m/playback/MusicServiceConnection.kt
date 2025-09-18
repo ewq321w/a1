@@ -62,11 +62,14 @@ class MusicServiceConnection @Inject constructor(
     private val _playbackState = MutableStateFlow(PlaybackState())
     val playbackState: StateFlow<PlaybackState> = _playbackState
 
-    private val _queue = MutableStateFlow<List<MediaItem>>(emptyList())
-    val queue: StateFlow<List<MediaItem>> = _queue
+    private val _queue = MutableStateFlow<List<Pair<String, MediaItem>>>(emptyList())
+    val queue: StateFlow<List<Pair<String, MediaItem>>> = _queue
 
     private val _currentMediaItemIndex = MutableStateFlow(0)
     val currentMediaItemIndex: StateFlow<Int> = _currentMediaItemIndex
+
+    private val _currentMediaId = MutableStateFlow<String?>(null)
+    val currentMediaId: StateFlow<String?> = _currentMediaId
 
     private var progressUpdateJob: Job? = null
     private var coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -88,6 +91,7 @@ class MusicServiceConnection @Inject constructor(
                 _isLoading.value = browser.isLoading
                 _playerState.value = browser.playbackState
                 _currentMediaItemIndex.value = browser.currentMediaItemIndex
+                _currentMediaId.value = browser.currentMediaItem?.mediaId
                 updateQueue()
                 if (browser.playbackState == Player.STATE_READY || browser.isPlaying) {
                     startProgressUpdates()
@@ -141,7 +145,8 @@ class MusicServiceConnection @Inject constructor(
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             super.onMediaItemTransition(mediaItem, reason)
 
-            val mediaId = mediaItem?.mediaId ?: return
+            val mediaId = mediaItem?.mediaId
+            _currentMediaId.value = mediaId
             Timber.tag(TAG).d("Media item changed. Media ID from player: '$mediaId'")
 
             _currentMediaItemIndex.value = mediaBrowser?.currentMediaItemIndex ?: 0
@@ -149,10 +154,13 @@ class MusicServiceConnection @Inject constructor(
             prefetchNextTrackStream()
             savePlaybackState()
 
-            coroutineScope.launch(Dispatchers.IO) {
-                val song = if (mediaId.startsWith("http")) songDao.getSongByUrl(mediaId) else songDao.getSongByFilePath(mediaId)
-                currentSongId = song?.songId
+            if (mediaId != null) {
+                coroutineScope.launch(Dispatchers.IO) {
+                    val song = if (mediaId.startsWith("http")) songDao.getSongByUrl(mediaId) else songDao.getSongByFilePath(mediaId)
+                    currentSongId = song?.songId
+                }
             }
+
 
             val currentQueueSize = mediaBrowser?.mediaItemCount ?: 0
             val currentIndex = mediaBrowser?.currentMediaItemIndex ?: 0
@@ -186,8 +194,17 @@ class MusicServiceConnection @Inject constructor(
 
     private fun updateQueue() {
         runPlayerCommand { browser ->
-            val mediaItems = (0 until browser.mediaItemCount).map { browser.getMediaItemAt(it) }
-            _queue.value = mediaItems
+            val timeline = browser.currentTimeline
+            if (timeline.isEmpty) {
+                _queue.value = emptyList()
+            } else {
+                val window = Timeline.Window()
+                val itemsWithUid = (0 until timeline.windowCount).map { i ->
+                    timeline.getWindow(i, window)
+                    window.uid.toString() to browser.getMediaItemAt(i)
+                }
+                _queue.value = itemsWithUid
+            }
             _currentMediaItemIndex.value = browser.currentMediaItemIndex
         }
     }
@@ -212,6 +229,7 @@ class MusicServiceConnection @Inject constructor(
         runPlayerCommand { browser ->
             if (index >= 0 && index < browser.mediaItemCount) {
                 browser.seekTo(index, C.TIME_UNSET)
+                browser.play()
             }
         }
     }
@@ -426,7 +444,7 @@ class MusicServiceConnection @Inject constructor(
         val mediaMetadata = createMediaMetadata(song)
         return MediaItem.Builder()
             .setUri(song.localFilePath!!.toUri())
-            .setMediaId(song.localFilePath!!.toUri().toString())
+            .setMediaId(song.youtubeUrl)
             .setMediaMetadata(mediaMetadata)
             .build()
     }

@@ -29,7 +29,8 @@ data class SearchedArtistDetailsUiState(
     val releases: List<PlaylistInfoItem> = emptyList(),
     val errorMessage: String? = null,
     val searchType: String = "video",
-    val showConfirmAddAllDialog: Boolean = false
+    val showConfirmAddAllDialog: Boolean = false,
+    val nowPlayingMediaId: String? = null
 )
 
 sealed interface SearchedArtistDetailEvent {
@@ -77,6 +78,11 @@ class SearchedArtistDetailViewModel @Inject constructor(
         viewModelScope.launch {
             localLibrary.drop(1).collect {
                 refreshSongStatuses()
+            }
+        }
+        viewModelScope.launch {
+            musicServiceConnection.currentMediaId.collect { mediaId ->
+                _uiState.update { it.copy(nowPlayingMediaId = mediaId) }
             }
         }
     }

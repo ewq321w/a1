@@ -30,7 +30,8 @@ data class AlbumDetailUiState(
     val errorMessage: String? = null,
     val searchType: String = "music",
     val nextPage: Page? = null,
-    val showConfirmAddAllDialog: Boolean = false
+    val showConfirmAddAllDialog: Boolean = false,
+    val nowPlayingMediaId: String? = null
 )
 
 sealed interface AlbumDetailEvent {
@@ -76,6 +77,11 @@ class AlbumDetailViewModel @Inject constructor(
         loadAlbumDetails()
         viewModelScope.launch {
             localLibrary.drop(1).collect { refreshSongStatuses() }
+        }
+        viewModelScope.launch {
+            musicServiceConnection.currentMediaId.collect { mediaId ->
+                _uiState.update { it.copy(nowPlayingMediaId = mediaId) }
+            }
         }
     }
 

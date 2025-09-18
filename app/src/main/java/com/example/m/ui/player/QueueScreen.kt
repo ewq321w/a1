@@ -2,56 +2,76 @@
 package com.example.m.ui.player
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DragHandle
-import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.ColorPainter
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.media3.common.MediaItem
-import kotlinx.coroutines.launch
+import coil.compose.AsyncImage
+import com.example.m.data.database.Song
 import org.burnoutcrew.reorderable.ReorderableItem
-import org.burnoutcrew.reorderable.detectReorderAfterLongPress
+import org.burnoutcrew.reorderable.detectReorder
 import org.burnoutcrew.reorderable.rememberReorderableLazyListState
 import org.burnoutcrew.reorderable.reorderable
 
 @Composable
 fun QueueTabContent(
-    queue: List<MediaItem>,
+    queue: List<Pair<String, Song?>>,
+    isLoading: Boolean,
     currentMediaItemIndex: Int,
     onPlayItem: (Int) -> Unit,
     onMoveItem: (from: Int, to: Int) -> Unit
 ) {
-    val reorderableState = rememberReorderableLazyListState(
-        onMove = { from, to -> onMoveItem(from.index, to.index) }
-    )
-
-    LazyColumn(
-        state = reorderableState.listState,
-        modifier = Modifier
-            .fillMaxSize()
-            .reorderable(reorderableState)
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
     ) {
-        itemsIndexed(queue, key = { index, item -> "${item.mediaId}-$index" }) { index, item ->
-            ReorderableItem(reorderableState, key = "${item.mediaId}-$index") {
-                val isPlaying = index == currentMediaItemIndex
-                QueueItem(
-                    mediaItem = item,
-                    isPlaying = isPlaying,
-                    onPlay = { onPlayItem(index) },
-                    modifier = Modifier.detectReorderAfterLongPress(reorderableState)
-                )
+        if (isLoading) {
+            CircularProgressIndicator()
+        } else {
+            val reorderableState = rememberReorderableLazyListState(
+                onMove = { from, to -> onMoveItem(from.index, to.index) }
+            )
+            val items = remember(queue) { queue.filter { it.second != null } }
+
+            LaunchedEffect(Unit) {
+                if (items.indices.contains(currentMediaItemIndex)) {
+                    reorderableState.listState.scrollToItem(index = currentMediaItemIndex)
+                }
+            }
+
+            LazyColumn(
+                state = reorderableState.listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .reorderable(reorderableState),
+                contentPadding = PaddingValues(bottom = 36.dp, top = 12.dp)
+            ) {
+                itemsIndexed(items, key = { _, item -> item.first }) { index, item ->
+                    val song = item.second!!
+                    ReorderableItem(reorderableState, key = item.first) { isDragging ->
+                        val isPlaying = index == currentMediaItemIndex
+                        QueueItem(
+                            song = song,
+                            isPlaying = isPlaying,
+                            onPlay = { onPlayItem(index) },
+                            modifier = Modifier.shadow(if (isDragging) 4.dp else 0.dp),
+                            dragHandleModifier = Modifier.detectReorder(reorderableState)
+                        )
+                    }
+                }
             }
         }
     }
@@ -59,49 +79,58 @@ fun QueueTabContent(
 
 @Composable
 private fun QueueItem(
-    mediaItem: MediaItem,
+    song: Song,
     isPlaying: Boolean,
     onPlay: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    dragHandleModifier: Modifier = Modifier
 ) {
-    val textColor = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+    val placeholderColor = MaterialTheme.colorScheme.surfaceVariant
 
     ListItem(
         headlineContent = {
             Text(
-                text = mediaItem.mediaMetadata.title?.toString() ?: "Unknown Title",
-                color = textColor,
+                text = song.title,
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium
             )
         },
         supportingContent = {
             Text(
-                text = mediaItem.mediaMetadata.artist?.toString() ?: "Unknown Artist",
+                text = song.artist,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodySmall
             )
         },
         leadingContent = {
-            if (isPlaying) {
-                Icon(
-                    Icons.Default.GraphicEq,
-                    contentDescription = "Currently Playing",
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
+            AsyncImage(
+                model = song.thumbnailUrl,
+                contentDescription = "Album art for ${song.title}",
+                modifier = Modifier
+                    .size(54.dp)
+                    .clip(RoundedCornerShape(3.dp)),
+                contentScale = ContentScale.Crop,
+                placeholder = remember { ColorPainter(placeholderColor) },
+                error = remember { ColorPainter(placeholderColor) }
+            )
         },
         trailingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     Icons.Default.DragHandle,
                     contentDescription = "Drag to reorder",
-                    modifier = modifier.padding(end = 10.dp),
+                    modifier = dragHandleModifier,
                     tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
                 )
             }
         },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.clickable(onClick = onPlay)
+        colors = ListItemDefaults.colors(
+            containerColor = if (isPlaying) Color.White.copy(alpha = 0.1f) else Color.Transparent
+        ),
+        modifier = modifier.clickable(onClick = onPlay).defaultMinSize(minHeight = 72.dp)
     )
 }

@@ -1,4 +1,4 @@
-// file: com/example.m/ui/main/MainScreen.kt
+// file: com.example.m/ui/main/MainScreen.kt
 package com.example.m.ui.main
 
 import android.annotation.SuppressLint
@@ -14,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -139,7 +140,8 @@ fun MainScreen() {
                 windowInsets = WindowInsets(0, 0, 0, 0),
                 dragHandle = null,
                 containerColor = Color.Transparent,
-                scrimColor = Color.Transparent
+                scrimColor = Color.Transparent,
+                shape = RectangleShape
             ) {
                 PlayerScreen(onDismiss = {
                     mainViewModel.onEvent(MainEvent.HidePlayerScreen)

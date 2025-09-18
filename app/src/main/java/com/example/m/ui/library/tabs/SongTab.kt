@@ -39,8 +39,10 @@ fun SongsTabContent(
             items = uiState.songs,
             key = { _, song -> song.songId }
         ) { index, song ->
+            val isPlaying = song.youtubeUrl == uiState.nowPlayingMediaId || song.localFilePath == uiState.nowPlayingMediaId
             SongItem(
                 song = song,
+                isPlaying = isPlaying,
                 onClick = { viewModel.onEvent(SongsTabEvent.SongSelected(index)) },
                 onAddToPlaylistClick = { viewModel.onEvent(SongsTabEvent.AddToPlaylist(song)) },
                 onDeleteClick = { viewModel.onEvent(SongsTabEvent.SetItemForDeletion(song)) },

@@ -270,8 +270,10 @@ fun ArtistDetailScreen(
                             }
                             is ArtistDetailListItem.SongItem -> {
                                 val song = item.song
+                                val isPlaying = song.youtubeUrl == uiState.nowPlayingMediaId || song.localFilePath == uiState.nowPlayingMediaId
                                 SongItem(
                                     song = song,
+                                    isPlaying = isPlaying,
                                     onClick = { viewModel.onEvent(ArtistDetailEvent.SongSelected(song)) },
                                     onAddToPlaylistClick = { viewModel.onEvent(ArtistDetailEvent.AddToPlaylist(song)) },
                                     onDeleteClick = { viewModel.onEvent(ArtistDetailEvent.SetItemForDeletion(song)) },

@@ -481,19 +481,26 @@ fun MoveToGroupSheet(
             colors = ListItemDefaults.colors(containerColor = Color.Transparent)
         )
         HorizontalDivider()
-        LazyColumn {
-            items(groups) { group ->
-                ListItem(
-                    headlineContent = { Text(group.name) },
-                    leadingContent = {
-                        Icon(
-                            Icons.Default.Folder,
-                            contentDescription = "Group"
-                        )
-                    },
-                    modifier = Modifier.clickable { onGroupSelected(group.groupId) },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent)
-                )
+        if (groups.isEmpty()) {
+            ListItem(
+                headlineContent = { Text("No other groups available.") },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+            )
+        } else {
+            LazyColumn {
+                items(groups) { group ->
+                    ListItem(
+                        headlineContent = { Text(group.name) },
+                        leadingContent = {
+                            Icon(
+                                Icons.Default.Folder,
+                                contentDescription = "Group"
+                            )
+                        },
+                        modifier = Modifier.clickable { onGroupSelected(group.groupId) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+                    )
+                }
             }
         }
     }

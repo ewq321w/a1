@@ -35,7 +35,7 @@ fun ArtistSongsScreen(
     viewModel: ArtistSongsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val title = if (uiState.searchType == "music") "Popular" else "Videos"
+    val title = if (uiState.searchType == "music") "Popular Songs" else "Videos"
     val listState = rememberLazyListState()
     val dialogState by viewModel.dialogState.collectAsState()
     val playlistActionState by viewModel.playlistActionState.collectAsState()
@@ -148,9 +148,12 @@ fun ArtistSongsScreen(
                     modifier = Modifier.padding(paddingValues).fillMaxSize()
                 ) {
                     itemsIndexed(uiState.songs, key = { index, item -> (item.result.streamInfo.url ?: "") + index }) { index, item ->
+                        val normalizedUrl = item.result.streamInfo.url?.replace("music.youtube.com", "www.youtube.com")
+                        val isPlaying = normalizedUrl == uiState.nowPlayingMediaId || item.localSong?.localFilePath == uiState.nowPlayingMediaId
                         SearchResultItem(
                             result = item.result,
                             localSong = item.localSong,
+                            isPlaying = isPlaying,
                             isSong = uiState.searchType == "music",
                             imageLoader = viewModel.imageLoader,
                             onPlay = { viewModel.onEvent(ArtistSongsEvent.SongSelected(index)) },

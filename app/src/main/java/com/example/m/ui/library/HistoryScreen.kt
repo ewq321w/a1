@@ -215,8 +215,10 @@ fun HistoryScreen(
                 ) {
                     itemsIndexed(uiState.history, key = { _, item -> item.logId }) { index, item ->
                         val song = item.song
+                        val isPlaying = song.youtubeUrl == uiState.nowPlayingMediaId || song.localFilePath == uiState.nowPlayingMediaId
                         SongItem(
                             song = song,
+                            isPlaying = isPlaying,
                             onClick = { viewModel.onEvent(HistoryEvent.SongSelected(index)) },
                             onAddToPlaylistClick = { viewModel.onEvent(HistoryEvent.AddToPlaylist(song)) },
                             onPlayNextClick = { viewModel.onEvent(HistoryEvent.PlayNext(song)) },

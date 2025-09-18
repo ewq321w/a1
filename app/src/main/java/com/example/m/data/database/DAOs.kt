@@ -123,6 +123,9 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE youtubeUrl IN (:youtubeUrls)")
     suspend fun getSongsByUrls(youtubeUrls: List<String>): List<Song>
 
+    @Query("SELECT * FROM songs WHERE localFilePath IN (:paths)")
+    suspend fun getSongsByFilePaths(paths: List<String>): List<Song>
+
     @Query("SELECT * FROM songs WHERE downloadStatus = 'DOWNLOADED'")
     suspend fun getAllDownloadedSongsOnce(): List<Song>
 

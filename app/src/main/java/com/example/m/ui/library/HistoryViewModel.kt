@@ -20,6 +20,7 @@ import javax.inject.Inject
 
 data class HistoryUiState(
     val history: List<HistoryEntry> = emptyList(),
+    val nowPlayingMediaId: String? = null
 )
 
 sealed interface HistoryEvent {
@@ -65,6 +66,12 @@ class HistoryViewModel @Inject constructor(
         viewModelScope.launch {
             listeningHistoryDao.getListeningHistory().collect { history ->
                 _uiState.update { it.copy(history = history) }
+            }
+        }
+
+        viewModelScope.launch {
+            musicServiceConnection.currentMediaId.collect { mediaId ->
+                _uiState.update { it.copy(nowPlayingMediaId = mediaId) }
             }
         }
     }

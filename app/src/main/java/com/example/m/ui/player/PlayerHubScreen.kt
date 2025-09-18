@@ -1,13 +1,9 @@
 // file: com/example/m/ui/player/PlayerHubScreen.kt
 package com.example.m.ui.player
 
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
@@ -33,8 +29,7 @@ import com.example.m.ui.main.MainViewModel
 private fun PlayerHubHeader(
     mediaMetadata: MediaMetadata?,
     isPlaying: Boolean,
-    onTogglePlayPause: () -> Unit,
-    onDismiss: () -> Unit
+    onTogglePlayPause: () -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -88,20 +83,23 @@ private fun PlayerHubHeader(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PlayerHubScreen(
-    viewModel: MainViewModel = hiltViewModel(),
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    isContentReady: Boolean,
+    mainViewModel: MainViewModel = hiltViewModel()
 ) {
-    val (color1, color2) = viewModel.playerGradientColors.value
-    val queue by viewModel.queue.collectAsState()
-    val currentIndex by viewModel.currentMediaItemIndex.collectAsState()
-    val nowPlaying by viewModel.nowPlaying.collectAsState()
-    val isPlaying by viewModel.isPlaying.collectAsState()
+    val (color1, color2) = mainViewModel.playerGradientColors.value
+    val songQueue by mainViewModel.queueSongs.collectAsState()
+    val mediaItemQueue by mainViewModel.queue.collectAsState()
+    val currentIndex by mainViewModel.currentMediaItemIndex.collectAsState()
+    val nowPlaying by mainViewModel.nowPlaying.collectAsState()
+    val isPlaying by mainViewModel.isPlaying.collectAsState()
 
     var selectedTabIndex by remember { mutableStateOf(0) }
-    val tabs = listOf("Queue", "asdsa", "sbad")
+    val tabs = listOf("Queue")
+
+    val isQueueLoading = mediaItemQueue.isNotEmpty() && songQueue.size != mediaItemQueue.size
 
     GradientBackground(
         gradientColor1 = color1,
@@ -118,8 +116,7 @@ fun PlayerHubScreen(
             PlayerHubHeader(
                 mediaMetadata = nowPlaying,
                 isPlaying = isPlaying,
-                onTogglePlayPause = { viewModel.onEvent(MainEvent.TogglePlayPause) },
-                onDismiss = onDismiss
+                onTogglePlayPause = { mainViewModel.onEvent(MainEvent.TogglePlayPause) }
             )
 
             Column(
@@ -172,13 +169,23 @@ fun PlayerHubScreen(
                             }
                         }
 
-                        when (selectedTabIndex) {
-                            0 -> QueueTabContent(
-                                queue = queue,
-                                currentMediaItemIndex = currentIndex,
-                                onPlayItem = { viewModel.skipToQueueItem(it) },
-                                onMoveItem = { from, to -> viewModel.moveQueueItem(from, to) }
-                            )
+                        if (isContentReady) {
+                            when (selectedTabIndex) {
+                                0 -> QueueTabContent(
+                                    queue = songQueue,
+                                    isLoading = isQueueLoading,
+                                    currentMediaItemIndex = currentIndex,
+                                    onPlayItem = { mainViewModel.skipToQueueItem(it) },
+                                    onMoveItem = { from, to -> mainViewModel.moveQueueItem(from, to) }
+                                )
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(color = Color.White)
+                            }
                         }
                     }
                 }
