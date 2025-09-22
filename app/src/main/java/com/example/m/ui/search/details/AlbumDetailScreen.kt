@@ -302,7 +302,7 @@ private fun AlbumHeader(thumbnailUrl: String?, albumName: String, artistName: St
         Text(
             text = albumName,
             style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.SemiBold, // Changed from Bold to SemiBold
             maxLines = 2, // Max lines 2
             overflow = TextOverflow.Ellipsis, // Ellipsis overflow
             textAlign = TextAlign.Center, // Center text

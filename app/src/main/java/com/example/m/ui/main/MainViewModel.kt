@@ -14,20 +14,29 @@ import androidx.palette.graphics.Palette
 import coil.ImageLoader
 import coil.request.ImageRequest
 import com.example.m.data.database.DownloadQueueDao
+import com.example.m.data.database.DownloadStatus
 import com.example.m.data.database.Song
 import com.example.m.data.database.SongDao
 import com.example.m.data.repository.LibraryRepository
 import com.example.m.download.DownloadService
 import com.example.m.playback.MusicServiceConnection
+import com.example.m.data.repository.YoutubeRepository
+import com.example.m.managers.LibraryActionsManager
+import com.example.m.managers.PlaylistActionsManager
+import com.example.m.ui.search.SearchResult
+import com.example.m.ui.search.SearchResultForList
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
@@ -54,7 +63,10 @@ class MainViewModel @Inject constructor(
     private val libraryRepository: LibraryRepository,
     private val songDao: SongDao,
     @ApplicationContext private val context: Context,
-    private val imageLoader: ImageLoader
+    private val imageLoader: ImageLoader,
+    private val youtubeRepository: YoutubeRepository,
+    val libraryActionsManager: LibraryActionsManager,
+    val playlistActionsManager: PlaylistActionsManager
 ) : ViewModel() {
     val nowPlaying = musicServiceConnection.nowPlaying
     val isPlaying = musicServiceConnection.isPlaying
@@ -83,6 +95,21 @@ class MainViewModel @Inject constructor(
     private val _playerGradientColors = mutableStateOf(Color.DarkGray to Color.Black)
     val playerGradientColors: State<Pair<Color, Color>> = _playerGradientColors
 
+    private val allLocalSongs: StateFlow<List<Song>> = songDao.getAllSongs()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val commentCount = MutableStateFlow<Int?>(null)
+    val isLoadingRelatedSongs = MutableStateFlow(false)
+
+    private val _relatedStreamInfoItems = MutableStateFlow<List<StreamInfoItem>>(emptyList())
+    val relatedSongs: StateFlow<List<SearchResultForList>> = combine(
+        _relatedStreamInfoItems,
+        allLocalSongs
+    ) { relatedItems, localSongs ->
+        mapStreamInfoToSearchResults(relatedItems, localSongs)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+
     init {
         _randomGradientColors.value = generateHarmoniousVibrantColors()
 
@@ -100,27 +127,45 @@ class MainViewModel @Inject constructor(
             }
         }
 
-        viewModelScope.launch(Dispatchers.IO) {
-            musicServiceConnection.queue.collect { itemsWithUid ->
-                if (itemsWithUid.isEmpty()) {
-                    _queueSongs.value = emptyList()
-                    return@collect
+        // Load comment count when the current song changes
+        viewModelScope.launch {
+            currentMediaId.collect { mediaId ->
+                if (mediaId != null && mediaId.startsWith("http")) {
+                    loadCommentCount(mediaId)
+                    loadRelatedSongs(mediaId)
+                } else {
+                    commentCount.value = null
+                    _relatedStreamInfoItems.value = emptyList()
                 }
+            }
+        }
 
-                val mediaIds = itemsWithUid.map { it.second.mediaId }
-                val urls = mediaIds.filter { it.startsWith("http") }
-                val paths = mediaIds.filterNot { it.startsWith("http") }
+        viewModelScope.launch {
+            combine(musicServiceConnection.queue, allLocalSongs) { queueItems, localSongs ->
+                val songMapByUrl = localSongs.associateBy { it.youtubeUrl }
+                val songMapByPath = localSongs.filter { it.localFilePath != null }.associateBy { it.localFilePath!! }
 
-                val songsFromUrls = if (urls.isNotEmpty()) songDao.getSongsByUrls(urls) else emptyList()
-                val songsFromPaths = if (paths.isNotEmpty()) songDao.getSongsByFilePaths(paths) else emptyList()
-
-                val songMap = (songsFromUrls.associateBy { it.youtubeUrl }) + (songsFromPaths.associateBy { it.localFilePath })
-
-                val songsWithStableIds = itemsWithUid.map { (uid, mediaItem) ->
-                    uid to songMap[mediaItem.mediaId]
+                queueItems.map { (uid, mediaItem) ->
+                    val song = if (mediaItem.mediaId.startsWith("http")) {
+                        songMapByUrl[mediaItem.mediaId]
+                    } else {
+                        songMapByPath[mediaItem.mediaId]
+                    }
+                    uid to song
                 }
+            }.collect { songsWithStableIds ->
                 _queueSongs.value = songsWithStableIds
             }
+        }
+    }
+
+    private fun mapStreamInfoToSearchResults(items: List<StreamInfoItem>, localSongs: List<Song>): List<SearchResultForList> {
+        val localSongsByUrl = localSongs.associateBy { it.youtubeUrl }
+        return items.map { streamInfo ->
+            val normalizedUrl = streamInfo.url?.replace("music.youtube.com", "www.youtube.com")
+            val localSong = localSongsByUrl[normalizedUrl]
+            val searchResult = SearchResult(streamInfo, localSong?.isInLibrary ?: false, localSong?.localFilePath != null)
+            SearchResultForList(searchResult, localSong)
         }
     }
 
@@ -146,6 +191,40 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             musicServiceConnection.playSingleSong(item)
         }
+    }
+
+    fun playRelatedSong(streamInfoItem: StreamInfoItem) {
+        viewModelScope.launch {
+            musicServiceConnection.playSingleSong(streamInfoItem)
+        }
+    }
+
+    // Add this function to manually trigger related songs loading
+    fun ensureRelatedSongsLoaded() {
+        viewModelScope.launch {
+            val mediaId = currentMediaId.value
+            if (mediaId != null && mediaId.startsWith("http") && _relatedStreamInfoItems.value.isEmpty()) {
+                loadRelatedSongs(mediaId)
+            }
+        }
+    }
+
+    // Add this function to manually trigger comment count loading
+    fun ensureCommentCountLoaded() {
+        viewModelScope.launch {
+            val mediaId = currentMediaId.value
+            if (mediaId != null && mediaId.startsWith("http") && commentCount.value == null) {
+                loadCommentCount(mediaId)
+            }
+        }
+    }
+
+    fun addToQueueNext(streamInfoItem: StreamInfoItem) {
+        musicServiceConnection.playNext(streamInfoItem)
+    }
+
+    fun addToQueue(streamInfoItem: StreamInfoItem) {
+        musicServiceConnection.addToQueue(streamInfoItem)
     }
 
     private fun generateHarmoniousVibrantColors(): Pair<Color, Color> {
@@ -266,5 +345,158 @@ class MainViewModel @Inject constructor(
 
     fun clearMaintenanceResult() {
         _maintenanceResult.value = null
+    }
+
+    private suspend fun loadCommentCount(mediaId: String) {
+        try {
+            withContext(Dispatchers.IO) {
+                // Use the new method to get total comment count directly from StreamInfo
+                val totalCommentCount = youtubeRepository.getStreamCommentCount(mediaId)
+                commentCount.value = totalCommentCount
+            }
+        } catch (e: Exception) {
+            // If we can't load comment count, show null (no count displayed)
+            commentCount.value = null
+        }
+    }
+
+    private suspend fun loadRelatedSongs(mediaId: String) {
+        isLoadingRelatedSongs.value = true
+        try {
+            withContext(Dispatchers.IO) {
+                val streamInfo = youtubeRepository.getStreamInfo(mediaId)
+
+                // Try to get music-focused related content using YouTube Music search
+                val musicRelatedItems = getMusicRelatedSongs(streamInfo)
+
+                if (musicRelatedItems.isNotEmpty()) {
+                    _relatedStreamInfoItems.value = musicRelatedItems
+                } else {
+                    // Fallback to filtered regular related items
+                    val allRelated = streamInfo?.relatedItems?.filterIsInstance<StreamInfoItem>() ?: emptyList()
+                    val musicFiltered = allRelated.filter { item ->
+                        isMusicContent(item)
+                    }.take(20)
+                    _relatedStreamInfoItems.value = musicFiltered
+                }
+            }
+        } catch (e: Exception) {
+            _relatedStreamInfoItems.value = emptyList()
+        }
+        isLoadingRelatedSongs.value = false
+    }
+
+    private suspend fun getMusicRelatedSongs(streamInfo: org.schabi.newpipe.extractor.stream.StreamInfo?): List<StreamInfoItem> {
+        if (streamInfo == null) return emptyList()
+
+        return try {
+            // Extract artist and title for YouTube Music search
+            val title = streamInfo.name
+            val uploader = streamInfo.uploaderName ?: ""
+
+            // Create search queries for YouTube Music
+            val searchQueries = buildMusicSearchQueries(title, uploader)
+
+            // Search YouTube Music for related songs
+            val allResults = mutableListOf<StreamInfoItem>()
+
+            for (query in searchQueries.take(2)) { // Limit to avoid too many requests
+                val musicResults = youtubeRepository.searchMusic(query)
+                allResults.addAll(musicResults.songs.take(10)) // Take top 10 from each search
+            }
+
+            // Remove duplicates and limit results
+            allResults.distinctBy { it.url }.take(20)
+
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun buildMusicSearchQueries(title: String, uploader: String): List<String> {
+        val queries = mutableListOf<String>()
+
+        // Clean up title - remove common noise words
+        val cleanTitle = title.replace(Regex("\\(.*?\\)|\\[.*?\\]|\\|.*"), "")
+            .replace(Regex("(official|video|audio|lyric|HD|4K|music|song)", RegexOption.IGNORE_CASE), "")
+            .trim()
+
+        // Extract likely artist name from uploader
+        val cleanUploader = uploader.replace(Regex("(official|channel|music|records|entertainment|VEVO)", RegexOption.IGNORE_CASE), "")
+            .trim()
+
+        // Search by artist if we have one
+        if (cleanUploader.isNotBlank() && cleanUploader.length > 2) {
+            queries.add(cleanUploader)
+        }
+
+        // Search by title
+        if (cleanTitle.isNotBlank()) {
+            queries.add(cleanTitle)
+        }
+
+        // Search by artist + partial title
+        if (cleanUploader.isNotBlank() && cleanTitle.isNotBlank()) {
+            val titleWords = cleanTitle.split(" ").filter { it.length > 2 }
+            if (titleWords.isNotEmpty()) {
+                queries.add("$cleanUploader ${titleWords.first()}")
+            }
+        }
+
+        return queries.filter { it.isNotBlank() }
+    }
+
+    private fun isMusicContent(item: StreamInfoItem): Boolean {
+        val title = item.name.lowercase()
+        val uploader = item.uploaderName?.lowercase() ?: ""
+        val duration = item.duration
+
+        // Filter out clearly non-music content
+        val nonMusicKeywords = listOf(
+            "podcast", "interview", "talk", "news", "review", "reaction",
+            "gameplay", "tutorial", "how to", "vlog", "unboxing", "trailer",
+            "documentary", "lecture", "sermon", "speech", "live stream"
+        )
+
+        // Check for non-music keywords in title
+        if (nonMusicKeywords.any { keyword -> title.contains(keyword) }) {
+            return false
+        }
+
+        // Filter by duration - music content is typically 1-15 minutes
+        if (duration > 0) {
+            val durationMinutes = duration / 60.0
+            if (durationMinutes < 0.5 || durationMinutes > 15) {
+                return false
+            }
+        }
+
+        // Prefer content from music-related channels
+        val musicChannelKeywords = listOf(
+            "music", "records", "entertainment", "artist", "band", "singer",
+            "official", "vevo", "sounds", "audio", "acoustic", "session"
+        )
+
+        val hasMusicChannelKeyword = musicChannelKeywords.any { keyword ->
+            uploader.contains(keyword)
+        }
+
+        // Prefer music-related titles
+        val musicTitleKeywords = listOf(
+            "song", "music", "acoustic", "cover", "remix", "live", "session",
+            "album", "single", "track", "audio", "instrumental", "karaoke",
+            "unplugged", "concert", "performance", "studio", "version"
+        )
+
+        val hasMusicTitleKeyword = musicTitleKeywords.any { keyword ->
+            title.contains(keyword)
+        }
+
+        // Include if it has music indicators or is from a music channel
+        return hasMusicChannelKeyword || hasMusicTitleKeyword ||
+                // Include if uploader is verified (likely official artists)
+                item.isUploaderVerified() ||
+                // Include shorter content that doesn't match exclusion criteria
+                (duration > 0 && duration <= 600) // 10 minutes or less
     }
 }

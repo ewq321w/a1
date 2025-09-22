@@ -180,7 +180,7 @@ fun SearchedArtistDetailScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     val headerText = if (uiState.searchType == "music") "Popular Songs" else "Videos"
-                                    Text(text = headerText, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                                    Text(text = headerText, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 8.dp))
                                     TextButton(
                                         onClick = {
                                             val info = uiState.channelInfo
@@ -227,7 +227,7 @@ fun SearchedArtistDetailScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     val headerText = if (uiState.searchType == "music") "Releases" else "Playlists"
-                                    Text(text = headerText, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                                    Text(text = headerText, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 8.dp))
                                     TextButton(
                                         onClick = {
                                             val info = uiState.channelInfo
@@ -300,7 +300,7 @@ private fun ArtistHeader(onBack: () -> Unit, bannerUrl: String?, avatarUrl: Stri
             )
             Spacer(modifier = Modifier.width(16.dp))
             Column(verticalArrangement = Arrangement.Center) {
-                Text(text = artistName, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.basicMarquee())
+                Text(text = artistName, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.basicMarquee())
                 if (subscriberCount >= 0) {
                     Text(text = formatSubscriberCount(subscriberCount), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

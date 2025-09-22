@@ -157,6 +157,27 @@ class YoutubeRepository @Inject constructor() {
         }
     }
 
+    suspend fun getStreamCommentCount(url: String): Int? {
+        return withContext(Dispatchers.IO) {
+            try {
+                // Get CommentsInfo which actually has the total comment count
+                val commentsInfo = getComments(url)
+                if (commentsInfo != null && !commentsInfo.isCommentsDisabled) {
+                    // Use the actual comment count from CommentsInfo
+                    val totalCount = commentsInfo.commentsCount
+                    Timber.d("Found actual comment count: $totalCount for URL: $url")
+                    totalCount
+                } else {
+                    Timber.d("Comments disabled or not available for URL: $url")
+                    0 // Comments disabled or not available
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to get comment count for URL: $url")
+                null
+            }
+        }
+    }
+
     suspend fun getComments(url: String): CommentsInfo? {
         return withContext(Dispatchers.IO) {
             try {
@@ -174,6 +195,18 @@ class YoutubeRepository @Inject constructor() {
                 CommentsInfo.getMoreItems(ServiceList.YouTube, commentsInfo, page)
             } catch (e: Exception) {
                 Timber.e(e, "Failed to get more comments")
+                null
+            }
+        }
+    }
+
+    suspend fun getCommentReplies(repliesPage: Page): ListExtractor.InfoItemsPage<CommentsInfoItem>? {
+        return withContext(Dispatchers.IO) {
+            try {
+                // Use the URL-based overload to avoid ambiguity
+                CommentsInfo.getMoreItems(ServiceList.YouTube, repliesPage.url, repliesPage)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to get comment replies")
                 null
             }
         }

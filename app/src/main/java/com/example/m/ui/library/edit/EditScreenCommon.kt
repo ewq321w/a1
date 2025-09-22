@@ -2,7 +2,7 @@
 package com.example.m.ui.library.edit
 
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -26,6 +26,7 @@ import coil.compose.AsyncImage
 import com.example.m.data.database.Song
 import org.burnoutcrew.reorderable.ReorderableLazyListState
 import org.burnoutcrew.reorderable.detectReorder
+import androidx.compose.ui.text.font.FontWeight
 
 @Composable
 fun EditSongItem(
@@ -35,13 +36,14 @@ fun EditSongItem(
     modifier: Modifier = Modifier
 ) {
     ListItem(
-        modifier = modifier.defaultMinSize(minHeight = 72.dp),
+        modifier = modifier.heightIn(min = 68.dp), // Use heightIn instead of defaultMinSize
         headlineContent = {
             Text(
                 song.title,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyMedium
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
             )
         },
         supportingContent = {
@@ -57,7 +59,7 @@ fun EditSongItem(
                 model = song.thumbnailUrl,
                 contentDescription = song.title,
                 modifier = Modifier
-                    .size(54.dp)
+                    .size(50.dp)
                     .clip(RoundedCornerShape(3.dp)),
                 contentScale = ContentScale.Crop
             )

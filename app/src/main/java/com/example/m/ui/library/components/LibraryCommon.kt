@@ -2,6 +2,7 @@
 package com.example.m.ui.library.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,6 +23,7 @@ import coil.compose.AsyncImage
 import com.example.m.data.database.DownloadStatus
 import com.example.m.data.database.Song
 import java.text.DecimalFormat
+import androidx.compose.ui.text.font.FontWeight
 
 internal fun formatDuration(totalSeconds: Long): String {
     if (totalSeconds < 0) return ""
@@ -81,23 +83,48 @@ fun SongItem(
         )
     }
 
-    ListItem(
-        headlineContent = {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(if (isPlaying) Color.White.copy(alpha = 0.075f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .heightIn(min = 68.dp) // Use minimum height instead of fixed height
+            .padding(start = 18.dp, top = 8.dp, end = 16.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically // Change back to CenterVertically for proper alignment
+    ) {
+        AsyncImage(
+            model = song.thumbnailUrl,
+            contentDescription = "Album art for ${song.title}",
+            modifier = Modifier
+                .size(50.dp)
+                .clip(RoundedCornerShape(3.dp)),
+            contentScale = ContentScale.Crop,
+            placeholder = remember { ColorPainter(placeholderColor) },
+            error = remember { ColorPainter(placeholderColor) }
+        )
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center // Center the text content vertically
+        ) {
             Text(
                 song.title,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyMedium
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface
             )
-        },
-        supportingContent = {
+
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (song.downloadStatus != DownloadStatus.NOT_DOWNLOADED || song.isInLibrary) {
                     Box(
-                        modifier = Modifier.width(20.dp),
+                        modifier = Modifier.width(18.dp),
                         contentAlignment = Alignment.CenterStart
                     ) {
-                        val iconSize = 16.dp
+                        val iconSize = 14.dp
                         when {
                             song.downloadStatus == DownloadStatus.DOWNLOADING -> {
                                 CircularProgressIndicator(
@@ -153,90 +180,74 @@ fun SongItem(
                     supportText,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-        },
-        leadingContent = {
-            AsyncImage(
-                model = song.thumbnailUrl,
-                contentDescription = "Album art for ${song.title}",
-                modifier = Modifier
-                    .size(54.dp)
-                    .clip(RoundedCornerShape(3.dp)),
-                contentScale = ContentScale.Crop,
-                placeholder = remember { ColorPainter(placeholderColor) },
-                error = remember { ColorPainter(placeholderColor) }
+        }
+
+        IconButton(
+            onClick = { showMenu = true },
+            modifier = Modifier.size(40.dp)
+        ) {
+            Icon(
+                Icons.Default.MoreVert,
+                contentDescription = "More options",
+                modifier = Modifier.size(20.dp)
             )
-        },
-        trailingContent = {
-            Box {
-                IconButton(onClick = { showMenu = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "More options")
-                }
-                TranslucentDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                    DropdownMenuItem(text = { Text("Play next") }, onClick = { onPlayNextClick(); showMenu = false })
-                    DropdownMenuItem(text = { Text("Add to queue") }, onClick = { onAddToQueueClick(); showMenu = false })
-                    DropdownMenuItem(text = { Text("Shuffle") }, onClick = { onShuffleClick(); showMenu = false })
-                    DropdownMenuItem(text = { Text("Go to artist") }, onClick = { onGoToArtistClick(); showMenu = false })
-                    HorizontalDivider()
-                    onAddToLibraryClick?.let {
-                        DropdownMenuItem(
-                            text = { Text(if (song.isInLibrary) "In Library" else "Add to Library") },
-                            enabled = !song.isInLibrary,
-                            onClick = { it(); showMenu = false }
-                        )
-                    }
-                    onDownloadClick?.let { downloadAction ->
-                        val isDownloaded = song.downloadStatus == DownloadStatus.DOWNLOADED
-                        val downloadText = when {
-                            isDownloading -> "Downloading..."
-                            isDownloaded -> "Delete download"
-                            else -> "Download"
-                        }
-                        DropdownMenuItem(
-                            text = { Text(downloadText) },
-                            enabled = !isDownloading,
-                            onClick = {
-                                if (isDownloaded) {
-                                    showDeleteConfirmDialog = true
-                                } else {
-                                    downloadAction()
-                                }
-                                showMenu = false
-                            }
-                        )
-                    }
-                    DropdownMenuItem(text = { Text("Add to playlist") }, onClick = { onAddToPlaylistClick(); showMenu = false })
-                    onAddToGroupClick?.let {
-                        DropdownMenuItem(text = { Text("Add to group") }, onClick = { it(); showMenu = false })
-                    }
-                    onRemoveFromPlaylistClick?.let {
-                        DropdownMenuItem(text = { Text("Remove from playlist") }, onClick = { it(); showMenu = false })
-                    }
-                    onRemoveFromGroupClick?.let {
-                        DropdownMenuItem(text = { Text("Remove from group") }, onClick = { it(); showMenu = false })
-                    }
-                    onDeleteFromHistoryClick?.let {
-                        DropdownMenuItem(text = { Text("Delete from history") }, onClick = { it(); showMenu = false })
-                    }
-                    onDeleteClick?.let {
-                        HorizontalDivider()
-                        DropdownMenuItem(text = { Text("Delete from device") }, onClick = { it(); showMenu = false })
-                    }
-                }
+        }
+        TranslucentDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            DropdownMenuItem(text = { Text("Play next") }, onClick = { onPlayNextClick(); showMenu = false })
+            DropdownMenuItem(text = { Text("Add to queue") }, onClick = { onAddToQueueClick(); showMenu = false })
+            DropdownMenuItem(text = { Text("Shuffle") }, onClick = { onShuffleClick(); showMenu = false })
+            DropdownMenuItem(text = { Text("Go to artist") }, onClick = { onGoToArtistClick(); showMenu = false })
+            HorizontalDivider()
+            onAddToLibraryClick?.let {
+                DropdownMenuItem(
+                    text = { Text(if (song.isInLibrary) "In Library" else "Add to Library") },
+                    enabled = !song.isInLibrary,
+                    onClick = { it(); showMenu = false }
+                )
             }
-        },
-        colors = ListItemDefaults.colors(
-            containerColor = if (isPlaying) Color.White.copy(alpha = 0.1f) else Color.Transparent,
-            headlineColor = MaterialTheme.colorScheme.onSurface,
-            supportingColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            trailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
-        ),
-        modifier = modifier
-            .clickable(onClick = onClick)
-            .defaultMinSize(minHeight = 72.dp)
-    )
+            onDownloadClick?.let { downloadAction ->
+                val isDownloaded = song.downloadStatus == DownloadStatus.DOWNLOADED
+                val downloadText = when {
+                    isDownloading -> "Downloading..."
+                    isDownloaded -> "Delete download"
+                    else -> "Download"
+                }
+                DropdownMenuItem(
+                    text = { Text(downloadText) },
+                    enabled = !isDownloading,
+                    onClick = {
+                        if (isDownloaded) {
+                            showDeleteConfirmDialog = true
+                    } else {
+                            downloadAction()
+                        }
+                        showMenu = false
+                    }
+                )
+            }
+            DropdownMenuItem(text = { Text("Add to playlist") }, onClick = { onAddToPlaylistClick(); showMenu = false })
+            onAddToGroupClick?.let {
+                DropdownMenuItem(text = { Text("Add to group") }, onClick = { it(); showMenu = false })
+            }
+            onRemoveFromPlaylistClick?.let {
+                DropdownMenuItem(text = { Text("Remove from playlist") }, onClick = { it(); showMenu = false })
+            }
+            onRemoveFromGroupClick?.let {
+                DropdownMenuItem(text = { Text("Remove from group") }, onClick = { it(); showMenu = false })
+            }
+            onDeleteFromHistoryClick?.let {
+                DropdownMenuItem(text = { Text("Delete from history") }, onClick = { it(); showMenu = false })
+            }
+            onDeleteClick?.let {
+                HorizontalDivider()
+                DropdownMenuItem(text = { Text("Delete from device") }, onClick = { it(); showMenu = false })
+            }
+        }
+    }
 }
 
 @Composable

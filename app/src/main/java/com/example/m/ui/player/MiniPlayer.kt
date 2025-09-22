@@ -19,10 +19,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
 import coil.compose.AsyncImage
+
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -75,6 +77,7 @@ fun MiniPlayer(
                     text = songTitle,
                     color = MaterialTheme.colorScheme.onBackground,
                     style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium, // Changed from SemiBold to Medium
                     maxLines = 1,
                     modifier = Modifier.basicMarquee()
                 )

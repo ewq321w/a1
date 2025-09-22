@@ -253,7 +253,16 @@ fun ArtistDetailScreen(
                     items(uiState.displayList, key = { item ->
                         when (item) {
                             is ArtistDetailListItem.GroupHeader -> "group-${item.data.group.groupId}"
-                            is ArtistDetailListItem.SongItem -> "song-${item.song.songId}"
+                            is ArtistDetailListItem.SongItem -> {
+                                // Use a more robust key that handles songs not yet in database
+                                val song = item.song
+                                when {
+                                    song.songId > 0 -> "song-${song.songId}"
+                                    song.youtubeUrl.isNotEmpty() -> "url-${song.youtubeUrl.hashCode()}"
+                                    song.localFilePath?.isNotEmpty() == true -> "file-${song.localFilePath.hashCode()}"
+                                    else -> "unknown-${song.title.hashCode()}-${song.artist.hashCode()}"
+                                }
+                            }
                         }
                     }) { item ->
                         when (item) {
@@ -316,7 +325,7 @@ fun GroupHeaderItem(
         supportingContent = { Text("${data.songCount} songs") },
         leadingContent = {
             Box(
-                modifier = Modifier.size(54.dp),
+                modifier = Modifier.size(50.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(

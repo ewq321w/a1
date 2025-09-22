@@ -396,14 +396,38 @@ private fun DetailedView(
                 SearchCategory.ARTISTS, SearchCategory.CHANNELS -> {
                     val items = if (uiState.selectedFilter == "music_songs") uiState.artists else uiState.videoChannels
                     itemsIndexed(items, key = { index, item -> (item.artistInfo.url ?: "") + index }) { _, item ->
-                        Row(modifier = Modifier.fillMaxWidth().clickable { onArtistClicked(item) }.height(72.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            AsyncImage(model = item.artistInfo.thumbnails.lastOrNull()?.url, imageLoader = imageLoader, contentDescription = item.artistInfo.name, modifier = Modifier.size(54.dp).clip(CircleShape))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onArtistClicked(item) }
+                                .heightIn(min = 68.dp) // Use minimum height instead of fixed height
+                                .padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AsyncImage(
+                                model = item.artistInfo.thumbnails.lastOrNull()?.url,
+                                imageLoader = imageLoader,
+                                contentDescription = item.artistInfo.name,
+                                modifier = Modifier.size(54.dp).clip(CircleShape)
+                            )
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(text = item.artistInfo.name ?: "", maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+                                Text(
+                                    text = item.artistInfo.name ?: "",
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
                                 val subs = formatSubscriberCount(item.artistInfo.subscriberCount)
                                 if (subs.isNotEmpty()) {
-                                    Text(text = subs, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        text = subs,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
                         }

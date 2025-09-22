@@ -42,7 +42,14 @@ class LibraryActionsManager @Inject constructor(
     private val _dialogState = MutableStateFlow<DialogState>(DialogState.Hidden)
     val dialogState = _dialogState.asStateFlow()
 
+    // Add callback for triggering UI updates
+    private var onLibraryActionCallback: (() -> Unit)? = null
+
     private var pendingItem: Any? = null
+
+    fun setOnLibraryActionCallback(callback: () -> Unit) {
+        onLibraryActionCallback = callback
+    }
 
     fun addToLibrary(item: Any) {
         scope.launch {
@@ -128,5 +135,7 @@ class LibraryActionsManager @Inject constructor(
         )
         songDao.updateSong(updatedSong)
         libraryRepository.linkSongToArtist(updatedSong)
+        // Trigger the callback to update the UI
+        onLibraryActionCallback?.invoke()
     }
 }

@@ -191,7 +191,7 @@ fun ArtistGroupConflictDialog(
                         append(artistName)
                     }
                     append(" already belongs to the ")
-                    withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                    withStyle(style = SpanStyle(fontWeight = FontWeight.Medium)) { // Changed from Bold to Medium
                         append(conflictingGroupName)
                     }
                     append(" group.\n\nTo add this song, you must move the artist and all their songs to the \"")
@@ -227,14 +227,14 @@ fun AddToPlaylistSheet(
 ) {
     Column(modifier = Modifier.padding(bottom = 32.dp)) {
         ListItem(
-            headlineContent = { Text(songTitle, fontWeight = FontWeight.Bold) },
+            headlineContent = { Text(songTitle, fontWeight = FontWeight.Medium) }, // Changed from Bold to Medium
             supportingContent = { Text(songArtist) },
             leadingContent = {
                 AsyncImage(
                     model = songThumbnailUrl,
                     contentDescription = "Song thumbnail",
                     modifier = Modifier
-                        .size(54.dp)
+                        .size(50.dp)
                         .clip(RoundedCornerShape(3.dp)),
                     contentScale = ContentScale.Crop
                 )
@@ -285,14 +285,14 @@ fun AddToArtistSongGroupSheet(
 ) {
     Column(modifier = Modifier.padding(bottom = 32.dp)) {
         ListItem(
-            headlineContent = { Text(songTitle, fontWeight = FontWeight.Bold) },
+            headlineContent = { Text(songTitle, fontWeight = FontWeight.Medium) }, // Changed from Bold to Medium
             supportingContent = { Text(songArtist) },
             leadingContent = {
                 AsyncImage(
                     model = songThumbnailUrl,
                     contentDescription = "Song thumbnail",
                     modifier = Modifier
-                        .size(54.dp)
+                        .size(50.dp)
                         .clip(RoundedCornerShape(3.dp)),
                     contentScale = ContentScale.Crop
                 )
@@ -477,7 +477,7 @@ fun MoveToGroupSheet(
 ) {
     Column(modifier = Modifier.padding(bottom = 32.dp)) {
         ListItem(
-            headlineContent = { Text("Move \"$artistName\" to...", fontWeight = FontWeight.Bold) },
+            headlineContent = { Text("Move \"$artistName\" to...", fontWeight = FontWeight.Medium) }, // Changed from Bold to Medium
             colors = ListItemDefaults.colors(containerColor = Color.Transparent)
         )
         HorizontalDivider()

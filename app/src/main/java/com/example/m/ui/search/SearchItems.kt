@@ -48,7 +48,7 @@ fun SectionHeader(
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Medium // Changed from SemiBold to Medium
             )
             if (showMoreButton) {
                 TextButton(
@@ -229,16 +229,16 @@ fun SearchResultItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(if (isPlaying) Color.White.copy(alpha = 0.1f) else Color.Transparent)
+            .background(if (isPlaying) Color.White.copy(alpha = 0.075f) else Color.Transparent)
             .clickable(onClick = onPlay)
-            .height(72.dp)
-            .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .heightIn(min = 68.dp) // Use minimum height instead of fixed height
+            .padding(start = 18.dp, top = 8.dp, end = 16.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically // Change back to CenterVertically for proper alignment
     ) {
         val imageModifier = if (isSong) {
-            Modifier.size(54.dp).clip(RoundedCornerShape(3.dp))
+            Modifier.size(50.dp).clip(RoundedCornerShape(3.dp))
         } else {
-            Modifier.size(90.dp, 54.dp).clip(RoundedCornerShape(3.dp))
+            Modifier.size(90.dp, 50.dp).clip(RoundedCornerShape(3.dp))
         }
 
         AsyncImage(
@@ -250,15 +250,20 @@ fun SearchResultItem(
             placeholder = remember { ColorPainter(placeholderColor) },
             error = remember { ColorPainter(placeholderColor) }
         )
-        Spacer(modifier = Modifier.width(16.dp))
 
-        Column(modifier = Modifier.weight(1f)) {
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center // Center the text content vertically
+        ) {
             Text(
                 text = result.streamInfo.name ?: "No Title",
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyMedium
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val shouldShowStatusIcon = result.isInLibrary ||
@@ -268,34 +273,97 @@ fun SearchResultItem(
                         downloadStatus == DownloadStatus.FAILED
 
                 if (shouldShowStatusIcon) {
-                    Box(modifier = Modifier.width(20.dp), contentAlignment = Alignment.CenterStart) {
-                        val iconSize = 16.dp
+                    Box(
+                        modifier = Modifier.width(18.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        val iconSize = 14.dp
                         when (downloadStatus) {
-                            DownloadStatus.DOWNLOADING -> CircularProgressIndicator(progress = { (localSong?.downloadProgress ?: 0) / 100f }, modifier = Modifier.size(iconSize), strokeWidth = 1.5.dp)
-                            DownloadStatus.QUEUED -> Icon(imageVector = Icons.Default.HourglassTop, contentDescription = "Queued", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(iconSize))
-                            DownloadStatus.FAILED -> Icon(imageVector = Icons.Default.ErrorOutline, contentDescription = "Failed", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(iconSize))
-                            DownloadStatus.DOWNLOADED -> Icon(imageVector = Icons.Default.CheckCircle, contentDescription = "Downloaded", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(iconSize))
+                            DownloadStatus.DOWNLOADING -> {
+                                CircularProgressIndicator(
+                                    progress = { (localSong?.downloadProgress ?: 0) / 100f },
+                                    modifier = Modifier.size(iconSize),
+                                    strokeWidth = 1.5.dp
+                                )
+                            }
+                            DownloadStatus.QUEUED -> {
+                                Icon(
+                                    imageVector = Icons.Default.HourglassTop,
+                                    contentDescription = "Queued",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(iconSize)
+                                )
+                            }
+                            DownloadStatus.FAILED -> {
+                                Icon(
+                                    imageVector = Icons.Default.ErrorOutline,
+                                    contentDescription = "Failed",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(iconSize)
+                                )
+                            }
+                            DownloadStatus.DOWNLOADED -> {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Downloaded",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(iconSize)
+                                )
+                            }
                             else -> {
-                                if (result.isInLibrary) Icon(imageVector = Icons.Default.Check, contentDescription = "In Library", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(iconSize))
+                                if (result.isInLibrary) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "In Library",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(iconSize)
+                                    )
+                                }
                             }
                         }
                     }
                 }
-                Text(text = result.streamInfo.uploaderName ?: "Unknown Artist", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, style = MaterialTheme.typography.bodySmall, overflow = TextOverflow.Ellipsis)
-                if (result.streamInfo.duration > 0) Text(text = " • ${formatDuration(result.streamInfo.duration)}", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, style = MaterialTheme.typography.bodySmall)
-                if (result.streamInfo.viewCount >= 0) Text(text = " • ${formatViewCount(result.streamInfo.viewCount)}", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, style = MaterialTheme.typography.bodySmall)
+
+                var supportText = result.streamInfo.uploaderName ?: "Unknown Artist"
+                if (result.streamInfo.duration > 0) {
+                    supportText += " • ${formatDuration(result.streamInfo.duration)}"
+                }
+                if (result.streamInfo.viewCount >= 0) {
+                    supportText += " • ${formatViewCount(result.streamInfo.viewCount)}"
+                }
+                Text(
+                    text = supportText,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    style = MaterialTheme.typography.bodySmall,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
-        Box {
-            IconButton(onClick = { showMenu = true }) {
-                Icon(Icons.Default.MoreVert, contentDescription = "More options", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            TranslucentDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                DropdownMenuItem(text = { Text("Play next") }, onClick = { onPlayNext(); showMenu = false })
-                DropdownMenuItem(text = { Text("Add to queue") }, onClick = { onAddToQueue(); showMenu = false })
-                DropdownMenuItem(text = { Text(if (result.isInLibrary) "In Library" else "Add to Library") }, enabled = !result.isInLibrary, onClick = { onAddToLibrary(); showMenu = false })
-                DropdownMenuItem(text = { Text("Add to playlist") }, onClick = { onAddToPlaylist(); showMenu = false })
-            }
+
+        IconButton(
+            onClick = { showMenu = true },
+            modifier = Modifier.size(40.dp)
+        ) {
+            Icon(
+                Icons.Default.MoreVert,
+                contentDescription = "More options",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        TranslucentDropdownMenu(
+            expanded = showMenu,
+            onDismissRequest = { showMenu = false }
+        ) {
+            DropdownMenuItem(text = { Text("Play next") }, onClick = { onPlayNext(); showMenu = false })
+            DropdownMenuItem(text = { Text("Add to queue") }, onClick = { onAddToQueue(); showMenu = false })
+            DropdownMenuItem(
+                text = { Text(if (result.isInLibrary) "In Library" else "Add to Library") },
+                enabled = !result.isInLibrary,
+                onClick = { onAddToLibrary(); showMenu = false }
+            )
+            DropdownMenuItem(text = { Text("Add to playlist") }, onClick = { onAddToPlaylist(); showMenu = false })
         }
     }
 }

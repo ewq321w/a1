@@ -17,6 +17,7 @@ import com.example.m.data.repository.YoutubeRepository
 import com.example.m.managers.PlaybackListManager
 import com.example.m.managers.PlaylistManager
 import com.example.m.managers.ThumbnailProcessor
+import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -430,12 +431,18 @@ class MusicServiceConnection @Inject constructor(
     }
 
     private suspend fun createMediaMetadata(song: Song): MediaMetadata {
-        // FIX: The artwork is no longer loaded here to prevent OutOfMemoryErrors.
-        // The MusicService will lazy-load it when the song becomes the current item.
+        // Use high-quality thumbnail URL for better resolution in player
+        val highQualityThumbnailUrl = getHighQualityThumbnailUrl(song.videoId)
+        val artworkUri = if (highQualityThumbnailUrl.isNotEmpty()) {
+            highQualityThumbnailUrl.toUri()
+        } else {
+            song.thumbnailUrl.toUri()
+        }
+
         val builder = MediaMetadata.Builder()
             .setTitle(song.title)
             .setArtist(song.artist)
-            .setArtworkUri(song.thumbnailUrl.toUri())
+            .setArtworkUri(artworkUri)
 
         return builder.build()
     }

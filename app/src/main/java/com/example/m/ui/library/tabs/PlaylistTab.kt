@@ -94,7 +94,7 @@ fun PlaylistItem(
     var showMenu by remember { mutableStateOf(false) }
 
     ListItem(
-        headlineContent = { Text(playlistWithSongs.playlist.name, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium) },
+        headlineContent = { Text(playlistWithSongs.playlist.name, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium) },
         supportingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (playlistWithSongs.playlist.downloadAutomatically) {

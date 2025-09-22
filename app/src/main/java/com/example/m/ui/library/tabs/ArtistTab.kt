@@ -214,7 +214,7 @@ fun GroupItem(
 ) {
     var showMenu by remember { mutableStateOf(false) }
     ListItem(
-        headlineContent = { Text(group.name, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium) },
+        headlineContent = { Text(group.name, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium) },
         supportingContent = { Text(text = "$artistCount artists", style = MaterialTheme.typography.bodySmall) },
         leadingContent = {
             Box(modifier = Modifier.size(54.dp), contentAlignment = Alignment.Center) {

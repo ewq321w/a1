@@ -21,7 +21,14 @@ data class CommentsUiState(
     val comments: List<CommentsInfoItem> = emptyList(),
     val error: String? = null,
     internal val commentsInfo: CommentsInfo? = null,
-    internal val nextPage: Page? = null
+    internal val nextPage: Page? = null,
+    // Replies state
+    val showingRepliesFor: CommentsInfoItem? = null,
+    val replies: List<CommentsInfoItem> = emptyList(),
+    val isLoadingReplies: Boolean = false,
+    val isLoadingMoreReplies: Boolean = false,
+    val repliesError: String? = null,
+    internal val repliesNextPage: Page? = null
 )
 
 @HiltViewModel
@@ -71,5 +78,61 @@ class CommentsViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    fun loadReplies(comment: CommentsInfoItem) {
+        if (comment.replies == null) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingReplies = true, showingRepliesFor = comment, repliesError = null) }
+            try {
+                val result = youtubeRepository.getCommentReplies(comment.replies!!)
+                _uiState.update {
+                    it.copy(
+                        isLoadingReplies = false,
+                        replies = result?.items ?: emptyList(),
+                        repliesNextPage = result?.nextPage,
+                        repliesError = if (result == null) "Could not load replies." else null
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isLoadingReplies = false,
+                        repliesError = "Failed to load replies: ${e.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun loadMoreReplies() {
+        val currentState = _uiState.value
+        if (currentState.isLoadingReplies || currentState.isLoadingMoreReplies || currentState.repliesNextPage == null) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingMoreReplies = true) }
+            try {
+                val result = youtubeRepository.getCommentReplies(currentState.repliesNextPage!!)
+                _uiState.update {
+                    it.copy(
+                        isLoadingMoreReplies = false,
+                        replies = it.replies + (result?.items ?: emptyList()),
+                        repliesNextPage = result?.nextPage
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isLoadingMoreReplies = false,
+                        repliesError = "Failed to load more replies: ${e.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun hideReplies() {
+        _uiState.update { it.copy(showingRepliesFor = null, replies = emptyList(), repliesError = null, repliesNextPage = null) }
     }
 }
