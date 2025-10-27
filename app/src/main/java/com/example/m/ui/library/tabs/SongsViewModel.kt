@@ -13,6 +13,7 @@ import com.example.m.managers.DialogState
 import com.example.m.managers.LibraryActionsManager
 import com.example.m.managers.PlaylistActionState
 import com.example.m.managers.PlaylistActionsManager
+import com.example.m.managers.SnackbarManager
 import com.example.m.playback.MusicServiceConnection
 import com.example.m.ui.library.*
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -58,7 +59,8 @@ class SongsViewModel @Inject constructor(
     private val songDao: SongDao,
     private val artistDao: ArtistDao,
     private val libraryActionsManager: LibraryActionsManager,
-    private val playlistActionsManager: PlaylistActionsManager
+    private val playlistActionsManager: PlaylistActionsManager,
+    private val snackbarManager: SnackbarManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SongsUiState())
@@ -69,9 +71,6 @@ class SongsViewModel @Inject constructor(
 
     private val _navigateToArtist = MutableSharedFlow<Long>()
     val navigateToArtist: SharedFlow<Long> = _navigateToArtist.asSharedFlow()
-
-    private val _userMessage = MutableSharedFlow<String>()
-    val userMessage: SharedFlow<String> = _userMessage.asSharedFlow()
 
     init {
         _uiState.update { it.copy(sortOrder = preferencesManager.songsSortOrder) }
@@ -199,7 +198,7 @@ class SongsViewModel @Inject constructor(
                     is AutoDownloadConflict.Artist -> "Cannot delete download. Auto-download is enabled for artist '${conflict.name}'."
                     is AutoDownloadConflict.Playlist -> "Cannot delete download. Song is in auto-downloading playlist '${conflict.name}'."
                 }
-                _userMessage.emit(message)
+                snackbarManager.showMessage(message)
             } else {
                 libraryRepository.deleteDownloadedFileForSong(song)
             }

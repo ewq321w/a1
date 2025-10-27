@@ -39,7 +39,6 @@ fun HistoryScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val sheetState = rememberModalBottomSheetState()
-    val snackbarHostState = remember { SnackbarHostState() }
     var clearActionPending by remember { mutableStateOf<ClearAction?>(null) }
     val dialogState by viewModel.dialogState.collectAsState()
     val playlistActionState by viewModel.playlistActionState.collectAsState()
@@ -52,12 +51,6 @@ fun HistoryScreen(
     LaunchedEffect(Unit) {
         viewModel.navigateToArtist.collect { artistId ->
             onArtistClick(artistId)
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        viewModel.userMessage.collectLatest { message ->
-            snackbarHostState.showSnackbar(message)
         }
     }
 
@@ -170,7 +163,6 @@ fun HistoryScreen(
     GradientBackground(gradientColor1 = gradientColor1, gradientColor2 = gradientColor2) {
         Scaffold(
             modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-            snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 TopAppBar(
                     title = { Text("History") },

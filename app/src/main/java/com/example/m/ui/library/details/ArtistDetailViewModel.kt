@@ -11,6 +11,7 @@ import com.example.m.data.repository.LibraryRepository
 import com.example.m.managers.PlaylistActionState
 import com.example.m.managers.PlaylistActionsManager
 import com.example.m.managers.PlaylistManager
+import com.example.m.managers.SnackbarManager
 import com.example.m.managers.ThumbnailProcessor
 import com.example.m.playback.MusicServiceConnection
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -98,7 +99,8 @@ class ArtistDetailViewModel @Inject constructor(
     private val playlistManager: PlaylistManager,
     private val playlistActionsManager: PlaylistActionsManager,
     private val preferencesManager: PreferencesManager,
-    val thumbnailProcessor: ThumbnailProcessor
+    val thumbnailProcessor: ThumbnailProcessor,
+    private val snackbarManager: SnackbarManager
 ) : ViewModel() {
     private val artistId: Long = checkNotNull(savedStateHandle["artistId"])
 
@@ -246,7 +248,7 @@ class ArtistDetailViewModel @Inject constructor(
                     is AutoDownloadConflict.Artist -> "Cannot delete download. Auto-download is enabled for artist '${conflict.name}'."
                     is AutoDownloadConflict.Playlist -> "Cannot delete download. Song is in auto-downloading playlist '${conflict.name}'."
                 }
-                _userMessage.emit(message)
+                snackbarManager.showMessage(message)
             } else {
                 libraryRepository.deleteDownloadedFileForSong(song)
             }

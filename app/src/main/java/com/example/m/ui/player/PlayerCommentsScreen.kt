@@ -33,6 +33,7 @@ import com.example.m.ui.main.MainViewModel
 private fun PlayerInfoBar(
     mediaMetadata: MediaMetadata?,
     isPlaying: Boolean,
+    playerState: Int,
     onTogglePlayPause: () -> Unit
 ) {
     Box(
@@ -73,13 +74,26 @@ private fun PlayerInfoBar(
                 )
             }
             Spacer(modifier = Modifier.width(12.dp))
-            IconButton(onClick = onTogglePlayPause) {
-                Icon(
-                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = "Play/Pause",
-                    modifier = Modifier.size(25.dp),
-                    tint = MaterialTheme.colorScheme.onPrimary
-                )
+            Box(
+                modifier = Modifier.size(48.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                if (playerState == androidx.media3.common.Player.STATE_BUFFERING) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(25.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    IconButton(onClick = onTogglePlayPause) {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = "Play/Pause",
+                            modifier = Modifier.size(25.dp),
+                            tint = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                }
             }
             Spacer(modifier = Modifier.width(4.dp))
         }
@@ -154,6 +168,7 @@ fun PlayerCommentsScreen(
     val currentMediaId by mainViewModel.currentMediaId.collectAsState()
     val nowPlaying by mainViewModel.nowPlaying.collectAsState()
     val isPlaying by mainViewModel.isPlaying.collectAsState()
+    val playerState by mainViewModel.playerState.collectAsState()
     val (gradientColor1, gradientColor2) = mainViewModel.playerGradientColors.value
 
     // Get the comments UI state to check if we're showing replies
@@ -182,6 +197,7 @@ fun PlayerCommentsScreen(
             PlayerInfoBar(
                 mediaMetadata = nowPlaying,
                 isPlaying = isPlaying,
+                playerState = playerState,
                 onTogglePlayPause = { mainViewModel.onEvent(MainEvent.TogglePlayPause) }
             )
             Column(

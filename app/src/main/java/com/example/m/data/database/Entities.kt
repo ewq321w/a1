@@ -293,3 +293,18 @@ data class ArtistSongGroupWithSongs(
     )
     val songs: List<Song>
 )
+
+@Entity(
+    tableName = "lyrics_cache",
+    indices = [Index(value = ["artist", "title"], unique = true)]
+)
+data class LyricsCache(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val artist: String,
+    val title: String,
+    val lyrics: String?,
+    val source: String,
+    val isSuccessful: Boolean,
+    val timestamp: Long = System.currentTimeMillis()
+)

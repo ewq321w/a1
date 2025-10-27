@@ -7,6 +7,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -27,9 +28,10 @@ import javax.inject.Provider
         ArtistGroup::class,
         ArtistSongGroup::class,
         ArtistSongGroupSongCrossRef::class,
-        LibraryGroup::class
+        LibraryGroup::class,
+        LyricsCache::class
     ],
-    version = 31,
+    version = 34, // Increased from 33 to 34
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -43,6 +45,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun artistDao(): ArtistDao
     abstract fun artistGroupDao(): ArtistGroupDao
     abstract fun libraryGroupDao(): LibraryGroupDao
+    abstract fun lyricsCacheDao(): LyricsCacheDao
 
     class AppDatabaseCallback @Inject constructor(
         private val database: Provider<AppDatabase>
@@ -55,6 +58,24 @@ abstract class AppDatabase : RoomDatabase() {
 
     companion object {
         private const val DATABASE_NAME = "music_app_database"
+
+        // Migration from version 32 to 33: Clear lyrics_cache table
+        val MIGRATION_32_33 = object : Migration(32, 33) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Clear all lyrics cache to allow testing with fresh data
+                database.execSQL("DELETE FROM lyrics_cache")
+                Timber.d("Cleared lyrics cache for fresh testing")
+            }
+        }
+
+        // Migration from version 33 to 34: Clear lyrics_cache table again for improved testing
+        val MIGRATION_33_34 = object : Migration(33, 34) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Clear all lyrics cache to test with the improved normalizer and spacing fixes
+                database.execSQL("DELETE FROM lyrics_cache")
+                Timber.d("Cleared lyrics cache for testing improved normalizer (v34)")
+            }
+        }
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
@@ -80,7 +101,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     dbFile.absolutePath // Pass the full, absolute path to the builder.
                 )
-                    .fallbackToDestructiveMigration(dropAllTables = true)
+                    .addMigrations(MIGRATION_32_33, MIGRATION_33_34) // Added new migration
                     .addCallback(callback)
                     .build()
                 INSTANCE = instance

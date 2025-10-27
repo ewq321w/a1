@@ -229,7 +229,9 @@ class MusicServiceConnection @Inject constructor(
     fun skipToQueueItem(index: Int) {
         runPlayerCommand { browser ->
             if (index >= 0 && index < browser.mediaItemCount) {
-                browser.seekTo(index, C.TIME_UNSET)
+                if (index != browser.currentMediaItemIndex) {
+                    browser.seekTo(index, C.TIME_UNSET)
+                }
                 browser.play()
             }
         }
@@ -291,82 +293,129 @@ class MusicServiceConnection @Inject constructor(
     }
 
     suspend fun playSingleSong(item: Any) {
-        playbackListManager.clearCurrentListContext()
         val mediaItem = withContext(Dispatchers.IO) { createMediaItemForItem(item) } ?: return
 
-        hasCheckedForRestoredSession = false // Reset for new playback
-        isCurrentSongLogged = false
         runPlayerCommand { browser ->
-            browser.setMediaItem(mediaItem)
-            browser.prepare()
-            browser.play()
-            savePlaybackState()
+            val currentMediaId = browser.currentMediaItem?.mediaId
+            val newMediaId = mediaItem.mediaId
+            val isSameSong = newMediaId == currentMediaId
+
+            // Debug logging to track the comparison
+            Timber.tag(TAG).d("playSingleSong - Current: '$currentMediaId', New: '$newMediaId', Same: $isSameSong")
+
+            if (isSameSong) {
+                // Same song is already playing, just ensure it's playing and update queue display
+                Timber.tag(TAG).d("Same song detected, not restarting playback")
+                if (!browser.isPlaying) {
+                    browser.play()
+                }
+                savePlaybackState()
+            } else {
+                // Different song, replace queue and start playback
+                Timber.tag(TAG).d("Different song, starting new playback")
+                playbackListManager.clearCurrentListContext()
+                browser.setMediaItem(mediaItem)
+                browser.prepare()
+                hasCheckedForRestoredSession = false // Reset for new playback
+                isCurrentSongLogged = false
+                browser.play()
+                savePlaybackState()
+            }
         }
+        updateQueue()
     }
 
     suspend fun playSongList(items: List<Any>, startIndex: Int) {
         if (items.isEmpty()) return
 
-        val firstItem = items.getOrNull(startIndex) ?: return
-        val firstMediaItem = withContext(Dispatchers.IO) { createMediaItemForItem(firstItem) } ?: return
-
-        hasCheckedForRestoredSession = false // Reset for new playback
-        isCurrentSongLogged = false
+        // First, create only the starting song's media item for immediate playback
+        val startingSong = items.getOrNull(startIndex) ?: return
+        val startingMediaItem = withContext(Dispatchers.IO) {
+            createMediaItemForItem(startingSong)
+        } ?: return
 
         runPlayerCommand { browser ->
-            browser.setMediaItem(firstMediaItem)
-            browser.prepare()
-            browser.play()
+            val oldCurrentMediaId = browser.currentMediaItem?.mediaId
+            val currentMediaId = startingMediaItem.mediaId
+            val isSameSong = currentMediaId == oldCurrentMediaId
 
-            coroutineScope.launch(Dispatchers.IO) {
-                playbackListManager.clearCurrentListContext()
+            // Debug logging to track the comparison
+            Timber.tag(TAG).d("playSongList - Current: '$oldCurrentMediaId', New: '$currentMediaId', Same: $isSameSong")
 
-                val windowSize = 10
-                val chunkSize = 20
+            if (isSameSong) {
+                // Same song is already playing, update queue without interrupting playback
+                Timber.tag(TAG).d("Same song detected in playSongList, updating queue without restarting playback")
 
-                val initialItemsAfter = items.subList(
-                    fromIndex = startIndex + 1,
-                    toIndex = minOf(items.size, startIndex + 1 + windowSize)
-                )
-                val initialItemsBefore = items.subList(
-                    fromIndex = maxOf(0, startIndex - windowSize),
-                    toIndex = startIndex
-                )
-
-                val mediaItemsAfter = initialItemsAfter.mapNotNull { createMediaItemForItem(it) }
-                val mediaItemsBefore = initialItemsBefore.mapNotNull { createMediaItemForItem(it) }
-
-                withContext(Dispatchers.Main) {
-                    browser.addMediaItems(0, mediaItemsBefore)
-                    browser.addMediaItems(mediaItemsAfter)
+                // Ensure it's playing if it was playing before
+                if (!browser.isPlaying) {
+                    browser.play()
                 }
-                savePlaybackState()
+            } else {
+                // Different song, start playback immediately with just the starting song
+                Timber.tag(TAG).d("Different song in playSongList, starting new playback immediately")
+                browser.setMediaItem(startingMediaItem)
+                browser.prepare()
+                hasCheckedForRestoredSession = false // Reset for new playback
+                isCurrentSongLogged = false
+                browser.play()
+            }
+        }
 
-                val remainingItemsAfter = items.subList(
-                    fromIndex = minOf(items.size, startIndex + 1 + windowSize),
-                    toIndex = items.size
-                )
-                val remainingItemsBefore = items.subList(
-                    fromIndex = 0,
-                    toIndex = maxOf(0, startIndex - windowSize)
-                )
+        // Update queue immediately with just the starting song
+        updateQueue()
 
-                remainingItemsAfter.chunked(chunkSize).forEach { chunk ->
-                    val mediaItemsChunk = chunk.mapNotNull { createMediaItemForItem(it) }
-                    if (mediaItemsChunk.isNotEmpty()) {
-                        withContext(Dispatchers.Main) { browser.addMediaItems(mediaItemsChunk) }
+        // Now build the full queue in the background (after playback has started)
+        coroutineScope.launch(Dispatchers.IO) {
+            // Create all media items
+            val allMediaItems = items.mapNotNull { createMediaItemForItem(it) }
+            if (allMediaItems.isEmpty()) return@launch
+
+            withContext(Dispatchers.Main) {
+                runPlayerCommand { browser ->
+                    val currentMediaId = browser.currentMediaItem?.mediaId
+                    val targetMediaId = allMediaItems.getOrNull(startIndex)?.mediaId
+                    val isSameSong = currentMediaId == targetMediaId
+
+                    if (isSameSong) {
+                        // Get current queue size
+                        val currentQueueSize = browser.mediaItemCount
+                        val currentIndex = browser.currentMediaItemIndex
+
+                        // Calculate items to add
+                        val itemsToAddAfter = allMediaItems.drop(startIndex + 1)
+                        val itemsToAddBefore = allMediaItems.take(startIndex)
+
+                        // Remove all items except the current one (from the end to avoid index shifts)
+                        for (i in (currentQueueSize - 1) downTo 0) {
+                            if (i != currentIndex) {
+                                browser.removeMediaItem(i)
+                            }
+                        }
+
+                        // Add items before the current song
+                        if (itemsToAddBefore.isNotEmpty()) {
+                            browser.addMediaItems(0, itemsToAddBefore)
+                        }
+
+                        // Add items after the current song (at the end)
+                        if (itemsToAddAfter.isNotEmpty()) {
+                            browser.addMediaItems(itemsToAddAfter)
+                        }
+
+                        Timber.tag(TAG).d("Queue updated with ${allMediaItems.size} items")
+                    } else {
+                        // Rare case: song changed between starting playback and building queue
+                        // Just add remaining items to queue
+                        val itemsToAdd = allMediaItems.filterNot { it.mediaId == currentMediaId }
+                        if (itemsToAdd.isNotEmpty()) {
+                            browser.addMediaItems(itemsToAdd)
+                            Timber.tag(TAG).d("Added ${itemsToAdd.size} remaining items to queue")
+                        }
                     }
-                    delay(200)
-                }
 
-                remainingItemsBefore.chunked(chunkSize).reversed().forEach { chunk ->
-                    val mediaItemsChunk = chunk.mapNotNull { createMediaItemForItem(it) }
-                    if (mediaItemsChunk.isNotEmpty()) {
-                        withContext(Dispatchers.Main) { browser.addMediaItems(0, mediaItemsChunk) }
-                    }
-                    delay(200)
+                    // Update queue after the full queue is built
+                    updateQueue()
                 }
-                savePlaybackState()
             }
         }
     }
@@ -380,6 +429,70 @@ class MusicServiceConnection @Inject constructor(
         val shuffledList = listOf(selectedItem) + remainingItems
 
         playSongList(shuffledList, 0)
+    }
+
+    suspend fun shuffleQueuePreservingState(items: List<Any>, startIndex: Int) {
+        playbackListManager.clearCurrentListContext()
+        if (items.isEmpty() || startIndex !in items.indices) return
+
+        val selectedItem = items[startIndex]
+        val remainingItems = items.toMutableList().apply { removeAt(startIndex) }.shuffled()
+        val shuffledList = listOf(selectedItem) + remainingItems
+
+        // Create all media items
+        val allMediaItems = withContext(Dispatchers.IO) {
+            shuffledList.mapNotNull { createMediaItemForItem(it) }
+        }
+        if (allMediaItems.isEmpty()) return
+
+        runPlayerCommand { browser ->
+            val currentMediaId = browser.currentMediaItem?.mediaId
+            val wasPlaying = browser.isPlaying
+            val currentPosition = browser.currentPosition
+
+            // Find the current song in the shuffled list
+            val currentSongIndexInShuffled = allMediaItems.indexOfFirst { it.mediaId == currentMediaId }
+
+            if (currentSongIndexInShuffled >= 0) {
+                // Current song is in the shuffled list - do in-place shuffle without restarting playback
+
+                // First, remove all items except the currently playing one (from end to start to avoid index shifts)
+                val currentIndex = browser.currentMediaItemIndex
+                for (i in (browser.mediaItemCount - 1) downTo 0) {
+                    if (i != currentIndex) {
+                        browser.removeMediaItem(i)
+                    }
+                }
+
+                // Now add the shuffled items around the current song
+                // Add items that should come before the current song
+                val itemsBefore = allMediaItems.take(currentSongIndexInShuffled)
+                if (itemsBefore.isNotEmpty()) {
+                    browser.addMediaItems(0, itemsBefore)
+                }
+
+                // Add items that should come after the current song (at the end)
+                val itemsAfter = allMediaItems.drop(currentSongIndexInShuffled + 1)
+                if (itemsAfter.isNotEmpty()) {
+                    browser.addMediaItems(itemsAfter)
+                }
+
+                // No need to restore playing state since we never interrupted it
+            } else {
+                // Fallback: current song not found in shuffled list, use the old method
+                browser.setMediaItems(allMediaItems, 0, currentPosition)
+                browser.prepare()
+
+                if (wasPlaying) {
+                    browser.play()
+                } else {
+                    browser.pause()
+                }
+            }
+        }
+
+        // Update the queue state
+        updateQueue()
     }
 
     fun playNext(item: Any) {
@@ -449,9 +562,10 @@ class MusicServiceConnection @Inject constructor(
 
     private suspend fun createLocalMediaItem(song: Song): MediaItem {
         val mediaMetadata = createMediaMetadata(song)
+        val normalizedUrl = song.youtubeUrl.replace("music.youtube.com", "www.youtube.com")
         return MediaItem.Builder()
             .setUri(song.localFilePath!!.toUri())
-            .setMediaId(song.youtubeUrl)
+            .setMediaId(normalizedUrl) // Use normalized URL for consistency
             .setMediaMetadata(mediaMetadata)
             .build()
     }
@@ -489,6 +603,42 @@ class MusicServiceConnection @Inject constructor(
 
     fun seekTo(position: Long) {
         runPlayerCommand { it.seekTo(position) }
+    }
+
+    fun setRepeatMode(@Player.RepeatMode repeatMode: Int) {
+        runPlayerCommand { browser ->
+            browser.repeatMode = repeatMode
+        }
+    }
+
+    fun setShuffleModeEnabled(shuffleEnabled: Boolean) {
+        runPlayerCommand { browser ->
+            browser.shuffleModeEnabled = shuffleEnabled
+        }
+    }
+
+    fun getCurrentRepeatMode(): Int {
+        return mediaBrowser?.repeatMode ?: Player.REPEAT_MODE_OFF
+    }
+
+    fun isShuffleModeEnabled(): Boolean {
+        return mediaBrowser?.shuffleModeEnabled ?: false
+    }
+
+    // Get the current timeline order (which reflects shuffle if enabled)
+    fun getCurrentTimelineOrder(): List<Pair<String, MediaItem>> {
+        return mediaBrowser?.let { browser ->
+            val timeline = browser.currentTimeline
+            if (timeline.isEmpty) {
+                emptyList()
+            } else {
+                val window = Timeline.Window()
+                (0 until timeline.windowCount).map { i ->
+                    timeline.getWindow(i, window)
+                    window.uid.toString() to browser.getMediaItemAt(i)
+                }
+            }
+        } ?: emptyList()
     }
 
     private fun startProgressUpdates() {

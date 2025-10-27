@@ -163,6 +163,11 @@ object AppModule {
 
     @Singleton
     @Provides
+    fun provideLyricsCacheDao(database: AppDatabase): LyricsCacheDao =
+        database.lyricsCacheDao()
+
+    @Singleton
+    @Provides
     fun provideExoPlayer(@ApplicationContext context: Context): ExoPlayer =
         ExoPlayer.Builder(context).build()
 

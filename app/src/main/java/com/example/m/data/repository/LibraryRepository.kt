@@ -138,6 +138,41 @@ class LibraryRepository @Inject constructor(
         }
     }
 
+    suspend fun removeSongFromLibraryKeepCached(song: Song) {
+        // Delete the downloaded file if it exists
+        song.localFilePath?.let { path ->
+            try {
+                val uri = path.toUri()
+                if (uri.scheme == "content") {
+                    context.contentResolver.delete(uri, null, null)
+                } else {
+                    File(path).delete()
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to delete file from device: $path")
+            }
+        }
+
+        // Mark song as not in library and reset download status while keeping cached metadata
+        val updatedSong = song.copy(
+            isInLibrary = false,
+            libraryGroupId = null, // Remove from any library group
+            localFilePath = null,  // Clear the file path
+            downloadStatus = DownloadStatus.NOT_DOWNLOADED, // Reset download status
+            downloadProgress = 0   // Reset download progress
+        )
+        songDao.updateSong(updatedSong)
+
+        // Check if artist should be removed from library
+        val artist = artistDao.getArtistByName(song.artist)
+        artist?.let {
+            val remainingLibrarySongs = artistDao.getArtistLibrarySongCount(it.artistId)
+            if (remainingLibrarySongs == 0) {
+                artistDao.deleteArtist(it)
+            }
+        }
+    }
+
     suspend fun deleteDownloadedFileForSong(song: Song) {
         val updatedSong = song.copy(
             localFilePath = null,
@@ -375,7 +410,27 @@ class LibraryRepository @Inject constructor(
                     finalSong
                 }
             }
-            else -> throw IllegalArgumentException("Unsupported item type for song creation")
+            is org.schabi.newpipe.extractor.stream.StreamInfo -> {
+                val normalizedUrl = item.url?.replace("music.youtube.com", "www.youtube.com")
+                    ?: item.url ?: ""
+                songDao.getSongByUrl(normalizedUrl) ?: run {
+                    val videoId = item.url?.substringAfter("v=")?.substringBefore('&')
+                    val newSong = Song(
+                        videoId = videoId,
+                        youtubeUrl = normalizedUrl,
+                        title = item.name ?: "Unknown Title",
+                        artist = item.uploaderName ?: "Unknown Artist",
+                        duration = item.duration,
+                        thumbnailUrl = getHighQualityThumbnailUrl(videoId),
+                        localFilePath = null,
+                        libraryGroupId = libraryGroupId
+                    )
+                    val finalSong = songDao.upsertSong(newSong)
+                    linkSongToArtist(finalSong)
+                    finalSong
+                }
+            }
+            else -> throw IllegalArgumentException("Unsupported item type for song creation: ${item::class.java.simpleName}")
         }
     }
 }

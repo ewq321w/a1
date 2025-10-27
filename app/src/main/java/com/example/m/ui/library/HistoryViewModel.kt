@@ -10,7 +10,7 @@ import com.example.m.managers.DialogState
 import com.example.m.managers.LibraryActionsManager
 import com.example.m.managers.PlaylistActionState
 import com.example.m.managers.PlaylistActionsManager
-import com.example.m.managers.PlaylistManager
+import com.example.m.managers.SnackbarManager
 import com.example.m.playback.MusicServiceConnection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -39,15 +39,15 @@ sealed interface HistoryEvent {
 
 @HiltViewModel
 class HistoryViewModel @Inject constructor(
-    private val listeningHistoryDao: ListeningHistoryDao,
+    private val historyDao: ListeningHistoryDao,
     private val musicServiceConnection: MusicServiceConnection,
-    private val playlistManager: PlaylistManager,
     private val libraryRepository: LibraryRepository,
     private val artistDao: ArtistDao,
     private val songDao: SongDao,
     private val playlistDao: PlaylistDao,
     private val libraryActionsManager: LibraryActionsManager,
-    private val playlistActionsManager: PlaylistActionsManager
+    private val playlistActionsManager: PlaylistActionsManager,
+    private val snackbarManager: SnackbarManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HistoryUiState())
@@ -64,7 +64,7 @@ class HistoryViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            listeningHistoryDao.getListeningHistory().collect { history ->
+            historyDao.getListeningHistory().collect { history ->
                 _uiState.update { it.copy(history = history) }
             }
         }
@@ -127,10 +127,10 @@ class HistoryViewModel @Inject constructor(
 
     private fun deleteFromHistory(entry: HistoryEntry) {
         viewModelScope.launch {
-            listeningHistoryDao.deleteHistoryEntry(entry.logId)
+            historyDao.deleteHistoryEntry(entry.logId)
 
             if (!entry.song.isInLibrary) {
-                val historyCount = listeningHistoryDao.getHistoryCountForSong(entry.song.songId)
+                val historyCount = historyDao.getHistoryCountForSong(entry.song.songId)
                 val playlistCount = playlistDao.getPlaylistCountForSong(entry.song.songId)
                 if (historyCount == 0 && playlistCount == 0) {
                     songDao.deleteSong(entry.song)
@@ -142,9 +142,9 @@ class HistoryViewModel @Inject constructor(
     private fun clearHistory(keep: Int) {
         viewModelScope.launch(Dispatchers.IO) {
             if (keep == 0) {
-                listeningHistoryDao.clearAllHistory()
+                historyDao.clearAllHistory()
             } else {
-                listeningHistoryDao.clearHistoryExceptLast(keep)
+                historyDao.clearHistoryExceptLast(keep)
             }
         }
     }
@@ -163,7 +163,7 @@ class HistoryViewModel @Inject constructor(
                     is AutoDownloadConflict.Artist -> "Cannot delete download. Auto-download is enabled for artist '${conflict.name}'."
                     is AutoDownloadConflict.Playlist -> "Cannot delete download. Song is in auto-downloading playlist '${conflict.name}'."
                 }
-                _userMessage.emit(message)
+                snackbarManager.showMessage(message)
             } else {
                 libraryRepository.deleteDownloadedFileForSong(song)
             }

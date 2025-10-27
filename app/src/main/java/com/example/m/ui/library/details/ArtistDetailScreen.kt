@@ -48,7 +48,6 @@ fun ArtistDetailScreen(
     val playlistActionState by viewModel.playlistActionState.collectAsState()
     val artistName = uiState.artist?.name ?: "Artist"
     var showMenu by remember { mutableStateOf(false) }
-    val snackbarHostState = remember { SnackbarHostState() }
     val sheetState = rememberModalBottomSheetState()
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(rememberTopAppBarState())
 
@@ -59,12 +58,6 @@ fun ArtistDetailScreen(
     LaunchedEffect(Unit) {
         viewModel.navigateToArtist.collect { artistId ->
             onArtistClick(artistId)
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        viewModel.userMessage.collectLatest { message ->
-            snackbarHostState.showSnackbar(message)
         }
     }
 
@@ -174,7 +167,6 @@ fun ArtistDetailScreen(
     GradientBackground(gradientColor1 = gradientColor1, gradientColor2 = gradientColor2) {
         Scaffold(
             modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-            snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 TopAppBar(
                     title = { Text(artistName, maxLines = 1, modifier = Modifier.basicMarquee()) },

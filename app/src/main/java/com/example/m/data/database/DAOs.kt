@@ -482,6 +482,14 @@ interface ArtistDao {
     @Query("SELECT COUNT(songId) FROM artist_song_cross_ref WHERE artistId = :artistId")
     suspend fun getArtistSongCount(artistId: Long): Int
 
+    @Query("""
+        SELECT COUNT(s.songId) 
+        FROM artist_song_cross_ref AS ascr 
+        INNER JOIN songs AS s ON ascr.songId = s.songId 
+        WHERE ascr.artistId = :artistId AND s.isInLibrary = 1
+    """)
+    suspend fun getArtistLibrarySongCount(artistId: Long): Int
+
     @Query("DELETE FROM artist_song_cross_ref WHERE songId NOT IN (SELECT songId FROM songs)")
     suspend fun deleteOrphanedArtistSongCrossRefs(): Int
 
@@ -590,4 +598,22 @@ interface ArtistGroupDao {
         ungroupArtists(groupId)
         deleteGroupById(groupId)
     }
+}
+
+@Dao
+interface LyricsCacheDao {
+    @Query("SELECT * FROM lyrics_cache WHERE artist = :artist AND title = :title LIMIT 1")
+    suspend fun getCachedLyrics(artist: String, title: String): LyricsCache?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertLyrics(lyricsCache: LyricsCache)
+
+    @Query("DELETE FROM lyrics_cache WHERE timestamp < :cutoffTime")
+    suspend fun deleteOldEntries(cutoffTime: Long)
+
+    @Query("SELECT COUNT(*) FROM lyrics_cache")
+    suspend fun getCacheSize(): Int
+
+    @Query("DELETE FROM lyrics_cache WHERE id IN (SELECT id FROM lyrics_cache ORDER BY timestamp ASC LIMIT :count)")
+    suspend fun deleteOldestEntries(count: Int)
 }

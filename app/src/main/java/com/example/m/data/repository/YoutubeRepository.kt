@@ -300,6 +300,47 @@ class YoutubeRepository @Inject constructor() {
         }
     }
 
+    /**
+     * Gets YouTube Mix playlist based on a video ID.
+     * YouTube Mix playlists are auto-generated playlists that provide diverse songs
+     * similar to the seed video, creating a radio-like experience.
+     *
+     * @param videoId The 11-character YouTube video ID (not the full URL)
+     * @return List of StreamInfoItem from the YouTube Mix playlist, or empty list if failed
+     */
+    suspend fun getYoutubeMixPlaylist(videoId: String): List<StreamInfoItem> {
+        return withContext(Dispatchers.IO) {
+            try {
+                // Validate video ID format
+                if (videoId.length != 11 || !videoId.matches(Regex("[a-zA-Z0-9_-]{11}"))) {
+                    Timber.w("Invalid video ID format: $videoId")
+                    return@withContext emptyList()
+                }
+
+                // Create YouTube Mix playlist URL
+                // Format: https://www.youtube.com/watch?v={videoId}&list=RD{videoId}
+                val mixPlaylistId = "RD$videoId"
+                val mixUrl = "https://www.youtube.com/watch?v=$videoId&list=$mixPlaylistId"
+
+                Timber.d("Fetching YouTube Mix playlist for video ID: $videoId, URL: $mixUrl")
+
+                val service = ServiceList.YouTube
+                val playlistInfo = PlaylistInfo.getInfo(service, mixUrl)
+
+                // Get initial page of mix playlist items
+                val initialPage = playlistInfo.relatedItems.filterIsInstance<StreamInfoItem>()
+
+                Timber.d("Successfully fetched YouTube Mix playlist with ${initialPage.size} items")
+
+                return@withContext initialPage
+
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to get YouTube Mix playlist for video ID: $videoId")
+                return@withContext emptyList()
+            }
+        }
+    }
+
     suspend fun getMusicArtistDetails(channelUrl: String, fetchAllPages: Boolean): ArtistDetails? {
         return withContext(Dispatchers.IO) {
             try {

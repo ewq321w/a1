@@ -1,4 +1,5 @@
-// file: com/example/m/ui/player/PlayerScreen.kt
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.example.m.ui.player
 
 import android.annotation.SuppressLint
@@ -31,29 +32,59 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Comment
+import androidx.compose.material.icons.automirrored.outlined.Comment
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
+import androidx.compose.material.icons.filled.HourglassTop
+import androidx.compose.material.icons.filled.LibraryAdd
+import androidx.compose.material.icons.filled.LibraryAddCheck
+import androidx.compose.material.icons.filled.PlaylistAddCheck
+import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.PauseCircleFilled
 import androidx.compose.material.icons.filled.PlayCircleFilled
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RepeatOn
+import androidx.compose.material.icons.filled.RepeatOne
+import androidx.compose.material.icons.filled.RepeatOneOn
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.ShuffleOn
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.outlined.LibraryAdd
+import androidx.compose.material.icons.outlined.LibraryAddCheck
+import androidx.compose.material.icons.outlined.PlaylistAdd
+import androidx.compose.material.icons.outlined.Repeat
+import androidx.compose.material.icons.outlined.RepeatOne
+import androidx.compose.material.icons.outlined.Shuffle
 import androidx.compose.material.ripple.LocalRippleTheme
 import androidx.compose.material.ripple.RippleTheme
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -75,10 +106,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import com.example.m.data.database.DownloadStatus
+import com.example.m.managers.PlaylistActionState
 import com.example.m.ui.common.CustomBottomSheet
 import com.example.m.ui.common.GradientBackground
+import com.example.m.ui.library.components.AddToPlaylistSheet
+import com.example.m.ui.library.components.TextFieldDialog
 import com.example.m.ui.main.MainEvent
 import com.example.m.ui.main.MainViewModel
+import com.example.m.ui.main.LoopMode
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
@@ -96,7 +132,7 @@ private object WhiteRippleTheme : RippleTheme {
     )
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerScreen(
     onDismiss: () -> Unit,
@@ -107,8 +143,13 @@ fun PlayerScreen(
     var showPlayerHub by remember { mutableStateOf(false) }
     var showComments by remember { mutableStateOf(false) }
     var initialHubTabIndex by remember { mutableStateOf(0) }
+    var hubCreationKey by remember { mutableStateOf(0) } // Add unique key for forcing recreation
 
     var hubAnimationProgress by remember { mutableStateOf(0f) }
+
+    // Playlist actions state
+    val playlistActionState by viewModel.playlistActionsManager.state.collectAsState()
+    val nowPlaying by viewModel.nowPlaying.collectAsState()
 
     LaunchedEffect(Unit) {
         viewModel.ensureCommentCountLoaded()
@@ -154,10 +195,17 @@ fun PlayerScreen(
                         viewModel = viewModel,
                         onShowQueue = {
                             initialHubTabIndex = 0
+                            hubCreationKey++ // Increment key to force recreation
+                            showPlayerHub = true
+                        },
+                        onShowLyrics = {
+                            initialHubTabIndex = 1
+                            hubCreationKey++ // Increment key to force recreation
                             showPlayerHub = true
                         },
                         onShowRelated = {
-                            initialHubTabIndex = 1
+                            initialHubTabIndex = 2
+                            hubCreationKey++ // Increment key to force recreation
                             showPlayerHub = true
                         },
                         onShowComments = { showComments = true }
@@ -207,11 +255,13 @@ fun PlayerScreen(
             ),
             onAnimationProgress = { progress -> hubAnimationProgress = progress }
         ) {
-            PlayerHubScreen(
-                onDismiss = { showPlayerHub = false },
-                animationProgress = hubAnimationProgress,
-                initialTabIndex = initialHubTabIndex
-            )
+            key(hubCreationKey) {
+                PlayerHubScreen(
+                    onDismiss = { showPlayerHub = false },
+                    animationProgress = hubAnimationProgress,
+                    initialTabIndex = initialHubTabIndex
+                )
+            }
         }
 
         CustomBottomSheet(
@@ -229,6 +279,77 @@ fun PlayerScreen(
                 isContentReady = true
             )
         }
+
+        // Playlist action sheets
+        when (val currentState = playlistActionState) {
+            is PlaylistActionState.AddToPlaylist -> {
+                ModalBottomSheet(
+                    onDismissRequest = { viewModel.playlistActionsManager.dismiss() }
+                ) {
+                    AddToPlaylistSheet(
+                        songTitle = nowPlaying?.title?.toString() ?: "Unknown Title",
+                        songArtist = nowPlaying?.artist?.toString() ?: "Unknown Artist",
+                        songThumbnailUrl = nowPlaying?.artworkUri?.toString() ?: "",
+                        playlists = currentState.playlists,
+                        onPlaylistSelected = { playlistId ->
+                            viewModel.playlistActionsManager.onPlaylistSelected(playlistId)
+                        },
+                        onCreateNewPlaylist = {
+                            viewModel.playlistActionsManager.prepareToCreatePlaylist()
+                        }
+                    )
+                }
+            }
+            is PlaylistActionState.CreatePlaylist -> {
+                TextFieldDialog(
+                    title = "New Playlist",
+                    label = "Playlist name",
+                    confirmButtonText = "Create",
+                    onDismiss = { viewModel.playlistActionsManager.dismiss() },
+                    onConfirm = { name: String ->
+                        viewModel.playlistActionsManager.onCreatePlaylist(name)
+                    }
+                )
+            }
+            is PlaylistActionState.SelectGroupForNewPlaylist -> {
+                // Handle group selection automatically - use first available group or dismiss
+                LaunchedEffect(currentState) {
+                    if (currentState.groups.isNotEmpty()) {
+                        viewModel.playlistActionsManager.onGroupSelectedForNewPlaylist(currentState.groups.first().groupId)
+                    } else {
+                        viewModel.playlistActionsManager.dismiss()
+                    }
+                }
+            }
+            PlaylistActionState.Hidden -> {
+                // No sheet to show
+            }
+        }
+
+        // Deletion confirmation dialog
+        viewModel.uiState.value.itemPendingDeletion?.let { song ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { viewModel.onEvent(MainEvent.CancelDeletion) },
+                title = { Text("Remove from Library") },
+                text = {
+                    Text("Remove \"${song.title}\" by ${song.artist} from your library? This will also delete any downloaded file, but the song can still be played from search results or current queue.")
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = { viewModel.onEvent(MainEvent.ConfirmDeletion) }
+                    ) {
+                        Text("Remove")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { viewModel.onEvent(MainEvent.CancelDeletion) }
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -244,6 +365,26 @@ private fun PlayerArtwork(viewModel: MainViewModel) {
     ) {
         var showBackwardFeedback by remember { mutableStateOf(false) }
         var showForwardFeedback by remember { mutableStateOf(false) }
+        var backwardTapCount by remember { mutableStateOf(0) }
+        var forwardTapCount by remember { mutableStateOf(0) }
+        var backwardFeedbackText by remember { mutableStateOf("10s") }
+        var forwardFeedbackText by remember { mutableStateOf("10s") }
+
+        // Reset backward tap count after timeout
+        LaunchedEffect(backwardTapCount) {
+            if (backwardTapCount > 0) {
+                kotlinx.coroutines.delay(1000) // Wait 1 second for potential additional taps
+                backwardTapCount = 0
+            }
+        }
+
+        // Reset forward tap count after timeout
+        LaunchedEffect(forwardTapCount) {
+            if (forwardTapCount > 0) {
+                kotlinx.coroutines.delay(1000) // Wait 1 second for potential additional taps
+                forwardTapCount = 0
+            }
+        }
 
         LaunchedEffect(showBackwardFeedback) {
             if (showBackwardFeedback) {
@@ -278,9 +419,15 @@ private fun PlayerArtwork(viewModel: MainViewModel) {
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onDoubleTap = {
+                            backwardTapCount++
                             showBackwardFeedback = true
+
+                            // Calculate seek amount based on tap count
+                            val seekAmountMs = backwardTapCount * 10000L // 10s per tap
+                            backwardFeedbackText = "${backwardTapCount * 10}s"
+
                             val currentPosition = viewModel.playbackState.value.currentPosition
-                            val newPosition = (currentPosition - 10000).coerceAtLeast(0)
+                            val newPosition = (currentPosition - seekAmountMs).coerceAtLeast(0)
                             viewModel.onEvent(MainEvent.SeekTo(newPosition))
                         }
                     )
@@ -295,10 +442,17 @@ private fun PlayerArtwork(viewModel: MainViewModel) {
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onDoubleTap = {
+                            forwardTapCount++
                             showForwardFeedback = true
+
+                            // Calculate seek amount based on tap count
+                            val seekAmountMs = forwardTapCount * 10000L // 10s per tap
+                            forwardFeedbackText = "${forwardTapCount * 10}s"
+
                             val currentPosition = viewModel.playbackState.value.currentPosition
                             val totalDuration = viewModel.playbackState.value.totalDuration
-                            val newPosition = (currentPosition + 10000).coerceAtMost(totalDuration)
+                            val newPosition =
+                                (currentPosition + seekAmountMs).coerceAtMost(totalDuration)
                             viewModel.onEvent(MainEvent.SeekTo(newPosition))
                         }
                     )
@@ -308,25 +462,31 @@ private fun PlayerArtwork(viewModel: MainViewModel) {
         AnimatedVisibility(
             visible = showBackwardFeedback,
             modifier = Modifier.fillMaxSize(),
-            enter = fadeIn(animationSpec = tween(150)),
+            enter = fadeIn(animationSpec = tween(100)),
             exit = fadeOut(animationSpec = tween(300))
         ) {
-            SeekFeedbackOverlay(isForward = false)
+            SeekFeedbackOverlay(
+                isForward = false,
+                feedbackText = backwardFeedbackText
+            )
         }
 
         AnimatedVisibility(
             visible = showForwardFeedback,
             modifier = Modifier.fillMaxSize(),
-            enter = fadeIn(animationSpec = tween(150)),
+            enter = fadeIn(animationSpec = tween(100)),
             exit = fadeOut(animationSpec = tween(300))
         ) {
-            SeekFeedbackOverlay(isForward = true)
+            SeekFeedbackOverlay(
+                isForward = true,
+                feedbackText = forwardFeedbackText
+            )
         }
     }
 }
 
 @Composable
-private fun SeekFeedbackOverlay(isForward: Boolean) {
+private fun SeekFeedbackOverlay(isForward: Boolean, feedbackText: String) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -393,7 +553,7 @@ private fun SeekFeedbackOverlay(isForward: Boolean) {
                     modifier = Modifier.size(40.dp)
                 )
                 Text(
-                    text = "10s",
+                    text = feedbackText,
                     color = Color.White,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
@@ -409,14 +569,51 @@ private fun SeekFeedbackOverlay(isForward: Boolean) {
 private fun PlayerControls(
     viewModel: MainViewModel,
     onShowQueue: () -> Unit,
+    onShowLyrics: () -> Unit,
     onShowRelated: () -> Unit,
     onShowComments: () -> Unit
 ) {
     val isPlaying by viewModel.isPlaying.collectAsState()
     val playbackState by viewModel.playbackState.collectAsState()
     val commentCount by viewModel.commentCount.collectAsState()
+    val loopMode by viewModel.loopMode.collectAsState()
+    val isShuffled by viewModel.isShuffled.collectAsState()
+    val isCurrentSongInLibrary by viewModel.isCurrentSongInLibrary.collectAsState()
+    val currentSongDownloadStatus by viewModel.currentSongDownloadStatus.collectAsState()
+    val currentSongDownloadProgress by viewModel.currentSongDownloadProgress.collectAsState()
+    val playerState by viewModel.playerState.collectAsState()
+    val isShuffling by viewModel.isShuffling.collectAsState()
     var localSliderProgress by remember { mutableFloatStateOf(0f) }
     var isUserInteracting by remember { mutableStateOf(false) }
+    var showDeleteDownloadDialog by remember { mutableStateOf(false) }
+
+    // Show delete download confirmation dialog
+    if (showDeleteDownloadDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showDeleteDownloadDialog = false },
+            title = { Text("Delete Download") },
+            text = {
+                Text("Delete the downloaded file for \"${viewModel.nowPlaying.value?.title}\"? The song will still be available for streaming.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.onEvent(MainEvent.DeleteCurrentSongDownload)
+                        showDeleteDownloadDialog = false
+                    }
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showDeleteDownloadDialog = false }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     LaunchedEffect(playbackState.currentPosition, playbackState.totalDuration) {
         if (!isUserInteracting) {
@@ -449,12 +646,13 @@ private fun PlayerControls(
                     .basicMarquee()
             )
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(24.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Start
             ) {
                 CompositionLocalProvider(LocalRippleTheme provides WhiteRippleTheme) {
+                    // Comments Button (moved to first position)
                     TextButton(
                         onClick = onShowComments,
                         modifier = Modifier
@@ -471,7 +669,7 @@ private fun PlayerControls(
                                 imageVector = Icons.AutoMirrored.Filled.Comment,
                                 contentDescription = "Show Comments",
                                 tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f),
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(24.dp)
                             )
                             Text(
                                 text = when (commentCount) {
@@ -488,6 +686,168 @@ private fun PlayerControls(
                                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f),
                                 fontSize = 14.sp
                             )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    // Library Button
+                    TextButton(
+                        onClick = {
+                            if (isCurrentSongInLibrary) {
+                                viewModel.onEvent(MainEvent.DeleteFromLibrary)
+                            } else {
+                                viewModel.onEvent(MainEvent.AddToLibrary)
+                            }
+                        },
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(MaterialTheme.colorScheme.onBackground.copy(alpha = 0.13f))
+                            .height(36.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isCurrentSongInLibrary) Icons.Outlined.LibraryAddCheck else Icons.Outlined.LibraryAdd,
+                                contentDescription = if (isCurrentSongInLibrary) "Delete from Library" else "Add to Library",
+                                tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f),
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Text(
+                                text = if (isCurrentSongInLibrary) "Delete" else "Library",
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f),
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    // Playlist Button
+                    TextButton(
+                        onClick = {
+                            if (isCurrentSongInLibrary) {
+                                viewModel.onEvent(MainEvent.AddToPlaylist)
+                            }
+                        },
+                        enabled = isCurrentSongInLibrary,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(
+                                if (isCurrentSongInLibrary)
+                                    MaterialTheme.colorScheme.onBackground.copy(alpha = 0.13f)
+                                else
+                                    MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f)
+                            )
+                            .height(36.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.PlaylistAdd,
+                                contentDescription = "Add to Playlist",
+                                tint = if (isCurrentSongInLibrary)
+                                    MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f)
+                                else
+                                    MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Text(
+                                text = "Playlist",
+                                color = if (isCurrentSongInLibrary)
+                                    MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f)
+                                else
+                                    MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    // Download Button (moved to last position)
+                    val isDownloading = currentSongDownloadStatus == DownloadStatus.DOWNLOADING || currentSongDownloadStatus == DownloadStatus.QUEUED
+                    val isDownloaded = currentSongDownloadStatus == DownloadStatus.DOWNLOADED
+                    val isFailed = currentSongDownloadStatus == DownloadStatus.FAILED
+
+                    IconButton(
+                        onClick = {
+                            if (isDownloaded) {
+                                showDeleteDownloadDialog = true
+                            } else if (!isDownloading && !isFailed) {
+                                viewModel.onEvent(MainEvent.DownloadCurrentSong)
+                            }
+                        },
+                        enabled = isCurrentSongInLibrary && !isDownloading,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(
+                                if (isCurrentSongInLibrary)
+                                    MaterialTheme.colorScheme.onBackground.copy(alpha = 0.13f)
+                                else
+                                    MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f)
+                            )
+                            .size(36.dp)
+                    ) {
+                        when {
+                            currentSongDownloadStatus == DownloadStatus.QUEUED -> {
+                                Icon(
+                                    imageVector = Icons.Default.HourglassTop,
+                                    contentDescription = "Queued for download",
+                                    tint = if (isCurrentSongInLibrary)
+                                        MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f)
+                                    else
+                                        MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            currentSongDownloadStatus == DownloadStatus.DOWNLOADING -> {
+                                CircularProgressIndicator(
+                                    progress = { currentSongDownloadProgress / 100f },
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                    color = if (isCurrentSongInLibrary)
+                                        MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f)
+                                    else
+                                        MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f)
+                                )
+                            }
+                            isDownloaded -> {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Downloaded - Click to delete",
+                                    tint = if (isCurrentSongInLibrary)
+                                        MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f)
+                                    else
+                                        MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            isFailed -> {
+                                Icon(
+                                    imageVector = Icons.Default.ErrorOutline,
+                                    contentDescription = "Download failed - Click to retry",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            else -> {
+                                Icon(
+                                    imageVector = Icons.Default.Download,
+                                    contentDescription = "Download",
+                                    tint = if (isCurrentSongInLibrary)
+                                        MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f)
+                                    else
+                                        MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -532,6 +892,23 @@ private fun PlayerControls(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Shuffle button
+            IconButton(
+                onClick = { viewModel.onEvent(MainEvent.ToggleShuffle) },
+                modifier = Modifier.size(45.dp),
+                enabled = !isShuffling
+            ) {
+                Icon(
+                    imageVector = if (isShuffling) Icons.Default.ShuffleOn else Icons.Outlined.Shuffle,
+                    contentDescription = "Shuffle",
+                    tint = if (isShuffling)
+                        MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f)
+                    else
+                        MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
             IconButton(onClick = { viewModel.onEvent(MainEvent.SkipToPrevious) }, modifier = Modifier.size(55.dp)) {
                 Icon(
                     Icons.Default.SkipPrevious, contentDescription = "Previous",
@@ -539,19 +916,57 @@ private fun PlayerControls(
                     modifier = Modifier.size(35.dp)
                 )
             }
-            IconButton(onClick = { viewModel.onEvent(MainEvent.TogglePlayPause) }, modifier = Modifier.size(100.dp)) {
-                Icon(
-                    imageVector = if (isPlaying) Icons.Default.PauseCircleFilled else Icons.Default.PlayCircleFilled,
-                    contentDescription = "Play/Pause",
-                    tint = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.size(88.dp)
-                )
+
+            // Play/Pause Button or Loading Indicator
+            Box(
+                modifier = Modifier.size(100.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                if (playerState == androidx.media3.common.Player.STATE_BUFFERING) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(60.dp),
+                        color = MaterialTheme.colorScheme.onBackground,
+                        strokeWidth = 3.dp
+                    )
+                } else {
+                    IconButton(onClick = { viewModel.onEvent(MainEvent.TogglePlayPause) }, modifier = Modifier.size(100.dp)) {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Default.PauseCircleFilled else Icons.Default.PlayCircleFilled,
+                            contentDescription = "Play/Pause",
+                            tint = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.size(88.dp)
+                        )
+                    }
+                }
             }
+
             IconButton(onClick = { viewModel.onEvent(MainEvent.SkipToNext) }, modifier = Modifier.size(55.dp)) {
                 Icon(
                     Icons.Default.SkipNext, contentDescription = "Next",
                     tint = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.size(35.dp))
+            }
+
+            // Loop button
+            IconButton(
+                onClick = { viewModel.onEvent(MainEvent.ToggleLoop) },
+                modifier = Modifier.size(45.dp)
+            ) {
+                val (icon, tint) = when (loopMode) {
+                    LoopMode.OFF -> Icons.Outlined.Repeat to MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+                    LoopMode.ONE -> Icons.Default.RepeatOneOn to MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f)
+                    LoopMode.ALL -> Icons.Default.RepeatOn to MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f)
+                }
+                Icon(
+                    imageVector = icon,
+                    contentDescription = when (loopMode) {
+                        LoopMode.OFF -> "Loop Off"
+                        LoopMode.ONE -> "Loop One"
+                        LoopMode.ALL -> "Loop All"
+                    },
+                    tint = tint,
+                    modifier = Modifier.size(24.dp)
+                )
             }
         }
         Spacer(modifier = Modifier.height(40.dp))
@@ -562,6 +977,9 @@ private fun PlayerControls(
             ) {
                 TextButton(onClick = onShowQueue) {
                     Text("UP NEXT", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f))
+                }
+                TextButton(onClick = onShowLyrics) {
+                    Text("LYRICS", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f))
                 }
                 TextButton(onClick = onShowRelated) {
                     Text("RELATED", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f))
@@ -638,7 +1056,12 @@ private fun CustomPlayerSlider(
 
 @SuppressLint("DefaultLocale")
 private fun formatDuration(millis: Long): String {
-    val minutes = TimeUnit.MILLISECONDS.toMinutes(millis)
-    val seconds = TimeUnit.MILLISECONDS.toSeconds(millis) - TimeUnit.MINUTES.toSeconds(minutes)
-    return String.format("%d:%02d", minutes, seconds)
+    val hours = TimeUnit.MILLISECONDS.toHours(millis)
+    val minutes = TimeUnit.MILLISECONDS.toMinutes(millis) - TimeUnit.HOURS.toMinutes(hours)
+    val seconds = TimeUnit.MILLISECONDS.toSeconds(millis) - TimeUnit.MINUTES.toSeconds(TimeUnit.MILLISECONDS.toMinutes(millis))
+
+    return when {
+        hours > 0 -> String.format("%d:%02d:%02d", hours, minutes, seconds)
+        else -> String.format("%d:%02d", minutes, seconds)
+    }
 }

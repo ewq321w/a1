@@ -42,7 +42,6 @@ fun PlaylistDetailScreen(
     val uiState by viewModel.uiState.collectAsState()
     val playlistActionState by viewModel.playlistActionState.collectAsState()
     var showDeleteConfirmation by remember { mutableStateOf(false) }
-    val snackbarHostState = remember { SnackbarHostState() }
     val sheetState = rememberModalBottomSheetState()
 
     val activity = LocalContext.current as ComponentActivity
@@ -52,12 +51,6 @@ fun PlaylistDetailScreen(
     LaunchedEffect(Unit) {
         viewModel.navigateToArtist.collect { artistId ->
             onArtistClick(artistId)
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        viewModel.userMessage.collectLatest { message ->
-            snackbarHostState.showSnackbar(message)
         }
     }
 
@@ -135,7 +128,6 @@ fun PlaylistDetailScreen(
                 nowPlayingMediaId = uiState.nowPlayingMediaId,
                 onEvent = viewModel::onEvent,
                 sortOrder = uiState.sortOrder,
-                snackbarHostState = snackbarHostState,
                 onBack = onBack,
                 onEdit = { onEditPlaylist(pl.playlistId) },
                 onShowDeleteDialog = { showDeleteConfirmation = true },
@@ -173,7 +165,6 @@ private fun PlaylistDetailContent(
     nowPlayingMediaId: String?,
     onEvent: (PlaylistDetailEvent) -> Unit,
     sortOrder: PlaylistSortOrder,
-    snackbarHostState: SnackbarHostState,
     onBack: () -> Unit,
     onEdit: () -> Unit,
     onShowDeleteDialog: () -> Unit,
@@ -183,7 +174,6 @@ private fun PlaylistDetailContent(
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text(playlist.name, maxLines = 1, modifier = Modifier.basicMarquee()) },

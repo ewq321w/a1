@@ -56,10 +56,20 @@ fun PlayerHubScreen(
     val (color1, color2) = mainViewModel.playerGradientColors.value
     val nowPlaying by mainViewModel.nowPlaying.collectAsState()
     val isPlaying by mainViewModel.isPlaying.collectAsState()
-    val songQueue by mainViewModel.queueSongs.collectAsState()
-    val relatedSongs by mainViewModel.relatedSongs.collectAsState()
-    val isLoadingRelatedSongs by mainViewModel.isLoadingRelatedSongs.collectAsState()
+    val playerState by mainViewModel.playerState.collectAsState()
+    val songQueue by mainViewModel.displayQueue.collectAsState()
+    val currentLyrics by mainViewModel.currentLyrics.collectAsState()
+    val isLoadingLyrics by mainViewModel.isLoadingLyrics.collectAsState()
+    val lyricsError by mainViewModel.lyricsError.collectAsState()
     val currentMediaId by mainViewModel.currentMediaId.collectAsState() // Add this line
+
+    // New unfiltered results
+    val unfilteredMusicResults by mainViewModel.unfilteredMusicResults.collectAsState()
+    val unfilteredRegularResults by mainViewModel.unfilteredRegularResults.collectAsState()
+    val isLoadingUnfilteredResults by mainViewModel.isLoadingUnfilteredResults.collectAsState()
+
+    // YouTube Mix results
+    val youtubeMixResults by mainViewModel.youtubeMixResults.collectAsState()
 
     // Track progress from sheet
     var currentProgress by remember { mutableStateOf(animationProgress) }
@@ -68,13 +78,8 @@ fun PlayerHubScreen(
         currentProgress = animationProgress
     }
 
-    // Tab state - use initial tab index and update when it changes
-    var selectedTabIndex by remember { mutableStateOf(initialTabIndex) }
-
-    // Update selectedTabIndex when initialTabIndex changes
-    LaunchedEffect(initialTabIndex) {
-        selectedTabIndex = initialTabIndex
-    }
+    // Tab state - reset to initial tab index every time PlayerHub opens
+    var selectedTabIndex by remember(initialTabIndex) { mutableStateOf(initialTabIndex) }
 
     // Data readiness for conditional loading
     val isDataReady by remember {
@@ -92,9 +97,10 @@ fun PlayerHubScreen(
         radialGradientRadiusMultiplier = 10.0f,
         radialGradientAlpha = 0.15f
     ) {
-        // Ensure related songs are loaded when PlayerHubScreen opens
-        LaunchedEffect(Unit) {
-            mainViewModel.ensureRelatedSongsLoaded()
+        // Ensure related songs and lyrics are loaded when PlayerHubScreen opens or song changes
+        LaunchedEffect(currentMediaId) {
+            // Also trigger lyrics loading immediately to ensure no delays
+            mainViewModel.ensureLyricsLoaded()
         }
 
         Box(modifier = Modifier.fillMaxSize()) {
@@ -104,6 +110,7 @@ fun PlayerHubScreen(
                 PlayerHubHeader(
                     mediaMetadata = nowPlaying,
                     isPlaying = isPlaying,
+                    playerState = playerState,
                     onTogglePlayPause = { mainViewModel.onEvent(MainEvent.TogglePlayPause) }
                 )
 
@@ -112,11 +119,18 @@ fun PlayerHubScreen(
                     mainViewModel = mainViewModel,
                     animationProgress = currentProgress,
                     songQueue = songQueue,
-                    relatedSongs = relatedSongs,
-                    isLoadingRelatedSongs = isLoadingRelatedSongs,
+                    relatedSongs = emptyList(), // Pass empty list
+                    isLoadingRelatedSongs = false, // Pass false
+                    unfilteredMusicResults = unfilteredMusicResults,
+                    unfilteredRegularResults = unfilteredRegularResults,
+                    youtubeMixResults = youtubeMixResults, // Pass YouTube Mix results
+                    isLoadingUnfilteredResults = isLoadingUnfilteredResults,
                     selectedTabIndex = selectedTabIndex,
                     onTabSelected = { selectedTabIndex = it },
-                    nowPlayingMediaId = currentMediaId // Use currentMediaId instead of nowPlaying?.mediaId
+                    nowPlayingMediaId = currentMediaId, // Use currentMediaId instead of nowPlaying?.mediaId
+                    currentLyrics = currentLyrics,
+                    isLoadingLyrics = isLoadingLyrics,
+                    lyricsError = lyricsError
                 )
             }
 
@@ -146,17 +160,35 @@ private fun TabContent(
     songQueue: List<Pair<String, Song?>>,
     relatedSongs: List<SearchResultForList>,
     isLoadingRelatedSongs: Boolean,
+    unfilteredMusicResults: List<SearchResultForList>,
+    unfilteredRegularResults: List<SearchResultForList>,
+    youtubeMixResults: List<SearchResultForList>,
+    isLoadingUnfilteredResults: Boolean,
     selectedTabIndex: Int,
     onTabSelected: (Int) -> Unit,
-    nowPlayingMediaId: String? // New parameter for current playing media ID
+    nowPlayingMediaId: String?, // New parameter for current playing media ID
+    currentLyrics: String?,
+    isLoadingLyrics: Boolean,
+    lyricsError: String?
 ) {
     val currentIndex by mainViewModel.currentMediaItemIndex.collectAsState()
     val (color1, color2) = mainViewModel.playerGradientColors.value
 
-    // Use derivedStateOf to properly react to songQueue changes
-    val filteredQueueItems by derivedStateOf {
-        songQueue.filter { it.second != null }
-            .map { it.first to it.second!! }
+    // Filter queue items directly - recalculates on every composition when songQueue changes
+    val filteredQueueItems = songQueue.filter { it.second != null }
+        .map { it.first to it.second!! }
+
+    // Local queue for reorderable to prevent jumping during drag
+    var localQueue by remember { mutableStateOf(filteredQueueItems) }
+
+    // Track if we're currently reordering to prevent scroll conflicts
+    var isReordering by remember { mutableStateOf(false) }
+
+    // Update localQueue whenever songQueue changes and we're not reordering
+    LaunchedEffect(songQueue) {
+        if (!isReordering) {
+            localQueue = filteredQueueItems
+        }
     }
 
     // Track whether we've already scrolled initially to prevent re-scrolling when becoming reorderable
@@ -165,17 +197,19 @@ private fun TabContent(
     // Track the last currentIndex we scrolled to, to only scroll on song changes
     var lastScrolledIndex by remember { mutableStateOf(-1) }
 
-    // Track if we're currently reordering to prevent scroll conflicts
-    var isReordering by remember { mutableStateOf(false) }
-
     // Determine if reorder is enabled based on animation progress and tab selection
-    val isReorderEnabled = animationProgress >= 1f && selectedTabIndex == 0  // Only for Queue tab
+    val isReorderEnabled = animationProgress >= 0.75f && selectedTabIndex == 0  // Only for Queue tab
 
     // onMove lambda for reordering
     val onMoveLambda = { from: ItemPosition, to: ItemPosition ->
         if (isReorderEnabled) {
             isReordering = true // Set reordering flag
             mainViewModel.moveQueueItem(from.index, to.index)
+            // Update local queue immediately to reflect the move
+            val list = localQueue.toMutableList()
+            val item = list.removeAt(from.index)
+            list.add(to.index, item)
+            localQueue = list
         }
     }
     val updatedOnMove = rememberUpdatedState(onMoveLambda)
@@ -273,10 +307,24 @@ private fun TabContent(
                             }
                         )
 
-                        // Related Tab
+                        // Lyrics Tab
                         Tab(
                             selected = selectedTabIndex == 1,
                             onClick = { onTabSelected(1) },
+                            text = {
+                                Text(
+                                    "Lyrics",
+                                    fontSize = 15.sp,
+                                    modifier = Modifier.padding(bottom = 3.dp),
+                                    color = Color.White
+                                )
+                            }
+                        )
+
+                        // Related Tab
+                        Tab(
+                            selected = selectedTabIndex == 2,
+                            onClick = { onTabSelected(2) },
                             text = {
                                 Text(
                                     "Related",
@@ -321,11 +369,11 @@ private fun TabContent(
                                         contentPadding = PaddingValues(bottom = 36.dp, top = 12.dp)
                                     ) {
                                         itemsIndexed(
-                                            items = filteredQueueItems,
-                                            key = { _, item -> item.first }
+                                            items = localQueue,
+                                            key = { index, item -> "${item.first}_$index" }
                                         ) { index, item ->
                                             if (isReorderEnabled) {
-                                                ReorderableItem(reorderableState, key = item.first) { isDragging ->
+                                                ReorderableItem(reorderableState, key = "${item.first}_$index") { isDragging ->
                                                     QueueItem(
                                                         song = item.second,
                                                         isPlaying = index == currentIndex,
@@ -347,97 +395,160 @@ private fun TabContent(
                                     }
                                 }
                                 1 -> {
-                                    // Related Songs Tab Content - YouTube Music style with pages
+                                    // Lyrics Tab Content
                                     Box(
                                         modifier = Modifier.fillMaxSize(),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         when {
-                                            isLoadingRelatedSongs -> {
-                                                // Show only loading spinner when loading
+                                            isLoadingLyrics -> {
                                                 CircularProgressIndicator(
                                                     color = Color.White,
                                                     modifier = Modifier.size(24.dp),
                                                     strokeWidth = 2.dp
                                                 )
                                             }
-                                            relatedSongs.isNotEmpty() -> {
-                                                // Show related songs with paging
+                                            lyricsError != null -> {
                                                 Column(
-                                                    modifier = Modifier.fillMaxSize()
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    verticalArrangement = Arrangement.spacedBy(8.dp)
                                                 ) {
                                                     Text(
-                                                        text = "More like this",
-                                                        color = Color.White,
-                                                        fontSize = 20.sp,
-                                                        fontWeight = FontWeight.Medium, // Changed from SemiBold to Medium
-                                                        modifier = Modifier.padding(start = 20.dp, top = 16.dp)
+                                                        text = lyricsError ?: "Error loading lyrics",
+                                                        color = Color.White.copy(alpha = 0.7f),
+                                                        fontSize = 14.sp,
+                                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                                     )
-
-                                                    // Use HorizontalPager for smooth paging
-                                                    val pagerState = rememberPagerState(
-                                                        pageCount = { ceil(relatedSongs.size / 4f).toInt() }
-                                                    )
-
-                                                    // Fixed height container to prevent dots indicator from moving
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .height(284.dp) // Fixed height for 4 songs (80dp each)
+                                                    TextButton(
+                                                        onClick = { mainViewModel.ensureLyricsLoaded() }
                                                     ) {
-                                                        HorizontalPager(
-                                                            state = pagerState,
-                                                            modifier = Modifier.fillMaxSize(),
-                                                            contentPadding = PaddingValues(end = 24.dp),
-                                                            pageSpacing = 0.dp
-                                                        ) { pageIndex ->
-                                                            val startIndex = pageIndex * 4
-                                                            val endIndex = min(startIndex + 4, relatedSongs.size)
-
-                                                            // Page content with consistent spacing
-                                                            Column(
-                                                                modifier = Modifier.fillMaxWidth(),
-                                                                verticalArrangement = Arrangement.spacedBy(0.dp)
-                                                            ) {
-                                                                for (index in startIndex until endIndex) {
-                                                                    val item = relatedSongs[index]
-                                                                    // Determine if this related song is currently playing
-                                                                    val normalizedUrl = item.result.streamInfo.url?.replace("music.youtube.com", "www.youtube.com")
-                                                                    val isPlaying = normalizedUrl == nowPlayingMediaId || item.localSong?.localFilePath == nowPlayingMediaId
-
-                                                                    RelatedSongItem(
-                                                                        searchResultForList = item,
-                                                                        isPlaying = isPlaying,
-                                                                        onPlay = { mainViewModel.playRelatedSong(item.result.streamInfo) },
-                                                                        modifier = Modifier.fillMaxWidth()
-                                                                    )
-                                                                }
-                                                                // Add empty space to maintain consistent height for incomplete pages
-                                                                if (endIndex - startIndex < 4) {
-                                                                    repeat(4 - (endIndex - startIndex)) {
-                                                                        Spacer(modifier = Modifier.height(68.dp)) // Updated to match RelatedSongItem height
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-
-                                                    // Add page indicator if there are multiple pages
-                                                    if (pagerState.pageCount > 1) {
-                                                        DotsIndicator(
-                                                            totalDots = pagerState.pageCount,
-                                                            selectedIndex = pagerState.currentPage,
-                                                            modifier = Modifier
-                                                                .align(Alignment.CenterHorizontally)
-                                                                .padding(top = 4.dp)
+                                                        Text(
+                                                            "Retry",
+                                                            color = Color.White.copy(alpha = 0.8f),
+                                                            fontSize = 14.sp
                                                         )
                                                     }
                                                 }
                                             }
+                                            currentLyrics != null -> {
+                                                // --- FIX START: Reverted to a single Text composable for smooth scrolling ---
+                                                LazyColumn(
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    contentPadding = PaddingValues(
+                                                        start = 20.dp,
+                                                        end = 20.dp,
+                                                        top = 16.dp,
+                                                        bottom = 32.dp
+                                                    )
+                                                ) {
+                                                    item {
+                                                        Text(
+                                                            text = currentLyrics,
+                                                            color = Color.White.copy(alpha = 0.9f),
+                                                            fontSize = 16.sp,
+                                                            lineHeight = 24.sp,
+                                                            modifier = Modifier.fillMaxWidth()
+                                                        )
+                                                    }
+                                                }
+                                                // --- FIX END ---
+                                            }
                                             else -> {
-                                                // Show empty state only when not loading and no songs found
+                                                Column(
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "No lyrics found",
+                                                        color = Color.White.copy(alpha = 0.7f),
+                                                        fontSize = 14.sp
+                                                    )
+                                                    TextButton(
+                                                        onClick = { mainViewModel.ensureLyricsLoaded() }
+                                                    ) {
+                                                        Text(
+                                                            "Search again",
+                                                            color = Color.White.copy(alpha = 0.8f),
+                                                            fontSize = 14.sp
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                2 -> {
+                                    // Related Songs Tab Content - Three sections with paging
+                                    when {
+                                        isLoadingUnfilteredResults -> {
+                                            // Show loading spinner when any section is loading
+                                            Box(
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                CircularProgressIndicator(
+                                                    color = Color.White,
+                                                    modifier = Modifier.size(24.dp),
+                                                    strokeWidth = 2.dp
+                                                )
+                                            }
+                                        }
+                                        unfilteredMusicResults.isNotEmpty() || unfilteredRegularResults.isNotEmpty() -> {
+                                            // Show all three sections in a scrollable column
+                                            LazyColumn(
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentPadding = PaddingValues(bottom = 36.dp, top = 12.dp)
+                                            ) {
+                                                // Section 1: Unfiltered Music Search Results (More like this)
+                                                if (unfilteredMusicResults.isNotEmpty()) {
+                                                    item {
+                                                        RelatedSection(
+                                                            title = "More like this",
+                                                            items = unfilteredMusicResults,
+                                                            nowPlayingMediaId = nowPlayingMediaId,
+                                                            mainViewModel = mainViewModel,
+                                                            useYoutubeMixQueue = true
+                                                        )
+                                                        Spacer(modifier = Modifier.height(24.dp))
+                                                    }
+                                                }
+
+                                                // Section 2: Unfiltered Regular YouTube Results (renamed)
+                                                if (unfilteredRegularResults.isNotEmpty()) {
+                                                    item {
+                                                        RelatedSection(
+                                                            title = "Related Videos",
+                                                            items = unfilteredRegularResults,
+                                                            nowPlayingMediaId = nowPlayingMediaId,
+                                                            mainViewModel = mainViewModel,
+                                                            useYoutubeMixQueue = true
+                                                        )
+                                                        Spacer(modifier = Modifier.height(24.dp))
+                                                    }
+                                                }
+
+                                                // Section 3: YouTube Mix Results
+                                                if (youtubeMixResults.isNotEmpty()) {
+                                                    item {
+                                                        RelatedSection(
+                                                            title = "YouTube Mix",
+                                                            items = youtubeMixResults,
+                                                            nowPlayingMediaId = nowPlayingMediaId,
+                                                            mainViewModel = mainViewModel,
+                                                            useYoutubeMixQueue = true
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        else -> {
+                                            // Show empty state only when not loading and no content found
+                                            Box(
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentAlignment = Alignment.Center
+                                            ) {
                                                 Text(
-                                                    text = "No related songs found",
+                                                    text = "No related content found",
                                                     color = Color.White.copy(alpha = 0.7f),
                                                     fontSize = 14.sp
                                                 )
@@ -458,6 +569,7 @@ private fun TabContent(
 private fun PlayerHubHeader(
     mediaMetadata: MediaMetadata?,
     isPlaying: Boolean,
+    playerState: Int,
     onTogglePlayPause: () -> Unit
 ) {
     val placeholderColor = Color.Gray  // Simple placeholder for immediate render
@@ -489,7 +601,7 @@ private fun PlayerHubHeader(
                 Text(
                     text = mediaMetadata?.title?.toString() ?: "Unknown Title",
                     style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium, // Changed from SemiBold to Medium
+                    fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     color = Color.White
@@ -503,13 +615,26 @@ private fun PlayerHubHeader(
                 )
             }
             Spacer(modifier = Modifier.width(12.dp))
-            IconButton(onClick = onTogglePlayPause) {
-                Icon(
-                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = "Play/Pause",
-                    modifier = Modifier.size(25.dp),
-                    tint = Color.White
-                )
+            Box(
+                modifier = Modifier.size(48.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                if (playerState == androidx.media3.common.Player.STATE_BUFFERING) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(25.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    IconButton(onClick = onTogglePlayPause) {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = "Play/Pause",
+                            modifier = Modifier.size(25.dp),
+                            tint = Color.White
+                        )
+                    }
+                }
             }
             Spacer(modifier = Modifier.width(4.dp))
         }
@@ -533,7 +658,7 @@ private fun QueueItem(
             .fillMaxWidth()
             .background(if (isPlaying) Color.White.copy(alpha = 0.075f) else Color.Transparent)
             .clickable(onClick = onPlay)
-            .height(68.dp) // Updated to match library items
+            .heightIn(min = 68.dp) // Use minimum height instead of fixed height
             .padding(start = 18.dp, top = 8.dp, end = 16.dp, bottom = 8.dp), // Fixed padding syntax
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -627,7 +752,7 @@ private fun QueueItem(
             Icon(
                 Icons.Default.DragHandle,
                 contentDescription = "Drag to reorder",
-                modifier = dragHandleModifier.size(24.dp), // Reduced size
+                modifier = dragHandleModifier.size(24.dp),
                 tint = Color.White.copy(alpha = 0.8f)
             )
         }
@@ -819,6 +944,93 @@ private fun DotsIndicator(
             if (index < totalDots - 1) {
                 Spacer(modifier = Modifier.width(4.dp))
             }
+        }
+    }
+}
+
+@Composable
+private fun RelatedSection(
+    title: String,
+    items: List<SearchResultForList>,
+    nowPlayingMediaId: String?,
+    mainViewModel: MainViewModel,
+    useYoutubeMixQueue: Boolean = false
+) {
+    val pagerState = rememberPagerState(
+        pageCount = { ceil(items.size / 4f).toInt() },
+        initialPage = 0
+    )
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = title,
+            color = Color.White,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = 20.dp, top = 16.dp)
+        )
+
+        // Fixed height container to prevent dots indicator from moving
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(284.dp) // Fixed height for 4 songs (80dp each)
+        ) {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(end = 24.dp),
+                pageSpacing = 0.dp
+            ) { pageIndex ->
+                val startIndex = pageIndex * 4
+                val endIndex = min(startIndex + 4, items.size)
+
+                // Page content with consistent spacing
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(0.dp)
+                ) {
+                    for (index in startIndex until endIndex) {
+                        val item = items[index]
+                        // Determine if this related song is currently playing
+                        val normalizedUrl = item.result.streamInfo.url?.replace("music.youtube.com", "www.youtube.com")
+                        val isPlaying = normalizedUrl == nowPlayingMediaId || item.localSong?.localFilePath == nowPlayingMediaId
+
+                        RelatedSongItem(
+                            searchResultForList = item,
+                            isPlaying = isPlaying,
+                            onPlay = {
+                                if (useYoutubeMixQueue) {
+                                    mainViewModel.playRelatedSongWithYoutubeMix(item.result.streamInfo)
+                                } else {
+                                    mainViewModel.playSingleSong(item.result.streamInfo)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    // Add empty space to maintain consistent height for incomplete pages
+                    if (endIndex - startIndex < 4) {
+                        repeat(4 - (endIndex - startIndex)) {
+                            Spacer(modifier = Modifier.height(68.dp)) // Updated to match RelatedSongItem height
+                        }
+                    }
+                }
+            }
+        }
+
+        // Add page indicator if there are multiple pages
+        if (pagerState.pageCount > 1) {
+            DotsIndicator(
+                totalDots = pagerState.pageCount,
+                selectedIndex = pagerState.currentPage,
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(top = 4.dp)
+            )
         }
     }
 }

@@ -4,15 +4,10 @@ package com.example.m.ui.main
 import android.annotation.SuppressLint
 import androidx.activity.ComponentActivity
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -46,15 +41,28 @@ fun MainScreen() {
 
     LaunchedEffect(maintenanceResult) {
         maintenanceResult?.let {
-            snackbarHostState.showSnackbar(it)
+            snackbarHostState.showSnackbar(
+                message = it,
+                actionLabel = "Close",
+                duration = SnackbarDuration.Short
+            )
             mainViewModel.clearMaintenanceResult()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        mainViewModel.snackbarManager.messages.collect { message ->
+            snackbarHostState.showSnackbar(
+                message = message,
+                actionLabel = "Close",
+                duration = SnackbarDuration.Short
+            )
         }
     }
 
     Box(Modifier.fillMaxSize()) {
         GradientBackground(gradientColor1 = randomColor1, gradientColor2 = randomColor2) {
             Scaffold(
-                snackbarHost = { SnackbarHost(snackbarHostState) },
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),
                 containerColor = Color.Transparent,
                 bottomBar = {
@@ -122,6 +130,16 @@ fun MainScreen() {
             PlayerScreen(onDismiss = {
                 mainViewModel.onEvent(MainEvent.HidePlayerScreen)
             })
+        }
+
+        // SnackbarHost positioned at the top level to appear above everything
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(bottom = 88.dp), // Padding to avoid bottom bar
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            SnackbarHost(snackbarHostState)
         }
     }
 }

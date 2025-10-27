@@ -47,7 +47,6 @@ fun LibraryScreen(
     val isDoingMaintenance by mainViewModel.isDoingMaintenance
     val (gradientColor1, gradientColor2) = mainViewModel.randomGradientColors.value
 
-
     val songsDialogState by songsViewModel.dialogState.collectAsState()
     val artistsPlaylistActionState by artistsViewModel.playlistActionState.collectAsState()
     val songsPlaylistActionState by songsViewModel.playlistActionState.collectAsState()
