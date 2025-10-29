@@ -5,6 +5,8 @@ package com.example.m.ui.player
 import android.annotation.SuppressLint
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.SpringSpec
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
@@ -395,32 +397,31 @@ private fun PlayerArtwork(viewModel: MainViewModel) {
         var backwardFeedbackText by remember { mutableStateOf("10s") }
         var forwardFeedbackText by remember { mutableStateOf("10s") }
 
-        // Reset backward tap count after timeout
+        // Reset tap count after a short delay
         LaunchedEffect(backwardTapCount) {
             if (backwardTapCount > 0) {
-                kotlinx.coroutines.delay(1000) // Wait 1 second for potential additional taps
+                kotlinx.coroutines.delay(800)
                 backwardTapCount = 0
             }
         }
 
-        // Reset forward tap count after timeout
         LaunchedEffect(forwardTapCount) {
             if (forwardTapCount > 0) {
-                kotlinx.coroutines.delay(1000) // Wait 1 second for potential additional taps
+                kotlinx.coroutines.delay(800)
                 forwardTapCount = 0
             }
         }
 
         LaunchedEffect(showBackwardFeedback) {
             if (showBackwardFeedback) {
-                kotlinx.coroutines.delay(250)
+                kotlinx.coroutines.delay(500)
                 showBackwardFeedback = false
             }
         }
 
         LaunchedEffect(showForwardFeedback) {
             if (showForwardFeedback) {
-                kotlinx.coroutines.delay(250)
+                kotlinx.coroutines.delay(500)
                 showForwardFeedback = false
             }
         }
@@ -447,12 +448,12 @@ private fun PlayerArtwork(viewModel: MainViewModel) {
                             backwardTapCount++
                             showBackwardFeedback = true
 
-                            // Calculate seek amount based on tap count
-                            val seekAmountMs = backwardTapCount * 10000L // 10s per tap
+                            // Update feedback text to show total accumulated time
                             backwardFeedbackText = "${backwardTapCount * 10}s"
 
+                            // Seek immediately - 10s per tap
                             val currentPosition = viewModel.playbackState.value.currentPosition
-                            val newPosition = (currentPosition - seekAmountMs).coerceAtLeast(0)
+                            val newPosition = (currentPosition - 10000L).coerceAtLeast(0)
                             viewModel.onEvent(MainEvent.SeekTo(newPosition))
                         }
                     )
@@ -470,14 +471,13 @@ private fun PlayerArtwork(viewModel: MainViewModel) {
                             forwardTapCount++
                             showForwardFeedback = true
 
-                            // Calculate seek amount based on tap count
-                            val seekAmountMs = forwardTapCount * 10000L // 10s per tap
+                            // Update feedback text to show total accumulated time
                             forwardFeedbackText = "${forwardTapCount * 10}s"
 
+                            // Seek immediately - 10s per tap
                             val currentPosition = viewModel.playbackState.value.currentPosition
                             val totalDuration = viewModel.playbackState.value.totalDuration
-                            val newPosition =
-                                (currentPosition + seekAmountMs).coerceAtMost(totalDuration)
+                            val newPosition = (currentPosition + 10000L).coerceAtMost(totalDuration)
                             viewModel.onEvent(MainEvent.SeekTo(newPosition))
                         }
                     )
@@ -487,8 +487,8 @@ private fun PlayerArtwork(viewModel: MainViewModel) {
         AnimatedVisibility(
             visible = showBackwardFeedback,
             modifier = Modifier.fillMaxSize(),
-            enter = fadeIn(animationSpec = tween(100)),
-            exit = fadeOut(animationSpec = tween(300))
+            enter = fadeIn(animationSpec = tween(150, easing = FastOutSlowInEasing)),
+            exit = fadeOut(animationSpec = tween(400, easing = LinearOutSlowInEasing))
         ) {
             SeekFeedbackOverlay(
                 isForward = false,
@@ -499,8 +499,8 @@ private fun PlayerArtwork(viewModel: MainViewModel) {
         AnimatedVisibility(
             visible = showForwardFeedback,
             modifier = Modifier.fillMaxSize(),
-            enter = fadeIn(animationSpec = tween(100)),
-            exit = fadeOut(animationSpec = tween(300))
+            enter = fadeIn(animationSpec = tween(150, easing = FastOutSlowInEasing)),
+            exit = fadeOut(animationSpec = tween(400, easing = LinearOutSlowInEasing))
         ) {
             SeekFeedbackOverlay(
                 isForward = true,

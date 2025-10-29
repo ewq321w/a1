@@ -10,6 +10,7 @@ import androidx.annotation.OptIn
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import coil.ImageLoader
@@ -171,10 +172,31 @@ object AppModule {
     fun provideSearchHistoryDao(database: AppDatabase): SearchHistoryDao =
         database.searchHistoryDao()
 
+    @OptIn(UnstableApi::class)
     @Singleton
     @Provides
-    fun provideExoPlayer(@ApplicationContext context: Context): ExoPlayer =
-        ExoPlayer.Builder(context).build()
+    fun provideExoPlayer(@ApplicationContext context: Context): ExoPlayer {
+        // Optimized load control for faster seeking
+        val loadControl = DefaultLoadControl.Builder()
+            .setBackBuffer(15000, false) // Keep 15s back buffer
+            .setBufferDurationsMs(
+                2000,   // Min buffer: 2s (faster resume after seek)
+                10000,  // Max buffer: 10s
+                1000,   // Buffer for playback: 1s (quick start)
+                1500    // Buffer for playback after rebuffer: 1.5s
+            )
+            .build()
+
+        return ExoPlayer.Builder(context)
+            .setLoadControl(loadControl)
+            .setSeekBackIncrementMs(10000) // 10 seconds for seek back
+            .setSeekForwardIncrementMs(10000) // 10 seconds for seek forward
+            .build().apply {
+                // Use CLOSEST_SYNC seek mode for faster seeking
+                // This seeks to the nearest sync point (keyframe) rather than exact position
+                setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC)
+            }
+    }
 
     @OptIn(UnstableApi::class)
     @Singleton
