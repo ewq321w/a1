@@ -23,18 +23,17 @@ import javax.inject.Inject
 
 data class SongsUiState(
     val songs: List<Song> = emptyList(),
-    val downloadFilter: DownloadFilter = DownloadFilter.ALL,
-    val playlistFilter: PlaylistFilter = PlaylistFilter.ALL,
-    val groupingFilter: GroupingFilter = GroupingFilter.ALL,
+    val filters: SongFilters = SongFilters(),
     val itemPendingDeletion: Song? = null,
     val sortOrder: SongSortOrder = SongSortOrder.ARTIST,
     val nowPlayingMediaId: String? = null
 )
 
 sealed interface SongsTabEvent {
-    data class SetDownloadFilter(val filter: DownloadFilter) : SongsTabEvent
-    data class SetPlaylistFilter(val filter: PlaylistFilter) : SongsTabEvent
-    data class SetGroupingFilter(val filter: GroupingFilter) : SongsTabEvent
+    object ToggleIncludeNonLocal : SongsTabEvent
+    object ToggleIncludeGroupedSongs : SongsTabEvent
+    object ToggleIncludeGroupedArtists : SongsTabEvent
+    object ToggleIncludeHiddenArtists : SongsTabEvent
     data class SetSortOrder(val order: SongSortOrder) : SongsTabEvent
     data class SongSelected(val index: Int) : SongsTabEvent
     object ShuffleFilteredSongs : SongsTabEvent
@@ -73,40 +72,63 @@ class SongsViewModel @Inject constructor(
     val navigateToArtist: SharedFlow<Long> = _navigateToArtist.asSharedFlow()
 
     init {
-        _uiState.update { it.copy(sortOrder = preferencesManager.songsSortOrder) }
+        // Load saved preferences
+        _uiState.update {
+            it.copy(
+                sortOrder = preferencesManager.songsSortOrder,
+                filters = SongFilters(
+                    includeNonLocal = preferencesManager.includeNonLocal,
+                    includeGroupedSongs = preferencesManager.includeGroupedSongs,
+                    includeGroupedArtists = preferencesManager.includeGroupedArtists,
+                    includeHiddenArtists = preferencesManager.includeHiddenArtists
+                )
+            )
+        }
 
         combine(
             _uiState.map { it.sortOrder }.distinctUntilChanged(),
             preferencesManager.getActiveLibraryGroupIdFlow(),
-            _uiState.map { it.downloadFilter }.distinctUntilChanged(),
-            _uiState.map { it.playlistFilter }.distinctUntilChanged(),
-            _uiState.map { it.groupingFilter }.distinctUntilChanged()
-        ) { sortOrder, groupId, downloadFilter, playlistFilter, groupingFilter ->
-            Quintuple(sortOrder, groupId, downloadFilter, playlistFilter, groupingFilter)
-        }.flatMapLatest { (order, groupId, downloadFilter, playlistFilter, groupingFilter) ->
+            _uiState.map { it.filters }.distinctUntilChanged()
+        ) { sortOrder, groupId, filters ->
+            Triple(sortOrder, groupId, filters)
+        }.flatMapLatest { (order, groupId, filters) ->
             val songsFlow = getSortedSongsFlow(order, groupId)
             combine(
                 songsFlow,
-                libraryRepository.getSongsInPlaylists(),
-                artistDao.getAllSongIdsInGroups()
-            ) { allSongs, songsInPlaylists, songIdsInGroups ->
-                val songsInPlaylistsIds = songsInPlaylists.map { it.songId }.toSet()
+                artistDao.getAllSongIdsInGroups(),
+                artistDao.getHiddenArtists(),
+                artistDao.getArtistNamesInGroups()
+            ) { allSongs, songIdsInGroups, hiddenArtists, artistNamesInGroups ->
                 val songIdsInGroupsSet = songIdsInGroups.toSet()
+                val hiddenArtistNames = hiddenArtists.map { it.name }.toSet()
+                val artistsInGroupsNames = artistNamesInGroups.toSet()
 
                 allSongs.filter { song ->
-                    val downloadMatch = when (downloadFilter) {
-                        DownloadFilter.ALL -> true
-                        DownloadFilter.DOWNLOADED -> song.localFilePath != null
+                    val localMatch = if (filters.includeNonLocal) {
+                        true // Include all songs
+                    } else {
+                        song.localFilePath != null // Only include downloaded songs
                     }
-                    val playlistMatch = when (playlistFilter) {
-                        PlaylistFilter.ALL -> true
-                        PlaylistFilter.IN_PLAYLIST -> songsInPlaylistsIds.contains(song.songId)
+
+                    val groupedSongsMatch = if (filters.includeGroupedSongs) {
+                        true // Include all songs
+                    } else {
+                        !songIdsInGroupsSet.contains(song.songId) // Exclude songs in groups
                     }
-                    val groupingMatch = when (groupingFilter) {
-                        GroupingFilter.ALL -> true
-                        GroupingFilter.UNGROUPED -> !songIdsInGroupsSet.contains(song.songId)
+
+                    val groupedArtistsMatch = if (filters.includeGroupedArtists) {
+                        true // Include all songs
+                    } else {
+                        !artistsInGroupsNames.contains(song.artist) // Exclude songs from artists in groups
                     }
-                    downloadMatch && playlistMatch && groupingMatch
+
+                    val hiddenArtistsMatch = if (filters.includeHiddenArtists) {
+                        true // Include all songs
+                    } else {
+                        !hiddenArtistNames.contains(song.artist) // Exclude songs from hidden artists
+                    }
+
+                    localMatch && groupedSongsMatch && groupedArtistsMatch && hiddenArtistsMatch
                 }
             }
         }.onEach { songs ->
@@ -140,9 +162,26 @@ class SongsViewModel @Inject constructor(
 
     fun onEvent(event: SongsTabEvent) {
         when (event) {
-            is SongsTabEvent.SetDownloadFilter -> _uiState.update { it.copy(downloadFilter = event.filter) }
-            is SongsTabEvent.SetPlaylistFilter -> _uiState.update { it.copy(playlistFilter = event.filter) }
-            is SongsTabEvent.SetGroupingFilter -> _uiState.update { it.copy(groupingFilter = event.filter) }
+            is SongsTabEvent.ToggleIncludeNonLocal -> {
+                val newValue = !_uiState.value.filters.includeNonLocal
+                _uiState.update { it.copy(filters = it.filters.copy(includeNonLocal = newValue)) }
+                preferencesManager.includeNonLocal = newValue
+            }
+            is SongsTabEvent.ToggleIncludeGroupedSongs -> {
+                val newValue = !_uiState.value.filters.includeGroupedSongs
+                _uiState.update { it.copy(filters = it.filters.copy(includeGroupedSongs = newValue)) }
+                preferencesManager.includeGroupedSongs = newValue
+            }
+            is SongsTabEvent.ToggleIncludeGroupedArtists -> {
+                val newValue = !_uiState.value.filters.includeGroupedArtists
+                _uiState.update { it.copy(filters = it.filters.copy(includeGroupedArtists = newValue)) }
+                preferencesManager.includeGroupedArtists = newValue
+            }
+            is SongsTabEvent.ToggleIncludeHiddenArtists -> {
+                val newValue = !_uiState.value.filters.includeHiddenArtists
+                _uiState.update { it.copy(filters = it.filters.copy(includeHiddenArtists = newValue)) }
+                preferencesManager.includeHiddenArtists = newValue
+            }
             is SongsTabEvent.SetSortOrder -> setSortOrder(event.order)
             is SongsTabEvent.SongSelected -> onSongSelected(event.index)
             is SongsTabEvent.ShuffleFilteredSongs -> shuffleFilteredSongs()
@@ -230,4 +269,3 @@ class SongsViewModel @Inject constructor(
     }
 }
 
-private data class Quintuple<A, B, C, D, E>(val a: A, val b: B, val c: C, val d: D, val e: E)

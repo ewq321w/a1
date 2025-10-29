@@ -9,6 +9,7 @@ import com.example.m.data.database.*
 import com.example.m.data.repository.YoutubeRepository
 import com.example.m.managers.DialogState
 import com.example.m.managers.LibraryActionsManager
+import com.example.m.managers.PlaybackListManager
 import com.example.m.managers.PlaylistActionState
 import com.example.m.managers.PlaylistActionsManager
 import com.example.m.playback.MusicServiceConnection
@@ -42,7 +43,6 @@ sealed interface AlbumDetailEvent {
     object DismissConfirmAddAllToLibraryDialog : AlbumDetailEvent
     object ConfirmAddAllToLibrary : AlbumDetailEvent
     data class AddToLibrary(val result: SearchResult) : AlbumDetailEvent
-    data class AddToPlaylist(val result: SearchResult) : AlbumDetailEvent
     data class PlayNext(val result: SearchResult) : AlbumDetailEvent
     data class AddToQueue(val result: SearchResult) : AlbumDetailEvent
     data class RequestCreateGroup(val name: String) : AlbumDetailEvent
@@ -59,7 +59,7 @@ class AlbumDetailViewModel @Inject constructor(
     private val songDao: SongDao,
     val imageLoader: ImageLoader,
     private val libraryActionsManager: LibraryActionsManager,
-    private val playlistActionsManager: PlaylistActionsManager
+    private val playbackListManager: PlaybackListManager
 ) : ViewModel() {
     private val albumUrl: String = savedStateHandle["albumUrl"]!!
     private val searchType: String = savedStateHandle["searchType"]!!
@@ -71,7 +71,6 @@ class AlbumDetailViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val dialogState: StateFlow<DialogState> = libraryActionsManager.dialogState
-    val playlistActionState: StateFlow<PlaylistActionState> = playlistActionsManager.state
 
     init {
         loadAlbumDetails()
@@ -94,7 +93,6 @@ class AlbumDetailViewModel @Inject constructor(
             is AlbumDetailEvent.DismissConfirmAddAllToLibraryDialog -> _uiState.update { it.copy(showConfirmAddAllDialog = false) }
             is AlbumDetailEvent.ConfirmAddAllToLibrary -> confirmAddAllToLibrary()
             is AlbumDetailEvent.AddToLibrary -> libraryActionsManager.addToLibrary(event.result.streamInfo)
-            is AlbumDetailEvent.AddToPlaylist -> playlistActionsManager.selectItem(event.result.streamInfo)
             is AlbumDetailEvent.PlayNext -> musicServiceConnection.playNext(event.result.streamInfo)
             is AlbumDetailEvent.AddToQueue -> musicServiceConnection.addToQueue(event.result.streamInfo)
             is AlbumDetailEvent.RequestCreateGroup -> libraryActionsManager.onCreateGroup(event.name)
@@ -104,11 +102,6 @@ class AlbumDetailViewModel @Inject constructor(
         }
     }
 
-    fun onPlaylistCreateConfirm(name: String) = playlistActionsManager.onCreatePlaylist(name)
-    fun onPlaylistSelected(playlistId: Long) = playlistActionsManager.onPlaylistSelected(playlistId)
-    fun onPlaylistActionDismiss() = playlistActionsManager.dismiss()
-    fun onPrepareToCreatePlaylist() = playlistActionsManager.prepareToCreatePlaylist()
-    fun onGroupSelectedForNewPlaylist(groupId: Long) = playlistActionsManager.onGroupSelectedForNewPlaylist(groupId)
     fun onDialogRequestCreateGroup() = libraryActionsManager.requestCreateGroup()
 
 
@@ -184,14 +177,22 @@ class AlbumDetailViewModel @Inject constructor(
     private fun onSongSelected(selectedIndex: Int) {
         val items = _uiState.value.songs.map { it.result.streamInfo }
         if (items.isNotEmpty()) {
-            viewModelScope.launch { musicServiceConnection.playSongList(items, selectedIndex) }
+            viewModelScope.launch {
+                // Set playlist context for pagination
+                playbackListManager.setCurrentListContext(albumUrl, _uiState.value.nextPage)
+                musicServiceConnection.playSongList(items, selectedIndex)
+            }
         }
     }
 
     private fun shuffle() {
         val songsToPlay = _uiState.value.songs
         if (songsToPlay.isNotEmpty()) {
-            viewModelScope.launch { musicServiceConnection.playSongList(songsToPlay.shuffled().map { it.result.streamInfo }, 0) }
+            viewModelScope.launch {
+                // Set playlist context for pagination even when shuffling
+                playbackListManager.setCurrentListContext(albumUrl, _uiState.value.nextPage)
+                musicServiceConnection.playSongList(songsToPlay.shuffled().map { it.result.streamInfo }, 0)
+            }
         }
     }
 

@@ -20,6 +20,7 @@ import org.schabi.newpipe.extractor.channel.ChannelInfoItem
 import org.schabi.newpipe.extractor.linkhandler.SearchQueryHandler
 import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
+import timber.log.Timber
 import javax.inject.Inject
 
 enum class SearchCategory {
@@ -69,7 +70,10 @@ data class SearchUiState(
     val artistsHandler: SearchQueryHandler? = null,
     val videoStreamsHandler: SearchQueryHandler? = null,
     val videoChannelsHandler: SearchQueryHandler? = null,
-    val nowPlayingMediaId: String? = null
+    val nowPlayingMediaId: String? = null,
+    val suggestions: List<String> = emptyList(),
+    val showSuggestions: Boolean = false,
+    val recentSearches: List<SearchHistory> = emptyList()
 )
 
 sealed interface SearchEvent {
@@ -81,7 +85,6 @@ sealed interface SearchEvent {
     data class ShowDetailedView(val category: SearchCategory) : SearchEvent
     object HideDetailedView : SearchEvent
     data class AddToLibrary(val result: SearchResult) : SearchEvent
-    data class AddToPlaylist(val result: SearchResult) : SearchEvent
     data class PlayNext(val result: SearchResult) : SearchEvent
     data class AddToQueue(val result: SearchResult) : SearchEvent
     data class ShuffleAlbum(val album: AlbumResult) : SearchEvent
@@ -90,6 +93,10 @@ sealed interface SearchEvent {
     data class SelectGroup(val groupId: Long) : SearchEvent
     object ResolveConflict : SearchEvent
     object DismissDialog : SearchEvent
+    data class SelectSuggestion(val suggestion: String) : SearchEvent
+    object ShowSuggestions : SearchEvent
+    object HideSuggestions : SearchEvent
+    data class DeleteSearchHistory(val id: Long) : SearchEvent
 }
 
 @HiltViewModel
@@ -99,15 +106,14 @@ class SearchViewModel @Inject constructor(
     private val musicServiceConnection: MusicServiceConnection,
     private val playbackListManager: PlaybackListManager,
     private val libraryActionsManager: LibraryActionsManager,
-    private val playlistActionsManager: PlaylistActionsManager,
-    private val songDao: SongDao
+    private val songDao: SongDao,
+    private val searchHistoryDao: SearchHistoryDao
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SearchUiState())
     val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
 
     val dialogState: StateFlow<DialogState> = libraryActionsManager.dialogState
-    val playlistActionState: StateFlow<PlaylistActionState> = playlistActionsManager.state
 
     private val allLocalSongs: StateFlow<List<Song>> = songDao.getAllSongs()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -143,19 +149,36 @@ class SearchViewModel @Inject constructor(
                 _uiState.update { it.copy(nowPlayingMediaId = mediaId) }
             }
         }
+
+        // Load recent searches
+        viewModelScope.launch {
+            searchHistoryDao.getRecentSearches(10).collect { history ->
+                Timber.d("Loaded ${history.size} recent searches")
+                _uiState.update { it.copy(recentSearches = history) }
+            }
+        }
     }
 
     fun onEvent(event: SearchEvent) {
         when(event) {
-            is SearchEvent.QueryChange -> _uiState.update { it.copy(query = event.query) }
+            is SearchEvent.QueryChange -> {
+                _uiState.update { it.copy(query = event.query, showSuggestions = true) }
+                if (event.query.isNotBlank()) {
+                    loadSuggestions(event.query)
+                } else {
+                    _uiState.update { it.copy(suggestions = emptyList(), showSuggestions = true) }
+                }
+            }
             is SearchEvent.FilterChange -> onFilterChange(event.filter)
-            is SearchEvent.Search -> search()
+            is SearchEvent.Search -> {
+                search()
+                _uiState.update { it.copy(showSuggestions = false) }
+            }
             is SearchEvent.LoadMore -> loadMoreResults()
             is SearchEvent.SongSelected -> onSongSelected(event.index)
             is SearchEvent.ShowDetailedView -> _uiState.update { it.copy(detailedViewCategory = event.category) }
             is SearchEvent.HideDetailedView -> _uiState.update { it.copy(detailedViewCategory = null) }
             is SearchEvent.AddToLibrary -> libraryActionsManager.addToLibrary(event.result.streamInfo)
-            is SearchEvent.AddToPlaylist -> playlistActionsManager.selectItem(event.result.streamInfo)
             is SearchEvent.PlayNext -> musicServiceConnection.playNext(event.result.streamInfo)
             is SearchEvent.AddToQueue -> musicServiceConnection.addToQueue(event.result.streamInfo)
             is SearchEvent.ShuffleAlbum -> onShuffleAlbum(event.album)
@@ -164,14 +187,20 @@ class SearchViewModel @Inject constructor(
             is SearchEvent.SelectGroup -> libraryActionsManager.onGroupSelected(event.groupId)
             is SearchEvent.ResolveConflict -> libraryActionsManager.onResolveConflict()
             is SearchEvent.DismissDialog -> libraryActionsManager.dismissDialog()
+            is SearchEvent.SelectSuggestion -> {
+                _uiState.update { it.copy(query = event.suggestion, showSuggestions = false) }
+                search()
+            }
+            is SearchEvent.ShowSuggestions -> {
+                _uiState.update { it.copy(showSuggestions = true) }
+            }
+            is SearchEvent.HideSuggestions -> {
+                _uiState.update { it.copy(showSuggestions = false) }
+            }
+            is SearchEvent.DeleteSearchHistory -> deleteSearchHistory(event.id)
         }
     }
 
-    fun onPlaylistCreateConfirm(name: String) = playlistActionsManager.onCreatePlaylist(name)
-    fun onPlaylistSelected(playlistId: Long) = playlistActionsManager.onPlaylistSelected(playlistId)
-    fun onPlaylistActionDismiss() = playlistActionsManager.dismiss()
-    fun onPrepareToCreatePlaylist() = playlistActionsManager.prepareToCreatePlaylist()
-    fun onGroupSelectedForNewPlaylist(groupId: Long) = playlistActionsManager.onGroupSelectedForNewPlaylist(groupId)
     fun onDialogRequestCreateGroup() = libraryActionsManager.requestCreateGroup()
 
 
@@ -199,6 +228,13 @@ class SearchViewModel @Inject constructor(
     private fun search() {
         val query = uiState.value.query
         if (query.isBlank()) return
+
+        // Record search in history
+        viewModelScope.launch {
+            searchHistoryDao.recordSearch(query)
+            searchHistoryDao.keepOnlyRecentSearches(100)
+        }
+
         _uiState.update { it.copy(isLoading = true, songs = emptyList(), albums = emptyList(), artists = emptyList(), videoStreams = emptyList(), playlists = emptyList(), videoChannels = emptyList()) }
 
         viewModelScope.launch {
@@ -216,6 +252,31 @@ class SearchViewModel @Inject constructor(
                 updateVideoSearchResults(videosResult?.items ?: emptyList(), playlistsResult?.items ?: emptyList(), channelsResult?.items ?: emptyList())
                 _uiState.update { it.copy(videoStreamsNextPage = videosResult?.nextPage, playlistsNextPage = playlistsResult?.nextPage, videoChannelsNextPage = channelsResult?.nextPage, videoStreamsHandler = videosResult?.queryHandler, playlistsHandler = playlistsResult?.queryHandler, videoChannelsHandler = channelsResult?.queryHandler, isLoading = false) }
             }
+        }
+    }
+
+    private fun loadSuggestions(query: String) {
+        viewModelScope.launch {
+            try {
+                val youtubeSuggestions = youtubeRepository.getSuggestions(query)
+                val historySuggestions = searchHistoryDao.getSearchSuggestions(query, 3)
+
+                Timber.d("Loaded ${youtubeSuggestions.size} YouTube suggestions and ${historySuggestions.size} history suggestions for query: $query")
+
+                // Combine both: first show history matches, then YouTube suggestions
+                val combined = (historySuggestions.map { it.query } + youtubeSuggestions).distinct().take(8)
+                _uiState.update { it.copy(suggestions = combined) }
+
+                Timber.d("Combined suggestions: $combined")
+            } catch (e: Exception) {
+                Timber.e(e, "Error loading suggestions")
+            }
+        }
+    }
+
+    private fun deleteSearchHistory(id: Long) {
+        viewModelScope.launch {
+            searchHistoryDao.deleteSearch(id)
         }
     }
 

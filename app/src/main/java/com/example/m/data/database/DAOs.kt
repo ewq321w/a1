@@ -129,8 +129,14 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE downloadStatus = 'DOWNLOADED'")
     suspend fun getAllDownloadedSongsOnce(): List<Song>
 
+    @Query("SELECT * FROM songs WHERE downloadStatus = 'FAILED'")
+    suspend fun getAllFailedDownloads(): List<Song>
+
     @Query("SELECT localFilePath FROM songs WHERE localFilePath IS NOT NULL")
     suspend fun getAllLocalFilePaths(): List<String>
+
+    @Query("SELECT localFilePath FROM songs WHERE localFilePath IS NOT NULL AND isInLibrary = 1")
+    suspend fun getLibrarySongsLocalFilePaths(): List<String>
 
     @Query("SELECT DISTINCT artist FROM songs ORDER BY artist ASC")
     fun getAllArtists(): Flow<List<String>>
@@ -444,6 +450,9 @@ interface ArtistDao {
     @Query("SELECT * FROM artists WHERE isHidden = 1 ORDER BY name ASC")
     fun getHiddenArtists(): Flow<List<Artist>>
 
+    @Query("SELECT name FROM artists WHERE parentGroupId IS NOT NULL")
+    fun getArtistNamesInGroups(): Flow<List<String>>
+
     @Query("UPDATE artists SET parentGroupId = :groupId WHERE artistId = :artistId")
     suspend fun moveArtistToGroup(artistId: Long, groupId: Long)
 
@@ -598,6 +607,39 @@ interface ArtistGroupDao {
         ungroupArtists(groupId)
         deleteGroupById(groupId)
     }
+}
+
+@Dao
+interface SearchHistoryDao {
+    @Query("SELECT * FROM search_history ORDER BY timestamp DESC LIMIT :limit")
+    fun getRecentSearches(limit: Int = 10): Flow<List<SearchHistory>>
+
+    @Query("SELECT * FROM search_history WHERE query LIKE :query || '%' ORDER BY searchCount DESC, timestamp DESC LIMIT :limit")
+    suspend fun getSearchSuggestions(query: String, limit: Int = 5): List<SearchHistory>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertSearch(searchHistory: SearchHistory): Long
+
+    @Query("UPDATE search_history SET timestamp = :timestamp, searchCount = searchCount + 1 WHERE query = :searchQuery")
+    suspend fun updateSearchTimestamp(searchQuery: String, timestamp: Long = System.currentTimeMillis())
+
+    @Transaction
+    suspend fun recordSearch(query: String) {
+        val insertResult = insertSearch(SearchHistory(query = query))
+        if (insertResult == -1L) {
+            // Already exists, update it
+            updateSearchTimestamp(query)
+        }
+    }
+
+    @Query("DELETE FROM search_history WHERE id = :id")
+    suspend fun deleteSearch(id: Long)
+
+    @Query("DELETE FROM search_history")
+    suspend fun clearAllSearchHistory()
+
+    @Query("DELETE FROM search_history WHERE id IN (SELECT id FROM search_history ORDER BY timestamp DESC LIMIT -1 OFFSET :limit)")
+    suspend fun keepOnlyRecentSearches(limit: Int = 100)
 }
 
 @Dao

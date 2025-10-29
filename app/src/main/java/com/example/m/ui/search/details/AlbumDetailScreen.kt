@@ -45,8 +45,6 @@ fun AlbumDetailScreen(
     val uiState by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
     val dialogState by viewModel.dialogState.collectAsState()
-    val playlistActionState by viewModel.playlistActionState.collectAsState()
-    val sheetState = rememberModalBottomSheetState()
 
     when (val state = dialogState) {
         is DialogState.CreateGroup -> {
@@ -88,43 +86,6 @@ fun AlbumDetailScreen(
         is DialogState.Hidden -> {}
     }
 
-    when(val state = playlistActionState) {
-        is PlaylistActionState.AddToPlaylist -> {
-            val item = state.item
-            val songTitle = (item as? Song)?.title ?: (item as? StreamInfoItem)?.name ?: "Unknown"
-            val songArtist = (item as? Song)?.artist ?: (item as? StreamInfoItem)?.uploaderName ?: "Unknown"
-            val thumbnailUrl = (item as? Song)?.thumbnailUrl ?: (item as? StreamInfoItem)?.getHighQualityThumbnailUrl() ?: ""
-
-            ModalBottomSheet(onDismissRequest = { viewModel.onPlaylistActionDismiss() }, sheetState = sheetState) {
-                AddToPlaylistSheet(
-                    songTitle = songTitle,
-                    songArtist = songArtist,
-                    songThumbnailUrl = thumbnailUrl,
-                    playlists = state.playlists,
-                    onPlaylistSelected = { playlistId -> viewModel.onPlaylistSelected(playlistId) },
-                    onCreateNewPlaylist = { viewModel.onPrepareToCreatePlaylist() }
-                )
-            }
-        }
-        is PlaylistActionState.CreatePlaylist -> {
-            TextFieldDialog(
-                title = "New Playlist",
-                label = "Playlist name",
-                confirmButtonText = "Create",
-                onDismiss = { viewModel.onPlaylistActionDismiss() },
-                onConfirm = { name -> viewModel.onPlaylistCreateConfirm(name) }
-            )
-        }
-        is PlaylistActionState.SelectGroupForNewPlaylist -> {
-            SelectLibraryGroupDialog(
-                groups = state.groups,
-                onDismiss = { viewModel.onPlaylistActionDismiss() },
-                onGroupSelected = { groupId -> viewModel.onGroupSelectedForNewPlaylist(groupId) },
-                onCreateNewGroup = { viewModel.onDialogRequestCreateGroup() }
-            )
-        }
-        is PlaylistActionState.Hidden -> {}
-    }
 
 
     if (uiState.showConfirmAddAllDialog) {
@@ -189,7 +150,6 @@ fun AlbumDetailScreen(
                                 imageLoader = viewModel.imageLoader,
                                 onPlay = { viewModel.onEvent(AlbumDetailEvent.SongSelected(index)) },
                                 onAddToLibrary = { viewModel.onEvent(AlbumDetailEvent.AddToLibrary(item.result)) },
-                                onAddToPlaylist = { viewModel.onEvent(AlbumDetailEvent.AddToPlaylist(item.result))},
                                 onPlayNext = { viewModel.onEvent(AlbumDetailEvent.PlayNext(item.result)) },
                                 onAddToQueue = { viewModel.onEvent(AlbumDetailEvent.AddToQueue(item.result)) }
                             )

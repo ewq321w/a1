@@ -292,16 +292,30 @@ private fun OptionsOverflowMenu(
             if (selectedView == "Songs") {
                 DropdownMenuItem(text = { Text("Shuffle") }, onClick = { songsViewModel.onEvent(SongsTabEvent.ShuffleFilteredSongs); showMenu = false }, leadingIcon = { Icon(Icons.Default.Shuffle, contentDescription = "Shuffle") })
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                Text("Show Only", modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                Text("Filters", modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                 DropdownMenuItem(
-                    text = { Text("Downloaded") },
-                    onClick = { songsViewModel.onEvent(SongsTabEvent.SetDownloadFilter(if (songsUiState.downloadFilter == DownloadFilter.DOWNLOADED) DownloadFilter.ALL else DownloadFilter.DOWNLOADED)); showMenu = false },
-                    leadingIcon = { if (songsUiState.downloadFilter == DownloadFilter.DOWNLOADED) Icon(Icons.Default.Check, contentDescription = "Selected") else Spacer(Modifier.width(24.dp)) }
+                    text = { Text("Non-local songs", style = MaterialTheme.typography.bodyMedium) },
+                    onClick = { songsViewModel.onEvent(SongsTabEvent.ToggleIncludeNonLocal) },
+                    leadingIcon = { if (songsUiState.filters.includeNonLocal) Icon(Icons.Default.Check, contentDescription = "Included", modifier = Modifier.size(20.dp)) else Spacer(Modifier.width(20.dp)) },
+                    modifier = Modifier.height(40.dp)
                 )
                 DropdownMenuItem(
-                    text = { Text("Ungrouped") },
-                    onClick = { songsViewModel.onEvent(SongsTabEvent.SetGroupingFilter(if (songsUiState.groupingFilter == GroupingFilter.UNGROUPED) GroupingFilter.ALL else GroupingFilter.UNGROUPED)); showMenu = false },
-                    leadingIcon = { if (songsUiState.groupingFilter == GroupingFilter.UNGROUPED) Icon(Icons.Default.Check, contentDescription = "Selected") else Spacer(Modifier.width(24.dp)) }
+                    text = { Text("Grouped songs", style = MaterialTheme.typography.bodyMedium) },
+                    onClick = { songsViewModel.onEvent(SongsTabEvent.ToggleIncludeGroupedSongs) },
+                    leadingIcon = { if (songsUiState.filters.includeGroupedSongs) Icon(Icons.Default.Check, contentDescription = "Included", modifier = Modifier.size(20.dp)) else Spacer(Modifier.width(20.dp)) },
+                    modifier = Modifier.height(40.dp)
+                )
+                DropdownMenuItem(
+                    text = { Text("Grouped artists", style = MaterialTheme.typography.bodyMedium) },
+                    onClick = { songsViewModel.onEvent(SongsTabEvent.ToggleIncludeGroupedArtists) },
+                    leadingIcon = { if (songsUiState.filters.includeGroupedArtists) Icon(Icons.Default.Check, contentDescription = "Included", modifier = Modifier.size(20.dp)) else Spacer(Modifier.width(20.dp)) },
+                    modifier = Modifier.height(40.dp)
+                )
+                DropdownMenuItem(
+                    text = { Text("Hidden artists", style = MaterialTheme.typography.bodyMedium) },
+                    onClick = { songsViewModel.onEvent(SongsTabEvent.ToggleIncludeHiddenArtists) },
+                    leadingIcon = { if (songsUiState.filters.includeHiddenArtists) Icon(Icons.Default.Check, contentDescription = "Included", modifier = Modifier.size(20.dp)) else Spacer(Modifier.width(20.dp)) },
+                    modifier = Modifier.height(40.dp)
                 )
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
             }

@@ -218,7 +218,6 @@ fun SearchResultItem(
     imageLoader: ImageLoader,
     onPlay: () -> Unit,
     onAddToLibrary: () -> Unit,
-    onAddToPlaylist: () -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit
 ) {
@@ -341,29 +340,30 @@ fun SearchResultItem(
             }
         }
 
-        IconButton(
-            onClick = { showMenu = true },
-            modifier = Modifier.size(40.dp)
-        ) {
-            Icon(
-                Icons.Default.MoreVert,
-                contentDescription = "More options",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-        TranslucentDropdownMenu(
-            expanded = showMenu,
-            onDismissRequest = { showMenu = false }
-        ) {
-            DropdownMenuItem(text = { Text("Play next") }, onClick = { onPlayNext(); showMenu = false })
-            DropdownMenuItem(text = { Text("Add to queue") }, onClick = { onAddToQueue(); showMenu = false })
-            DropdownMenuItem(
-                text = { Text(if (result.isInLibrary) "In Library" else "Add to Library") },
-                enabled = !result.isInLibrary,
-                onClick = { onAddToLibrary(); showMenu = false }
-            )
-            DropdownMenuItem(text = { Text("Add to playlist") }, onClick = { onAddToPlaylist(); showMenu = false })
+        Box {
+            IconButton(
+                onClick = { showMenu = true },
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    Icons.Default.MoreVert,
+                    contentDescription = "More options",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            TranslucentDropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false }
+            ) {
+                DropdownMenuItem(text = { Text("Play next") }, onClick = { onPlayNext(); showMenu = false })
+                DropdownMenuItem(text = { Text("Add to queue") }, onClick = { onAddToQueue(); showMenu = false })
+                DropdownMenuItem(
+                    text = { Text(if (result.isInLibrary) "In Library" else "Add to Library") },
+                    enabled = !result.isInLibrary,
+                    onClick = { onAddToLibrary(); showMenu = false }
+                )
+            }
         }
     }
 }

@@ -72,4 +72,21 @@ class PreferencesManager @Inject constructor(@ApplicationContext context: Contex
             }
         }
         set(value) = prefs.edit { putString("playlist_sort_order", value.name) }
+
+    // Song Filters
+    var includeNonLocal: Boolean
+        get() = prefs.getBoolean("include_non_local", true)
+        set(value) = prefs.edit { putBoolean("include_non_local", value) }
+
+    var includeGroupedSongs: Boolean
+        get() = prefs.getBoolean("include_grouped_songs", true)
+        set(value) = prefs.edit { putBoolean("include_grouped_songs", value) }
+
+    var includeGroupedArtists: Boolean
+        get() = prefs.getBoolean("include_grouped_artists", true)
+        set(value) = prefs.edit { putBoolean("include_grouped_artists", value) }
+
+    var includeHiddenArtists: Boolean
+        get() = prefs.getBoolean("include_hidden_artists", true)
+        set(value) = prefs.edit { putBoolean("include_hidden_artists", value) }
 }

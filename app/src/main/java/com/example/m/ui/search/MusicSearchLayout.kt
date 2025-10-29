@@ -22,7 +22,6 @@ fun MusicSearchLayout(
     onArtistClicked: (ArtistResult) -> Unit,
     onShowMore: (SearchCategory) -> Unit,
     onAddToLibrary: (SearchResult) -> Unit,
-    onAddToPlaylist: (SearchResult) -> Unit,
     onPlayNext: (SearchResult) -> Unit,
     onAddToQueue: (SearchResult) -> Unit,
     onShuffleAlbum: (AlbumResult) -> Unit
@@ -50,7 +49,6 @@ fun MusicSearchLayout(
                     imageLoader = imageLoader,
                     onPlay = { onSongClicked(index) },
                     onAddToLibrary = { onAddToLibrary(item.result) },
-                    onAddToPlaylist = { onAddToPlaylist(item.result) },
                     onPlayNext = { onPlayNext(item.result) },
                     onAddToQueue = { onAddToQueue(item.result) }
                 )

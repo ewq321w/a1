@@ -62,6 +62,7 @@ fun PlayerHubScreen(
     val isLoadingLyrics by mainViewModel.isLoadingLyrics.collectAsState()
     val lyricsError by mainViewModel.lyricsError.collectAsState()
     val currentMediaId by mainViewModel.currentMediaId.collectAsState() // Add this line
+    val isLoadingInitialQueue by mainViewModel.isLoadingInitialQueue.collectAsState()
 
     // New unfiltered results
     val unfilteredMusicResults by mainViewModel.unfilteredMusicResults.collectAsState()
@@ -130,7 +131,8 @@ fun PlayerHubScreen(
                     nowPlayingMediaId = currentMediaId, // Use currentMediaId instead of nowPlaying?.mediaId
                     currentLyrics = currentLyrics,
                     isLoadingLyrics = isLoadingLyrics,
-                    lyricsError = lyricsError
+                    lyricsError = lyricsError,
+                    isLoadingInitialQueue = isLoadingInitialQueue
                 )
             }
 
@@ -169,17 +171,18 @@ private fun TabContent(
     nowPlayingMediaId: String?, // New parameter for current playing media ID
     currentLyrics: String?,
     isLoadingLyrics: Boolean,
-    lyricsError: String?
+    lyricsError: String?,
+    isLoadingInitialQueue: Boolean
 ) {
     val currentIndex by mainViewModel.currentMediaItemIndex.collectAsState()
     val (color1, color2) = mainViewModel.playerGradientColors.value
 
-    // Filter queue items directly - recalculates on every composition when songQueue changes
-    val filteredQueueItems = songQueue.filter { it.second != null }
-        .map { it.first to it.second!! }
+    // Don't filter - show all songs, even if data isn't loaded yet
+    // This allows progressive loading as data becomes available
+    val queueItems = songQueue
 
     // Local queue for reorderable to prevent jumping during drag
-    var localQueue by remember { mutableStateOf(filteredQueueItems) }
+    var localQueue by remember { mutableStateOf(queueItems) }
 
     // Track if we're currently reordering to prevent scroll conflicts
     var isReordering by remember { mutableStateOf(false) }
@@ -187,7 +190,7 @@ private fun TabContent(
     // Update localQueue whenever songQueue changes and we're not reordering
     LaunchedEffect(songQueue) {
         if (!isReordering) {
-            localQueue = filteredQueueItems
+            localQueue = queueItems
         }
     }
 
@@ -217,7 +220,7 @@ private fun TabContent(
     // Set initial scroll position to currentIndex for smooth initial positioning
     val lazyListState = rememberLazyListState(
         initialFirstVisibleItemIndex = if (selectedTabIndex == 0) {
-            currentIndex.coerceAtMost(maxOf(0, filteredQueueItems.size - 1))
+            currentIndex.coerceAtMost(maxOf(0, queueItems.size - 1))
         } else 0
     )
 
@@ -231,7 +234,7 @@ private fun TabContent(
     // 1. We haven't scrolled initially and animation is complete
     // 2. OR the currentIndex actually changed (new song) AND we're not currently reordering
     LaunchedEffect(currentIndex, animationProgress, selectedTabIndex) {
-        if (selectedTabIndex == 0 && filteredQueueItems.indices.contains(currentIndex) && !isReordering) {
+        if (selectedTabIndex == 0 && queueItems.indices.contains(currentIndex) && !isReordering) {
             val shouldScrollInitially = !hasScrolledInitially && animationProgress >= 1f
             val shouldScrollForNewSong = hasScrolledInitially && currentIndex != lastScrolledIndex
 
@@ -355,6 +358,9 @@ private fun TabContent(
                             when (selectedTabIndex) {
                                 0 -> {
                                     // Queue Tab Content
+                                    // Collect loading state at composable level
+                                    val isLoadingMore by mainViewModel.isLoadingMoreQueueItems.collectAsState()
+
                                     LazyColumn(
                                         state = lazyListState,
                                         modifier = Modifier
@@ -390,6 +396,42 @@ private fun TabContent(
                                                     onPlay = { mainViewModel.skipToQueueItem(index) },
                                                     showDragHandle = false
                                                 )
+                                            }
+                                        }
+
+                                        // Load More button if there are more items available or initial queue is loading
+                                        if (mainViewModel.hasMoreQueueItems() || isLoadingMore || isLoadingInitialQueue) {
+                                            item {
+                                                Button(
+                                                    onClick = { mainViewModel.loadMoreQueueItems() },
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(horizontal = 24.dp, vertical = 12.dp),
+                                                    colors = ButtonDefaults.buttonColors(
+                                                        containerColor = Color.White.copy(alpha = 0.1f),
+                                                        contentColor = Color.White
+                                                    ),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    enabled = !isLoadingMore && !isLoadingInitialQueue
+                                                ) {
+                                                    if (isLoadingMore || isLoadingInitialQueue) {
+                                                        CircularProgressIndicator(
+                                                            color = Color.White,
+                                                            modifier = Modifier.size(20.dp),
+                                                            strokeWidth = 2.dp
+                                                        )
+                                                        Spacer(modifier = Modifier.width(8.dp))
+                                                        Text("Loading...")
+                                                    } else {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Add,
+                                                            contentDescription = "Load More",
+                                                            modifier = Modifier.size(20.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(8.dp))
+                                                        Text("Load More Songs")
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -643,7 +685,7 @@ private fun PlayerHubHeader(
 
 @Composable
 private fun QueueItem(
-    song: Song,
+    song: Song?,
     isPlaying: Boolean,
     onPlay: () -> Unit,
     modifier: Modifier = Modifier,
@@ -652,6 +694,53 @@ private fun QueueItem(
 ) {
     val placeholderColor = MaterialTheme.colorScheme.surfaceVariant
     var showMenu by remember { mutableStateOf(false) }
+
+    // Show placeholder skeleton if song data isn't loaded yet
+    if (song == null) {
+        Row(
+            modifier = modifier
+                .fillMaxWidth()
+                .background(Color.Transparent)
+                .heightIn(min = 68.dp)
+                .padding(start = 18.dp, top = 8.dp, end = 16.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Placeholder thumbnail
+            Box(
+                modifier = Modifier
+                    .size(50.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Color.White.copy(alpha = 0.1f))
+            )
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                // Placeholder title
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.7f)
+                        .height(16.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color.White.copy(alpha = 0.1f))
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                // Placeholder artist
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.5f)
+                        .height(14.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color.White.copy(alpha = 0.07f))
+                )
+            }
+
+            if (showDragHandle) {
+                Spacer(modifier = Modifier.width(24.dp))
+            }
+        }
+        return
+    }
 
     Row(
         modifier = modifier
@@ -907,13 +996,6 @@ private fun RelatedSongItem(
                     enabled = !searchResultForList.result.isInLibrary,
                     onClick = {
                         mainViewModel.libraryActionsManager.addToLibrary(streamInfoItem)
-                        showMenu = false
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Add to playlist") },
-                    onClick = {
-                        mainViewModel.playlistActionsManager.selectItem(streamInfoItem)
                         showMenu = false
                     }
                 )

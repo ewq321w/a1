@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -15,6 +16,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -22,6 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -31,6 +34,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -38,17 +42,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import coil.ImageLoader
 import coil.compose.AsyncImage
-import com.example.m.data.database.Song
 import com.example.m.managers.DialogState
-import com.example.m.managers.PlaylistActionState
 import com.example.m.ui.common.GradientBackground
-import com.example.m.ui.common.getHighQualityThumbnailUrl
-import com.example.m.ui.library.components.AddToPlaylistSheet
 import com.example.m.ui.library.components.ArtistGroupConflictDialog
 import com.example.m.ui.library.components.SelectLibraryGroupDialog
 import com.example.m.ui.library.components.TextFieldDialog
 import com.example.m.ui.main.MainViewModel
-import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
@@ -62,8 +61,6 @@ fun SearchScreen(
     val songsWithStatus by viewModel.songsWithStatus.collectAsState()
     val videoStreamsWithStatus by viewModel.videoStreamsWithStatus.collectAsState()
     val dialogState by viewModel.dialogState.collectAsState()
-    val playlistActionState by viewModel.playlistActionState.collectAsState()
-    val sheetState = rememberModalBottomSheetState()
     val activity = LocalContext.current as ComponentActivity
     val mainViewModel: MainViewModel = hiltViewModel(activity)
     val (gradientColor1, gradientColor2) = mainViewModel.randomGradientColors.value
@@ -112,46 +109,6 @@ fun SearchScreen(
         is DialogState.Hidden -> {}
     }
 
-    when (val state = playlistActionState) {
-        is PlaylistActionState.AddToPlaylist -> {
-            val item = state.item
-            val songTitle = (item as? Song)?.title ?: (item as? StreamInfoItem)?.name ?: "Unknown"
-            val songArtist = (item as? Song)?.artist ?: (item as? StreamInfoItem)?.uploaderName ?: "Unknown"
-            val thumbnailUrl = (item as? Song)?.thumbnailUrl ?: (item as? StreamInfoItem)?.getHighQualityThumbnailUrl() ?: ""
-
-            ModalBottomSheet(
-                onDismissRequest = { viewModel.onPlaylistActionDismiss() },
-                sheetState = sheetState
-            ) {
-                AddToPlaylistSheet(
-                    songTitle = songTitle,
-                    songArtist = songArtist,
-                    songThumbnailUrl = thumbnailUrl,
-                    playlists = state.playlists,
-                    onPlaylistSelected = { playlistId -> viewModel.onPlaylistSelected(playlistId) },
-                    onCreateNewPlaylist = { viewModel.onPrepareToCreatePlaylist() }
-                )
-            }
-        }
-        is PlaylistActionState.CreatePlaylist -> {
-            TextFieldDialog(
-                title = "New Playlist",
-                label = "Playlist name",
-                confirmButtonText = "Create",
-                onDismiss = { viewModel.onPlaylistActionDismiss() },
-                onConfirm = { name -> viewModel.onPlaylistCreateConfirm(name) }
-            )
-        }
-        is PlaylistActionState.SelectGroupForNewPlaylist -> {
-            SelectLibraryGroupDialog(
-                groups = state.groups,
-                onDismiss = { viewModel.onPlaylistActionDismiss() },
-                onGroupSelected = { groupId -> viewModel.onGroupSelectedForNewPlaylist(groupId) },
-                onCreateNewGroup = { viewModel.onDialogRequestCreateGroup() }
-            )
-        }
-        is PlaylistActionState.Hidden -> {}
-    }
 
 
     if (uiState.detailedViewCategory != null) {
@@ -176,7 +133,6 @@ fun SearchScreen(
                 navController.navigate("searched_artist_detail/$searchType/$encodedUrl")
             },
             onAddToLibrary = { viewModel.onEvent(SearchEvent.AddToLibrary(it)) },
-            onAddToPlaylist = { viewModel.onEvent(SearchEvent.AddToPlaylist(it)) },
             onPlayNext = { viewModel.onEvent(SearchEvent.PlayNext(it)) },
             onAddToQueue = { viewModel.onEvent(SearchEvent.AddToQueue(it)) }
         )
@@ -184,6 +140,26 @@ fun SearchScreen(
         val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
         val keyboardController = LocalSoftwareKeyboardController.current
         val focusManager = LocalFocusManager.current
+        var isSearchFocused by remember { mutableStateOf(false) }
+
+        // Handle back press: close suggestions first, then navigate back
+        BackHandler(enabled = isSearchFocused || uiState.showSuggestions) {
+            if (isSearchFocused || uiState.showSuggestions) {
+                // Close suggestions and keyboard
+                viewModel.onEvent(SearchEvent.HideSuggestions)
+                keyboardController?.hide()
+                focusManager.clearFocus()
+            }
+        }
+
+        // Show suggestions when field gains focus
+        LaunchedEffect(isSearchFocused) {
+            if (isSearchFocused) {
+                viewModel.onEvent(SearchEvent.ShowSuggestions)
+            } else {
+                viewModel.onEvent(SearchEvent.HideSuggestions)
+            }
+        }
 
         GradientBackground(
             gradientColor1 = gradientColor1,
@@ -205,11 +181,21 @@ fun SearchScreen(
 
                             BasicTextField(
                                 value = uiState.query,
-                                onValueChange = { viewModel.onEvent(SearchEvent.QueryChange(it)) },
+                                onValueChange = {
+                                    viewModel.onEvent(SearchEvent.QueryChange(it))
+                                },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(end = 16.dp)
-                                    .height(42.dp),
+                                    .height(42.dp)
+                                    .onFocusChanged { focusState ->
+                                        isSearchFocused = focusState.isFocused
+                                        if (focusState.isFocused) {
+                                            viewModel.onEvent(SearchEvent.ShowSuggestions)
+                                        } else {
+                                            viewModel.onEvent(SearchEvent.HideSuggestions)
+                                        }
+                                    },
                                 textStyle = searchTextStyle,
                                 cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
                                 singleLine = true,
@@ -262,6 +248,36 @@ fun SearchScreen(
                         .fillMaxSize()
                         .padding(paddingValues)
                 ) {
+                    // Show suggestions when:
+                    // 1. Search field is FOCUSED (keyboard active) AND showSuggestions=true
+                    // 2. OR when on initial empty page (no query, no results) AND not focused
+                    val showInitialSuggestions = uiState.query.isEmpty() &&
+                                                 uiState.songs.isEmpty() &&
+                                                 uiState.videoStreams.isEmpty() &&
+                                                 !uiState.isLoading &&
+                                                 !isSearchFocused
+
+                    val showActiveSuggestions = isSearchFocused &&
+                                                uiState.showSuggestions &&
+                                                !uiState.isLoading
+
+                    if ((showActiveSuggestions || showInitialSuggestions)) {
+                        if (uiState.suggestions.isNotEmpty() || uiState.recentSearches.isNotEmpty() || showInitialSuggestions) {
+                            SearchSuggestionsDropdown(
+                                suggestions = uiState.suggestions,
+                                recentSearches = uiState.recentSearches,
+                                onSuggestionClick = { suggestion ->
+                                    viewModel.onEvent(SearchEvent.SelectSuggestion(suggestion))
+                                    keyboardController?.hide()
+                                    focusManager.clearFocus()
+                                },
+                                onDeleteHistory = { id ->
+                                    viewModel.onEvent(SearchEvent.DeleteSearchHistory(id))
+                                }
+                            )
+                        }
+                    }
+
                     FilterChipSection(
                         selectedFilter = uiState.selectedFilter,
                         onFilterSelected = { viewModel.onEvent(SearchEvent.FilterChange(it)) }
@@ -272,7 +288,18 @@ fun SearchScreen(
                             CircularProgressIndicator()
                         }
                     } else {
-                        if (uiState.selectedFilter == "music_songs") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) {
+                                    viewModel.onEvent(SearchEvent.HideSuggestions)
+                                    focusManager.clearFocus()
+                                }
+                        ) {
+                            if (uiState.selectedFilter == "music_songs") {
                             MusicSearchLayout(
                                 uiState = uiState,
                                 songsWithStatus = songsWithStatus,
@@ -289,7 +316,6 @@ fun SearchScreen(
                                 },
                                 onShowMore = { viewModel.onEvent(SearchEvent.ShowDetailedView(it)) },
                                 onAddToLibrary = { viewModel.onEvent(SearchEvent.AddToLibrary(it)) },
-                                onAddToPlaylist = { viewModel.onEvent(SearchEvent.AddToPlaylist(it)) },
                                 onPlayNext = { viewModel.onEvent(SearchEvent.PlayNext(it)) },
                                 onAddToQueue = { viewModel.onEvent(SearchEvent.AddToQueue(it)) },
                                 onShuffleAlbum = { viewModel.onEvent(SearchEvent.ShuffleAlbum(it)) }
@@ -311,10 +337,10 @@ fun SearchScreen(
                                 },
                                 onShowMore = { viewModel.onEvent(SearchEvent.ShowDetailedView(it)) },
                                 onAddToLibrary = { viewModel.onEvent(SearchEvent.AddToLibrary(it)) },
-                                onAddToPlaylist = { viewModel.onEvent(SearchEvent.AddToPlaylist(it)) },
                                 onPlayNext = { viewModel.onEvent(SearchEvent.PlayNext(it)) },
                                 onAddToQueue = { viewModel.onEvent(SearchEvent.AddToQueue(it)) }
                             )
+                            }
                         }
                     }
                 }
@@ -338,7 +364,6 @@ private fun DetailedView(
     onAlbumClicked: (AlbumResult) -> Unit,
     onArtistClicked: (ArtistResult) -> Unit,
     onAddToLibrary: (SearchResult) -> Unit,
-    onAddToPlaylist: (SearchResult) -> Unit,
     onPlayNext: (SearchResult) -> Unit,
     onAddToQueue: (SearchResult) -> Unit
 ) {
@@ -368,7 +393,7 @@ private fun DetailedView(
                     val itemsToShow = if (category == SearchCategory.SONGS) songsWithStatus else videoStreamsWithStatus
                     itemsIndexed(itemsToShow, key = { index, item -> (item.result.streamInfo.url ?: "") + index }) { index, item ->
                         val normalizedUrl = item.result.streamInfo.url?.replace("music.youtube.com", "www.youtube.com")
-                        val isPlaying = normalizedUrl == nowPlayingMediaId
+                        val isPlaying = normalizedUrl == nowPlayingMediaId || item.localSong?.localFilePath == nowPlayingMediaId
                         SearchResultItem(
                             result = item.result,
                             localSong = item.localSong,
@@ -377,7 +402,6 @@ private fun DetailedView(
                             imageLoader = imageLoader,
                             onPlay = { onSongClicked(index) },
                             onAddToLibrary = { onAddToLibrary(item.result) },
-                            onAddToPlaylist = { onAddToPlaylist(item.result) },
                             onPlayNext = { onPlayNext(item.result) },
                             onAddToQueue = { onAddToQueue(item.result) }
                         )
@@ -493,3 +517,128 @@ fun FilterChipSection(selectedFilter: String, onFilterSelected: (String) -> Unit
         )
     }
 }
+
+@Composable
+fun SearchSuggestionsDropdown(
+    suggestions: List<String>,
+    recentSearches: List<com.example.m.data.database.SearchHistory>,
+    onSuggestionClick: (String) -> Unit,
+    onDeleteHistory: (Long) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+    ) {
+        // Recent searches section (when no active suggestions from typing)
+        if (recentSearches.isNotEmpty() && suggestions.isEmpty()) {
+            item {
+                Text(
+                    text = "Recent Searches",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
+                )
+            }
+            items(recentSearches.take(10)) { history ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSuggestionClick(history.query) }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = androidx.compose.material.icons.Icons.Default.Search,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = history.query,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    androidx.compose.material3.IconButton(
+                        onClick = { onDeleteHistory(history.id) },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = androidx.compose.material.icons.Icons.Default.Close,
+                            contentDescription = "Delete",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Empty state when no history and no suggestions
+        if (recentSearches.isEmpty() && suggestions.isEmpty()) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Default.Search,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Search for songs, artists, albums...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Your recent searches will appear here",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+
+        // Active suggestions (when typing)
+        if (suggestions.isNotEmpty()) {
+            items(suggestions) { suggestion ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSuggestionClick(suggestion) }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Default.Search,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = suggestion,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+        }
+    }
+}
+

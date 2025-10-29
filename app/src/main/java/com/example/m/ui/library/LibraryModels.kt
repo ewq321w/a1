@@ -19,9 +19,12 @@ enum class SongSortOrder {
     PLAY_COUNT
 }
 
-enum class DownloadFilter { ALL, DOWNLOADED }
-enum class PlaylistFilter { ALL, IN_PLAYLIST }
-enum class GroupingFilter { ALL, UNGROUPED }
+data class SongFilters(
+    val includeNonLocal: Boolean = true,
+    val includeGroupedSongs: Boolean = true,
+    val includeGroupedArtists: Boolean = true,
+    val includeHiddenArtists: Boolean = true
+)
 
 sealed interface LibraryArtistItem {
     data class ArtistItem(val artistWithSongs: ArtistWithSongs) : LibraryArtistItem

@@ -22,7 +22,6 @@ fun VideoSearchLayout(
     onChannelClick: (ArtistResult) -> Unit,
     onShowMore: (SearchCategory) -> Unit,
     onAddToLibrary: (SearchResult) -> Unit,
-    onAddToPlaylist: (SearchResult) -> Unit,
     onPlayNext: (SearchResult) -> Unit,
     onAddToQueue: (SearchResult) -> Unit
 ) {
@@ -49,7 +48,6 @@ fun VideoSearchLayout(
                     imageLoader = imageLoader,
                     onPlay = { onVideoClick(index) },
                     onAddToLibrary = { onAddToLibrary(item.result) },
-                    onAddToPlaylist = { onAddToPlaylist(item.result) },
                     onPlayNext = { onPlayNext(item.result) },
                     onAddToQueue = { onAddToQueue(item.result) }
                 )

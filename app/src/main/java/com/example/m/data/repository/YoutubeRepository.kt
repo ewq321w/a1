@@ -200,6 +200,19 @@ class YoutubeRepository @Inject constructor() {
         }
     }
 
+    suspend fun getSuggestions(query: String): List<String> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val service = ServiceList.YouTube
+                val suggestionExtractor = service.suggestionExtractor
+                suggestionExtractor.suggestionList(query)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to get suggestions for query: $query")
+                emptyList()
+            }
+        }
+    }
+
     suspend fun getCommentReplies(repliesPage: Page): ListExtractor.InfoItemsPage<CommentsInfoItem>? {
         return withContext(Dispatchers.IO) {
             try {
@@ -308,13 +321,13 @@ class YoutubeRepository @Inject constructor() {
      * @param videoId The 11-character YouTube video ID (not the full URL)
      * @return List of StreamInfoItem from the YouTube Mix playlist, or empty list if failed
      */
-    suspend fun getYoutubeMixPlaylist(videoId: String): List<StreamInfoItem> {
+    suspend fun getYoutubeMixPlaylist(videoId: String): PlaylistPage? {
         return withContext(Dispatchers.IO) {
             try {
                 // Validate video ID format
                 if (videoId.length != 11 || !videoId.matches(Regex("[a-zA-Z0-9_-]{11}"))) {
                     Timber.w("Invalid video ID format: $videoId")
-                    return@withContext emptyList()
+                    return@withContext null
                 }
 
                 // Create YouTube Mix playlist URL
@@ -327,16 +340,13 @@ class YoutubeRepository @Inject constructor() {
                 val service = ServiceList.YouTube
                 val playlistInfo = PlaylistInfo.getInfo(service, mixUrl)
 
-                // Get initial page of mix playlist items
-                val initialPage = playlistInfo.relatedItems.filterIsInstance<StreamInfoItem>()
+                Timber.d("Successfully fetched YouTube Mix playlist with ${playlistInfo.relatedItems.size} items, hasNextPage: ${playlistInfo.nextPage != null}")
 
-                Timber.d("Successfully fetched YouTube Mix playlist with ${initialPage.size} items")
-
-                return@withContext initialPage
+                return@withContext PlaylistPage(playlistInfo, playlistInfo.nextPage)
 
             } catch (e: Exception) {
                 Timber.e(e, "Failed to get YouTube Mix playlist for video ID: $videoId")
-                return@withContext emptyList()
+                return@withContext null
             }
         }
     }

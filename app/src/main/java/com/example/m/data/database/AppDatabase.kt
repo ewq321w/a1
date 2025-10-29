@@ -29,9 +29,10 @@ import javax.inject.Provider
         ArtistSongGroup::class,
         ArtistSongGroupSongCrossRef::class,
         LibraryGroup::class,
-        LyricsCache::class
+        LyricsCache::class,
+        SearchHistory::class
     ],
-    version = 34, // Increased from 33 to 34
+    version = 36, // Increased from 35 to 36 for search history
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -46,6 +47,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun artistGroupDao(): ArtistGroupDao
     abstract fun libraryGroupDao(): LibraryGroupDao
     abstract fun lyricsCacheDao(): LyricsCacheDao
+    abstract fun searchHistoryDao(): SearchHistoryDao
 
     class AppDatabaseCallback @Inject constructor(
         private val database: Provider<AppDatabase>
@@ -77,6 +79,41 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // Migration from version 34 to 35: Add listening time tracking to playback state
+        val MIGRATION_34_35 = object : Migration(34, 35) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Add new listening time tracking columns to playback_state table
+                try {
+                    database.execSQL("ALTER TABLE playback_state ADD COLUMN accumulatedListeningTime INTEGER NOT NULL DEFAULT 0")
+                    database.execSQL("ALTER TABLE playback_state ADD COLUMN playCountIncrements INTEGER NOT NULL DEFAULT 0")
+                    Timber.d("Added listening time tracking columns to playback_state table")
+                } catch (e: Exception) {
+                    // Columns might already exist or table might not exist yet
+                    Timber.w(e, "Could not add listening time columns (might already exist)")
+                }
+            }
+        }
+
+        // Migration from version 35 to 36: Add search history table
+        val MIGRATION_35_36 = object : Migration(35, 36) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                try {
+                    database.execSQL("""
+                        CREATE TABLE IF NOT EXISTS search_history (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                            query TEXT NOT NULL,
+                            timestamp INTEGER NOT NULL,
+                            searchCount INTEGER NOT NULL DEFAULT 1
+                        )
+                    """)
+                    database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_search_history_query ON search_history(query)")
+                    Timber.d("Created search_history table")
+                } catch (e: Exception) {
+                    Timber.w(e, "Could not create search_history table (might already exist)")
+                }
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -101,7 +138,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     dbFile.absolutePath // Pass the full, absolute path to the builder.
                 )
-                    .addMigrations(MIGRATION_32_33, MIGRATION_33_34) // Added new migration
+                    .addMigrations(MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36)
                     .addCallback(callback)
                     .build()
                 INSTANCE = instance

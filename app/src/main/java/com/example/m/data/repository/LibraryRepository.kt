@@ -255,12 +255,54 @@ class LibraryRepository @Inject constructor(
 
     suspend fun verifyLibraryEntries(): Int {
         val songsToReQueue = mutableListOf<DownloadQueueItem>()
-        val downloadedSongs = songDao.getAllDownloadedSongsOnce()
 
+        // Check downloaded songs for missing/invalid files
+        val downloadedSongs = songDao.getAllDownloadedSongsOnce()
         for (song in downloadedSongs) {
             val path = song.localFilePath
+
+            // If song is not in library anymore, clear its download data
+            if (!song.isInLibrary) {
+                if (!path.isNullOrBlank()) {
+                    // Delete the file since the song is no longer in library
+                    try {
+                        val uri = path.toUri()
+                        if (uri.scheme == "content") {
+                            context.contentResolver.delete(uri, null, null)
+                        } else {
+                            File(path).delete()
+                        }
+                    } catch (e: Exception) {
+                        Timber.e(e, "Failed to delete file for non-library song: $path")
+                    }
+                }
+                // Clear the download status and file path
+                songDao.updateSong(song.copy(
+                    localFilePath = null,
+                    downloadStatus = DownloadStatus.NOT_DOWNLOADED,
+                    downloadProgress = 0
+                ))
+                continue
+            }
+
+            // If file is missing or invalid, re-queue for download
             if (path.isNullOrBlank() || !isUriValid(path.toUri())) {
                 songsToReQueue.add(DownloadQueueItem(song.songId))
+                // Reset the status to queued
+                songDao.updateDownloadInfo(song.songId, DownloadStatus.QUEUED, 0)
+            }
+        }
+
+        // Check for failed downloads and re-queue them (only if they're still in library)
+        val failedDownloads = songDao.getAllFailedDownloads()
+        for (song in failedDownloads) {
+            if (song.isInLibrary) {
+                songsToReQueue.add(DownloadQueueItem(song.songId))
+                // Reset the status to queued
+                songDao.updateDownloadInfo(song.songId, DownloadStatus.QUEUED, 0)
+            } else {
+                // Clear failed status for non-library songs
+                songDao.updateDownloadInfo(song.songId, DownloadStatus.NOT_DOWNLOADED, 0)
             }
         }
 
@@ -271,7 +313,8 @@ class LibraryRepository @Inject constructor(
     }
 
     suspend fun cleanOrphanedFiles(): Int {
-        val databasePaths = songDao.getAllLocalFilePaths().toSet()
+        // Get only file paths for songs that are in the library (download enabled)
+        val databasePaths = songDao.getLibrarySongsLocalFilePaths().toSet()
         val orphanedUris = mutableListOf<Uri>()
 
         val projection = arrayOf(MediaStore.Audio.Media._ID, MediaStore.Audio.Media.DATA)
@@ -288,6 +331,7 @@ class LibraryRepository @Inject constructor(
                 cursor.getString(dataColumn)
                 val contentUri = Uri.withAppendedPath(queryUri, id.toString())
 
+                // Delete file if it's not bound to any library song (download enabled song)
                 if (!databasePaths.contains(contentUri.toString())) {
                     orphanedUris.add(contentUri)
                 }

@@ -132,6 +132,31 @@ private object WhiteRippleTheme : RippleTheme {
     )
 }
 
+/**
+ * Formats a number in compact form (e.g., 5300 -> "5.3k", 1200000 -> "1.2M")
+ */
+private fun formatCompactNumber(number: Int): String {
+    return when {
+        number >= 1_000_000 -> {
+            val millions = number / 1_000_000.0
+            if (millions >= 10) {
+                "${millions.toInt()}M"
+            } else {
+                "%.1fM".format(millions).replace(".0M", "M")
+            }
+        }
+        number >= 1_000 -> {
+            val thousands = number / 1_000.0
+            if (thousands >= 10) {
+                "${thousands.toInt()}k"
+            } else {
+                "%.1fk".format(thousands).replace(".0k", "k")
+            }
+        }
+        else -> number.toString()
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerScreen(
@@ -675,13 +700,7 @@ private fun PlayerControls(
                                 text = when (commentCount) {
                                     null -> "•••"
                                     0 -> "0"
-                                    else -> {
-                                        val count = commentCount ?: 0
-                                        when {
-                                            count >= 1000 -> "${count / 1000}K"
-                                            else -> count.toString()
-                                        }
-                                    }
+                                    else -> formatCompactNumber(commentCount ?: 0)
                                 },
                                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f),
                                 fontSize = 14.sp
@@ -780,7 +799,10 @@ private fun PlayerControls(
                         onClick = {
                             if (isDownloaded) {
                                 showDeleteDownloadDialog = true
-                            } else if (!isDownloading && !isFailed) {
+                            } else if (isFailed) {
+                                // Retry failed download
+                                viewModel.onEvent(MainEvent.DownloadCurrentSong)
+                            } else if (!isDownloading) {
                                 viewModel.onEvent(MainEvent.DownloadCurrentSong)
                             }
                         },

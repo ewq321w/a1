@@ -1,6 +1,7 @@
 package com.example.m
 
 import android.app.Application
+import com.example.m.network.NetworkMonitor
 import com.example.m.util.CrashHandler
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
@@ -21,6 +22,9 @@ class MainApplication : Application() {
     @Named("NewPipe")
     lateinit var downloader: Downloader
 
+    @Inject
+    lateinit var networkMonitor: NetworkMonitor
+
     private val applicationScope = CoroutineScope(Dispatchers.Default)
 
     override fun onCreate() {
@@ -33,6 +37,9 @@ class MainApplication : Application() {
 
         // Set up the crash handler
         Thread.setDefaultUncaughtExceptionHandler(CrashHandler(this))
+
+        // Start network monitoring to handle VPN and network changes
+        networkMonitor.startMonitoring()
 
         // Launch NewPipe initialization in a background coroutine to avoid blocking the main thread
         applicationScope.launch {

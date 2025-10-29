@@ -186,65 +186,67 @@ fun SongItem(
             }
         }
 
-        IconButton(
-            onClick = { showMenu = true },
-            modifier = Modifier.size(40.dp)
-        ) {
-            Icon(
-                Icons.Default.MoreVert,
-                contentDescription = "More options",
-                modifier = Modifier.size(20.dp)
-            )
-        }
-        TranslucentDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-            DropdownMenuItem(text = { Text("Play next") }, onClick = { onPlayNextClick(); showMenu = false })
-            DropdownMenuItem(text = { Text("Add to queue") }, onClick = { onAddToQueueClick(); showMenu = false })
-            DropdownMenuItem(text = { Text("Shuffle") }, onClick = { onShuffleClick(); showMenu = false })
-            DropdownMenuItem(text = { Text("Go to artist") }, onClick = { onGoToArtistClick(); showMenu = false })
-            HorizontalDivider()
-            onAddToLibraryClick?.let {
-                DropdownMenuItem(
-                    text = { Text(if (song.isInLibrary) "In Library" else "Add to Library") },
-                    enabled = !song.isInLibrary,
-                    onClick = { it(); showMenu = false }
+        Box {
+            IconButton(
+                onClick = { showMenu = true },
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    Icons.Default.MoreVert,
+                    contentDescription = "More options",
+                    modifier = Modifier.size(20.dp)
                 )
             }
-            onDownloadClick?.let { downloadAction ->
-                val isDownloaded = song.downloadStatus == DownloadStatus.DOWNLOADED
-                val downloadText = when {
-                    isDownloading -> "Downloading..."
-                    isDownloaded -> "Delete download"
-                    else -> "Download"
-                }
-                DropdownMenuItem(
-                    text = { Text(downloadText) },
-                    enabled = !isDownloading,
-                    onClick = {
-                        if (isDownloaded) {
-                            showDeleteConfirmDialog = true
-                    } else {
-                            downloadAction()
-                        }
-                        showMenu = false
-                    }
-                )
-            }
-            DropdownMenuItem(text = { Text("Add to playlist") }, onClick = { onAddToPlaylistClick(); showMenu = false })
-            onAddToGroupClick?.let {
-                DropdownMenuItem(text = { Text("Add to group") }, onClick = { it(); showMenu = false })
-            }
-            onRemoveFromPlaylistClick?.let {
-                DropdownMenuItem(text = { Text("Remove from playlist") }, onClick = { it(); showMenu = false })
-            }
-            onRemoveFromGroupClick?.let {
-                DropdownMenuItem(text = { Text("Remove from group") }, onClick = { it(); showMenu = false })
-            }
-            onDeleteFromHistoryClick?.let {
-                DropdownMenuItem(text = { Text("Delete from history") }, onClick = { it(); showMenu = false })
-            }
-            onDeleteClick?.let {
+            TranslucentDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                DropdownMenuItem(text = { Text("Play next") }, onClick = { onPlayNextClick(); showMenu = false })
+                DropdownMenuItem(text = { Text("Add to queue") }, onClick = { onAddToQueueClick(); showMenu = false })
+                DropdownMenuItem(text = { Text("Shuffle") }, onClick = { onShuffleClick(); showMenu = false })
+                DropdownMenuItem(text = { Text("Go to artist") }, onClick = { onGoToArtistClick(); showMenu = false })
                 HorizontalDivider()
-                DropdownMenuItem(text = { Text("Delete from device") }, onClick = { it(); showMenu = false })
+                onAddToLibraryClick?.let {
+                    DropdownMenuItem(
+                        text = { Text(if (song.isInLibrary) "In Library" else "Add to Library") },
+                        enabled = !song.isInLibrary,
+                        onClick = { it(); showMenu = false }
+                    )
+                }
+                onDownloadClick?.let { downloadAction ->
+                    val isDownloaded = song.downloadStatus == DownloadStatus.DOWNLOADED
+                    val downloadText = when {
+                        isDownloading -> "Downloading..."
+                        isDownloaded -> "Delete download"
+                        else -> "Download"
+                    }
+                    DropdownMenuItem(
+                        text = { Text(downloadText) },
+                        enabled = !isDownloading,
+                        onClick = {
+                            if (isDownloaded) {
+                                showDeleteConfirmDialog = true
+                        } else {
+                                downloadAction()
+                            }
+                            showMenu = false
+                        }
+                    )
+                }
+                DropdownMenuItem(text = { Text("Add to playlist") }, onClick = { onAddToPlaylistClick(); showMenu = false })
+                onAddToGroupClick?.let {
+                    DropdownMenuItem(text = { Text("Add to group") }, onClick = { it(); showMenu = false })
+                }
+                onRemoveFromPlaylistClick?.let {
+                    DropdownMenuItem(text = { Text("Remove from playlist") }, onClick = { it(); showMenu = false })
+                }
+                onRemoveFromGroupClick?.let {
+                    DropdownMenuItem(text = { Text("Remove from group") }, onClick = { it(); showMenu = false })
+                }
+                onDeleteFromHistoryClick?.let {
+                    DropdownMenuItem(text = { Text("Delete from history") }, onClick = { it(); showMenu = false })
+                }
+                onDeleteClick?.let {
+                    HorizontalDivider()
+                    DropdownMenuItem(text = { Text("Delete from device") }, onClick = { it(); showMenu = false })
+                }
             }
         }
     }
@@ -354,9 +356,9 @@ fun TranslucentDropdownMenu(
 ) {
     // This theme makes the DropdownMenu's default surface have a "very dark translucent" tint.
     val newColorScheme = MaterialTheme.colorScheme.copy(
-        surface = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+        surface = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
         onSurface = Color.White,
-        onSurfaceVariant = Color.White.copy(alpha = 0.9f)
+        onSurfaceVariant = Color.White.copy(alpha = 0.93f)
     )
 
     MaterialTheme(colorScheme = newColorScheme) {

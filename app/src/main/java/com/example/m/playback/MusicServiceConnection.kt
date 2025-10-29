@@ -72,13 +72,32 @@ class MusicServiceConnection @Inject constructor(
     private val _currentMediaId = MutableStateFlow<String?>(null)
     val currentMediaId: StateFlow<String?> = _currentMediaId
 
+    private val _isLoadingMoreQueueItems = MutableStateFlow(false)
+    val isLoadingMoreQueueItems: StateFlow<Boolean> = _isLoadingMoreQueueItems
+
+    private val _isLoadingInitialQueue = MutableStateFlow(false)
+    val isLoadingInitialQueue: StateFlow<Boolean> = _isLoadingInitialQueue
+
     private var progressUpdateJob: Job? = null
+    private var queueLoadingJob: Job? = null // Job for tracking queue loading operation
     private var coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
+    // Track the full original list and loaded ranges for lazy loading
+    private var fullOriginalList: List<Any> = emptyList()
+    private var originalStartIndex: Int = 0
+    private var loadedBeforeCount: Int = 0
+    private var loadedAfterCount: Int = 0
 
     private var currentSongId: Long? = null
     private var isCurrentSongLogged = false
     private val isFetchingNextPage = AtomicBoolean(false)
     private var hasCheckedForRestoredSession = false
+
+    // New play count tracking variables
+    private var listeningStartTime: Long? = null
+    private var accumulatedListeningTime: Long = 0L
+    private var playCountIncrements: Int = 0
+    private var lastPlayState: Boolean = false
 
     init {
         mediaBrowserFuture = MediaBrowser.Builder(context, SessionToken(context, serviceComponent)).buildAsync()
@@ -94,6 +113,10 @@ class MusicServiceConnection @Inject constructor(
                 _currentMediaItemIndex.value = browser.currentMediaItemIndex
                 _currentMediaId.value = browser.currentMediaItem?.mediaId
                 updateQueue()
+
+                // Restore listening time state if session was restored
+                restoreListeningTimeState()
+
                 if (browser.playbackState == Player.STATE_READY || browser.isPlaying) {
                     startProgressUpdates()
                 }
@@ -152,6 +175,13 @@ class MusicServiceConnection @Inject constructor(
 
             _currentMediaItemIndex.value = mediaBrowser?.currentMediaItemIndex ?: 0
             isCurrentSongLogged = false
+
+            // Reset listening time tracking for new song
+            listeningStartTime = if (mediaBrowser?.isPlaying == true) System.currentTimeMillis() else null
+            accumulatedListeningTime = 0L
+            playCountIncrements = 0
+            lastPlayState = mediaBrowser?.isPlaying ?: false
+
             prefetchNextTrackStream()
             savePlaybackState()
 
@@ -187,6 +217,24 @@ class MusicServiceConnection @Inject constructor(
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _isPlaying.value = isPlaying
+
+            // Track listening time
+            val currentTime = System.currentTimeMillis()
+            if (isPlaying && !lastPlayState) {
+                // Started playing - start timer
+                listeningStartTime = currentTime
+                Timber.tag(TAG).d("Started playing - listening timer started")
+            } else if (!isPlaying && lastPlayState) {
+                // Paused - accumulate listening time
+                listeningStartTime?.let { startTime ->
+                    val sessionTime = currentTime - startTime
+                    accumulatedListeningTime += sessionTime
+                    Timber.tag(TAG).d("Paused - accumulated listening time: ${accumulatedListeningTime}ms (session: ${sessionTime}ms)")
+                }
+                listeningStartTime = null
+            }
+            lastPlayState = isPlaying
+
             if (!isPlaying) {
                 savePlaybackState()
             }
@@ -237,6 +285,35 @@ class MusicServiceConnection @Inject constructor(
         }
     }
 
+    private fun restoreListeningTimeState() {
+        coroutineScope.launch {
+            // Get saved state from database on IO thread
+            val savedState = withContext(Dispatchers.IO) {
+                playbackStateDao.getState()
+            }
+
+            // Access mediaBrowser on main thread
+            val hasCurrentItem = mediaBrowser?.currentMediaItem != null
+            val isPlaying = mediaBrowser?.isPlaying ?: false
+
+            if (savedState != null && hasCurrentItem) {
+                // Restore the listening time state
+                accumulatedListeningTime = savedState.accumulatedListeningTime
+                playCountIncrements = savedState.playCountIncrements
+
+                // Set listening start time if currently playing
+                if (isPlaying) {
+                    listeningStartTime = System.currentTimeMillis()
+                } else {
+                    listeningStartTime = null
+                }
+                lastPlayState = isPlaying
+
+                Timber.tag(TAG).d("Restored listening time state: accumulated=${accumulatedListeningTime}ms, increments=$playCountIncrements, playing=$isPlaying")
+            }
+        }
+    }
+
     private fun savePlaybackState() {
         if (MusicService.isRestoring.value) {
             return
@@ -258,16 +335,27 @@ class MusicServiceConnection @Inject constructor(
                 val currentPosition = if (browser.isPlaying) browser.currentPosition else browser.currentPosition.coerceAtLeast(0)
                 val playing = browser.isPlaying
 
+                // Calculate current accumulated time if playing
+                val currentTime = System.currentTimeMillis()
+                val totalAccumulatedTime = accumulatedListeningTime +
+                    (if (playing && listeningStartTime != null) {
+                        currentTime - listeningStartTime!!
+                    } else {
+                        0L
+                    })
+
                 if (queue.isNotEmpty()) {
                     withContext(Dispatchers.IO) {
                         val state = PlaybackStateEntity(
                             queue = queue,
                             currentItemIndex = currentIndex,
                             currentPosition = currentPosition,
-                            isPlaying = playing
+                            isPlaying = playing,
+                            accumulatedListeningTime = totalAccumulatedTime,
+                            playCountIncrements = playCountIncrements
                         )
                         playbackStateDao.saveState(state)
-                        Timber.tag(TAG).d("Playback state saved.")
+                        Timber.tag(TAG).d("Playback state saved with listening time: ${totalAccumulatedTime}ms, increments: $playCountIncrements")
                     }
                 }
             }
@@ -293,6 +381,17 @@ class MusicServiceConnection @Inject constructor(
     }
 
     suspend fun playSingleSong(item: Any) {
+        // Cancel any existing queue loading operation
+        queueLoadingJob?.cancel()
+        _isLoadingInitialQueue.value = false
+        Timber.tag(TAG).d("Cancelled previous queue loading job (playSingleSong)")
+
+        // Clear original list tracking since we're playing just one song
+        fullOriginalList = emptyList()
+        originalStartIndex = 0
+        loadedBeforeCount = 0
+        loadedAfterCount = 0
+
         val mediaItem = withContext(Dispatchers.IO) { createMediaItemForItem(item) } ?: return
 
         runPlayerCommand { browser ->
@@ -318,6 +417,11 @@ class MusicServiceConnection @Inject constructor(
                 browser.prepare()
                 hasCheckedForRestoredSession = false // Reset for new playback
                 isCurrentSongLogged = false
+                // Reset listening time tracking
+                listeningStartTime = null
+                accumulatedListeningTime = 0L
+                playCountIncrements = 0
+                lastPlayState = false
                 browser.play()
                 savePlaybackState()
             }
@@ -327,6 +431,16 @@ class MusicServiceConnection @Inject constructor(
 
     suspend fun playSongList(items: List<Any>, startIndex: Int) {
         if (items.isEmpty()) return
+
+        // Cancel any existing queue loading operation
+        queueLoadingJob?.cancel()
+        Timber.tag(TAG).d("Cancelled previous queue loading job")
+
+        // Store the full list for lazy loading later
+        fullOriginalList = items
+        originalStartIndex = startIndex
+        loadedBeforeCount = 0
+        loadedAfterCount = 0
 
         // First, create only the starting song's media item for immediate playback
         val startingSong = items.getOrNull(startIndex) ?: return
@@ -357,6 +471,11 @@ class MusicServiceConnection @Inject constructor(
                 browser.prepare()
                 hasCheckedForRestoredSession = false // Reset for new playback
                 isCurrentSongLogged = false
+                // Reset listening time tracking
+                listeningStartTime = null
+                accumulatedListeningTime = 0L
+                playCountIncrements = 0
+                lastPlayState = false
                 browser.play()
             }
         }
@@ -364,58 +483,59 @@ class MusicServiceConnection @Inject constructor(
         // Update queue immediately with just the starting song
         updateQueue()
 
-        // Now build the full queue in the background (after playback has started)
-        coroutineScope.launch(Dispatchers.IO) {
-            // Create all media items
-            val allMediaItems = items.mapNotNull { createMediaItemForItem(it) }
-            if (allMediaItems.isEmpty()) return@launch
+        // Cancel and reset previous loading state
+        _isLoadingInitialQueue.value = false
 
-            withContext(Dispatchers.Main) {
-                runPlayerCommand { browser ->
-                    val currentMediaId = browser.currentMediaItem?.mediaId
-                    val targetMediaId = allMediaItems.getOrNull(startIndex)?.mediaId
-                    val isSameSong = currentMediaId == targetMediaId
+        // Set loading state if there are more items to load
+        if (items.size > 1) {
+            _isLoadingInitialQueue.value = true
+        }
 
-                    if (isSameSong) {
-                        // Get current queue size
-                        val currentQueueSize = browser.mediaItemCount
-                        val currentIndex = browser.currentMediaItemIndex
+        // Smart batching: Only load nearby songs to prevent performance issues with large queues
+        // Load 10 songs before and 30 songs after the current song initially
+        val INITIAL_LOAD_BEFORE = 10
+        val INITIAL_LOAD_AFTER = 30
 
-                        // Calculate items to add
-                        val itemsToAddAfter = allMediaItems.drop(startIndex + 1)
-                        val itemsToAddBefore = allMediaItems.take(startIndex)
+        // Now build the initial portion of the queue progressively in the background
+        queueLoadingJob = coroutineScope.launch(Dispatchers.IO) {
+            try {
+                // Calculate how many songs to load initially
+                val itemsBeforeCount = minOf(startIndex, INITIAL_LOAD_BEFORE)
+                val itemsAfterCount = minOf(items.size - startIndex - 1, INITIAL_LOAD_AFTER)
 
-                        // Remove all items except the current one (from the end to avoid index shifts)
-                        for (i in (currentQueueSize - 1) downTo 0) {
-                            if (i != currentIndex) {
-                                browser.removeMediaItem(i)
-                            }
-                        }
+                Timber.tag(TAG).d("Smart loading: $itemsBeforeCount before, $itemsAfterCount after current song (total queue: ${items.size})")
 
-                        // Add items before the current song
-                        if (itemsToAddBefore.isNotEmpty()) {
-                            browser.addMediaItems(0, itemsToAddBefore)
-                        }
-
-                        // Add items after the current song (at the end)
-                        if (itemsToAddAfter.isNotEmpty()) {
-                            browser.addMediaItems(itemsToAddAfter)
-                        }
-
-                        Timber.tag(TAG).d("Queue updated with ${allMediaItems.size} items")
-                    } else {
-                        // Rare case: song changed between starting playback and building queue
-                        // Just add remaining items to queue
-                        val itemsToAdd = allMediaItems.filterNot { it.mediaId == currentMediaId }
-                        if (itemsToAdd.isNotEmpty()) {
-                            browser.addMediaItems(itemsToAdd)
-                            Timber.tag(TAG).d("Added ${itemsToAdd.size} remaining items to queue")
+                // Process items before the starting song (limited to INITIAL_LOAD_BEFORE)
+                val itemsBefore = items.subList(maxOf(0, startIndex - itemsBeforeCount), startIndex).reversed()
+                for (item in itemsBefore) {
+                    val mediaItem = createMediaItemForItem(item) ?: continue
+                    withContext(Dispatchers.Main) {
+                        runPlayerCommand { browser ->
+                            // Insert at position 0 to maintain order
+                            browser.addMediaItem(0, mediaItem)
+                            updateQueue()
                         }
                     }
-
-                    // Update queue after the full queue is built
-                    updateQueue()
                 }
+                loadedBeforeCount = itemsBeforeCount
+
+                // Process items after the starting song (limited to INITIAL_LOAD_AFTER)
+                val itemsAfter = items.subList(startIndex + 1, minOf(items.size, startIndex + 1 + itemsAfterCount))
+                for (item in itemsAfter) {
+                    val mediaItem = createMediaItemForItem(item) ?: continue
+                    withContext(Dispatchers.Main) {
+                        runPlayerCommand { browser ->
+                            // Add to end of queue
+                            browser.addMediaItem(mediaItem)
+                            updateQueue()
+                        }
+                    }
+                }
+                loadedAfterCount = itemsAfterCount
+
+                Timber.tag(TAG).d("Finished loading initial queue batch ($loadedBeforeCount before, $loadedAfterCount after)")
+            } finally {
+                _isLoadingInitialQueue.value = false
             }
         }
     }
@@ -431,9 +551,82 @@ class MusicServiceConnection @Inject constructor(
         playSongList(shuffledList, 0)
     }
 
+    private fun hasMoreFromOriginalList(): Boolean {
+        if (fullOriginalList.isEmpty()) return false
+
+        val canLoadMoreBefore = loadedBeforeCount < originalStartIndex
+        val canLoadMoreAfter = loadedAfterCount < (fullOriginalList.size - originalStartIndex - 1)
+
+        return canLoadMoreBefore || canLoadMoreAfter
+    }
+
+    private suspend fun loadMoreFromOriginalList() {
+        if (!hasMoreFromOriginalList()) return
+
+        val BATCH_SIZE = 20 // Load 20 more songs at a time
+
+        Timber.tag(TAG).d("Loading more from original list (current: $loadedBeforeCount before, $loadedAfterCount after)")
+
+        // Prioritize loading more songs after the current position
+        if (loadedAfterCount < (fullOriginalList.size - originalStartIndex - 1)) {
+            val startIdx = originalStartIndex + 1 + loadedAfterCount
+            val endIdx = minOf(startIdx + BATCH_SIZE, fullOriginalList.size)
+            val itemsToLoad = fullOriginalList.subList(startIdx, endIdx)
+
+            for (item in itemsToLoad) {
+                val mediaItem = withContext(Dispatchers.IO) {
+                    createMediaItemForItem(item)
+                } ?: continue
+
+                withContext(Dispatchers.Main) {
+                    runPlayerCommand { browser ->
+                        browser.addMediaItem(mediaItem)
+                        updateQueue()
+                    }
+                }
+            }
+
+            loadedAfterCount += itemsToLoad.size
+            Timber.tag(TAG).d("Loaded ${itemsToLoad.size} more songs after (total after: $loadedAfterCount)")
+        }
+        // If we've loaded all songs after, load more before
+        else if (loadedBeforeCount < originalStartIndex) {
+            val endIdx = originalStartIndex - loadedBeforeCount
+            val startIdx = maxOf(0, endIdx - BATCH_SIZE)
+            val itemsToLoad = fullOriginalList.subList(startIdx, endIdx).reversed()
+
+            for (item in itemsToLoad) {
+                val mediaItem = withContext(Dispatchers.IO) {
+                    createMediaItemForItem(item)
+                } ?: continue
+
+                withContext(Dispatchers.Main) {
+                    runPlayerCommand { browser ->
+                        browser.addMediaItem(0, mediaItem)
+                        updateQueue()
+                    }
+                }
+            }
+
+            loadedBeforeCount += itemsToLoad.size
+            Timber.tag(TAG).d("Loaded ${itemsToLoad.size} more songs before (total before: $loadedBeforeCount)")
+        }
+    }
+
     suspend fun shuffleQueuePreservingState(items: List<Any>, startIndex: Int) {
         playbackListManager.clearCurrentListContext()
         if (items.isEmpty() || startIndex !in items.indices) return
+
+        // Cancel any existing queue loading operation
+        queueLoadingJob?.cancel()
+        _isLoadingInitialQueue.value = false
+        Timber.tag(TAG).d("Cancelled previous queue loading job (shuffleQueuePreservingState)")
+
+        // Clear original list tracking - shuffle loads all songs at once
+        fullOriginalList = emptyList()
+        originalStartIndex = 0
+        loadedBeforeCount = 0
+        loadedAfterCount = 0
 
         val selectedItem = items[startIndex]
         val remainingItems = items.toMutableList().apply { removeAt(startIndex) }.shuffled()
@@ -514,6 +707,67 @@ class MusicServiceConnection @Inject constructor(
                 Timber.tag(TAG).d("Added to end of queue: ${mediaItem.mediaMetadata.title}")
             }
         }
+    }
+
+    fun loadMoreQueueItems() {
+        Timber.tag(TAG).d("loadMoreQueueItems: Called")
+        if (isFetchingNextPage.compareAndSet(false, true)) {
+            _isLoadingMoreQueueItems.value = true
+            Timber.tag(TAG).d("loadMoreQueueItems: Starting fetch...")
+
+            coroutineScope.launch {
+                // First, try to load more from the original list if available
+                if (hasMoreFromOriginalList()) {
+                    Timber.tag(TAG).d("loadMoreQueueItems: Loading from original list")
+                    loadMoreFromOriginalList()
+                    _isLoadingMoreQueueItems.value = false
+                    isFetchingNextPage.set(false)
+                    return@launch
+                }
+
+                // If no more from original list, fetch the next page of StreamInfoItems
+                val newStreamItems = withContext(Dispatchers.IO) {
+                    playbackListManager.fetchNextPageStreamInfoItems()
+                }
+
+                if (!newStreamItems.isNullOrEmpty()) {
+                    Timber.tag(TAG).d("loadMoreQueueItems: Received ${newStreamItems.size} items, loading progressively...")
+
+                    // Load songs progressively one by one
+                    for (streamItem in newStreamItems) {
+                        val mediaItem = withContext(Dispatchers.IO) {
+                            createMediaItemForItem(streamItem)
+                        }
+
+                        if (mediaItem != null) {
+                            withContext(Dispatchers.Main) {
+                                runPlayerCommand { browser ->
+                                    browser.addMediaItem(mediaItem)
+                                    updateQueue()
+                                }
+                            }
+                        }
+                    }
+
+                    Timber.tag(TAG).d("loadMoreQueueItems: Finished loading ${newStreamItems.size} items progressively")
+                } else {
+                    Timber.tag(TAG).d("loadMoreQueueItems: No new items received")
+                }
+
+                _isLoadingMoreQueueItems.value = false
+                isFetchingNextPage.set(false)
+            }
+        } else {
+            Timber.tag(TAG).d("loadMoreQueueItems: Already fetching, skipping")
+        }
+    }
+
+    fun hasMoreQueueItems(): Boolean {
+        val hasMoreFromOriginal = hasMoreFromOriginalList()
+        val hasMoreFromPages = playbackListManager.hasMorePages()
+        val hasMore = hasMoreFromOriginal || hasMoreFromPages
+        Timber.tag(TAG).d("hasMoreQueueItems: $hasMore (original: $hasMoreFromOriginal, pages: $hasMoreFromPages)")
+        return hasMore
     }
 
     private fun isUriValid(uri: Uri): Boolean {
@@ -644,9 +898,11 @@ class MusicServiceConnection @Inject constructor(
     private fun startProgressUpdates() {
         stopProgressUpdates()
 
+        // For restored sessions, check if we should skip the initial listening history log
         if (!hasCheckedForRestoredSession) {
             val browser = mediaBrowser
             if (browser != null && browser.currentPosition > 1000) {
+                // If restoring a session with significant progress, mark as logged to avoid duplicate history
                 if (browser.currentPosition >= 30000) {
                     isCurrentSongLogged = true
                 }
@@ -661,16 +917,41 @@ class MusicServiceConnection @Inject constructor(
                 val totalDuration = mediaBrowser?.duration?.takeIf { it > 0 } ?: 0
                 _playbackState.value = PlaybackState(currentPosition, totalDuration)
 
-                if (!isCurrentSongLogged && currentPosition >= 30000) {
-                    currentSongId?.let { songId ->
-                        Timber.tag(TAG).d("LOGGING PLAY for song ID: $songId")
+                // Calculate current total listening time
+                val currentTime = System.currentTimeMillis()
+                val currentListeningTime = accumulatedListeningTime +
+                    (if (lastPlayState && listeningStartTime != null) {
+                        currentTime - listeningStartTime!!
+                    } else {
+                        0L
+                    })
+
+                currentSongId?.let { songId ->
+                    // First increment: after 30 seconds of listening
+                    if (playCountIncrements == 0 && currentListeningTime >= 30000) {
+                        Timber.tag(TAG).d("First play count increment for song ID: $songId after 30s listening (total: ${currentListeningTime}ms)")
                         withContext(Dispatchers.IO) {
-                            listeningHistoryDao.insertPlayLog(
-                                ListeningHistory(songId = songId, timestamp = System.currentTimeMillis())
-                            )
+                            if (!isCurrentSongLogged) {
+                                listeningHistoryDao.insertPlayLog(
+                                    ListeningHistory(songId = songId, timestamp = System.currentTimeMillis())
+                                )
+                                isCurrentSongLogged = true
+                            }
                             songDao.incrementPlayCount(songId)
                         }
-                        isCurrentSongLogged = true
+                        playCountIncrements++
+                    }
+                    // Subsequent increments: every song duration after the first increment
+                    else if (playCountIncrements > 0 && totalDuration > 0) {
+                        // Calculate threshold: 30s + (playCountIncrements * duration)
+                        val threshold = 30000L + (playCountIncrements * totalDuration)
+                        if (currentListeningTime >= threshold) {
+                            Timber.tag(TAG).d("Additional play count increment #$playCountIncrements for song ID: $songId (listening: ${currentListeningTime}ms, threshold: ${threshold}ms)")
+                            withContext(Dispatchers.IO) {
+                                songDao.incrementPlayCount(songId)
+                            }
+                            playCountIncrements++
+                        }
                     }
                 }
 

@@ -7,6 +7,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import okhttp3.Cache
+import okhttp3.Dns
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -15,6 +16,8 @@ import org.schabi.newpipe.extractor.downloader.Request
 import org.schabi.newpipe.extractor.downloader.Response
 import java.io.File
 import java.io.IOException
+import java.net.InetAddress
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 import javax.inject.Named
 import javax.inject.Singleton
@@ -36,8 +39,18 @@ object NetworkModule {
             .cache(cache)
             .readTimeout(30, TimeUnit.SECONDS)
             .connectTimeout(30, TimeUnit.SECONDS)
+            // Force DNS resolution on every request to respect network changes
+            .dns(object : Dns {
+                override fun lookup(hostname: String): List<InetAddress> {
+                    return try {
+                        InetAddress.getAllByName(hostname).toList()
+                    } catch (e: UnknownHostException) {
+                        emptyList()
+                    }
+                }
+            })
             .addInterceptor { chain ->
-                var request = chain.request()
+                val request = chain.request()
                 var response = chain.proceed(request)
                 var tryCount = 0
                 while (!response.isSuccessful && tryCount < 3) {

@@ -168,6 +168,11 @@ object AppModule {
 
     @Singleton
     @Provides
+    fun provideSearchHistoryDao(database: AppDatabase): SearchHistoryDao =
+        database.searchHistoryDao()
+
+    @Singleton
+    @Provides
     fun provideExoPlayer(@ApplicationContext context: Context): ExoPlayer =
         ExoPlayer.Builder(context).build()
 

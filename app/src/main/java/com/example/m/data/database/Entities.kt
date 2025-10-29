@@ -169,7 +169,9 @@ data class PlaybackStateEntity(
     val queue: List<String>,
     val currentItemIndex: Int,
     val currentPosition: Long,
-    val isPlaying: Boolean
+    val isPlaying: Boolean,
+    val accumulatedListeningTime: Long = 0L,
+    val playCountIncrements: Int = 0
 )
 
 @Entity(tableName = "artists", indices = [Index(value = ["name"], unique = true)])
@@ -308,3 +310,16 @@ data class LyricsCache(
     val isSuccessful: Boolean,
     val timestamp: Long = System.currentTimeMillis()
 )
+
+@Entity(
+    tableName = "search_history",
+    indices = [Index(value = ["query"], unique = true)]
+)
+data class SearchHistory(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val query: String,
+    val timestamp: Long = System.currentTimeMillis(),
+    val searchCount: Int = 1
+)
+

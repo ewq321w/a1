@@ -29,8 +29,6 @@ import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.comments.CommentsInfoItem
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import org.schabi.newpipe.extractor.stream.StreamType
-import java.text.NumberFormat
-import java.util.*
 
 private fun parseTimestampFromUrl(url: String, currentVideoId: String?): Long? {
     if (currentVideoId == null) return null
@@ -71,6 +69,31 @@ private fun getYoutubeVideoIdFromUrl(url: String): String? {
     }
 }
 
+/**
+ * Formats a number in compact form (e.g., 5300 -> "5.3k", 1200000 -> "1.2M")
+ */
+private fun formatCompactNumber(number: Int): String {
+    return when {
+        number >= 1_000_000 -> {
+            val millions = number / 1_000_000.0
+            if (millions >= 10) {
+                "${millions.toInt()}M"
+            } else {
+                "%.1fM".format(millions).replace(".0M", "M")
+            }
+        }
+        number >= 1_000 -> {
+            val thousands = number / 1_000.0
+            if (thousands >= 10) {
+                "${thousands.toInt()}k"
+            } else {
+                "%.1fk".format(thousands).replace(".0k", "k")
+            }
+        }
+        else -> number.toString()
+    }
+}
+
 @Composable
 fun CommentsTabContent(
     mainViewModel: MainViewModel = hiltViewModel(),
@@ -86,7 +109,7 @@ fun CommentsTabContent(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 8.dp),
-        contentAlignment = Alignment.Center
+        contentAlignment = Alignment.TopCenter
     ) {
         when {
             uiState.showingRepliesFor != null -> {
@@ -273,7 +296,7 @@ private fun CommentItem(
             ) {
                 if (comment.likeCount > 0) {
                     Text(
-                        text = "${NumberFormat.getNumberInstance(Locale.US).format(comment.likeCount)} likes",
+                        text = "${formatCompactNumber(comment.likeCount)} likes",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -298,7 +321,7 @@ private fun CommentItem(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "${comment.replyCount} ${if (comment.replyCount == 1) "reply" else "replies"}",
+                            text = "${formatCompactNumber(comment.replyCount)} ${if (comment.replyCount == 1) "reply" else "replies"}",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.primary
@@ -341,7 +364,7 @@ private fun RepliesView(
             // Replies section header - show the original reply count from the comment
             item {
                 Text(
-                    text = "${originalComment.replyCount} ${if (originalComment.replyCount == 1) "reply" else "replies"}",
+                    text = "${formatCompactNumber(originalComment.replyCount)} ${if (originalComment.replyCount == 1) "reply" else "replies"}",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
@@ -489,7 +512,7 @@ private fun OriginalCommentItem(
                 if (comment.likeCount > 0) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "${NumberFormat.getNumberInstance(Locale.US).format(comment.likeCount)} likes",
+                        text = "${formatCompactNumber(comment.likeCount)} likes",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -569,7 +592,7 @@ private fun ReplyItem(
             if (reply.likeCount > 0) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "${NumberFormat.getNumberInstance(Locale.US).format(reply.likeCount)} likes",
+                    text = "${formatCompactNumber(reply.likeCount)} likes",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

@@ -26,6 +26,7 @@ import com.example.m.playback.MusicServiceConnection
 import com.example.m.data.repository.YoutubeRepository
 import com.example.m.data.repository.LyricsRepository
 import com.example.m.managers.LibraryActionsManager
+import com.example.m.managers.PlaybackListManager
 import com.example.m.managers.PlaylistActionsManager
 import com.example.m.managers.SnackbarManager
 import com.example.m.ui.search.SearchResult
@@ -48,6 +49,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.schabi.newpipe.extractor.Page
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import javax.inject.Inject
 import android.graphics.Color as AndroidColor
@@ -93,7 +95,8 @@ class MainViewModel @Inject constructor(
     private val lyricsRepository: LyricsRepository,
     val libraryActionsManager: LibraryActionsManager,
     val playlistActionsManager: PlaylistActionsManager,
-    val snackbarManager: SnackbarManager
+    val snackbarManager: SnackbarManager,
+    private val playbackListManager: PlaybackListManager
 ) : ViewModel() {
     val nowPlaying = musicServiceConnection.nowPlaying
     val isPlaying = musicServiceConnection.isPlaying
@@ -103,6 +106,8 @@ class MainViewModel @Inject constructor(
     val queue = musicServiceConnection.queue
     val currentMediaItemIndex = musicServiceConnection.currentMediaItemIndex
     val currentMediaId = musicServiceConnection.currentMediaId
+    val isLoadingMoreQueueItems = musicServiceConnection.isLoadingMoreQueueItems
+    val isLoadingInitialQueue = musicServiceConnection.isLoadingInitialQueue
 
     private val _queueSongs = MutableStateFlow<List<Pair<String, Song?>>>(emptyList())
     val queueSongs: StateFlow<List<Pair<String, Song?>>> = _queueSongs
@@ -189,6 +194,9 @@ class MainViewModel @Inject constructor(
     val isLoadingLyrics = MutableStateFlow(false)
     val lyricsError = MutableStateFlow<String?>(null)
 
+    // YouTube Mix pagination state
+    private var youtubeMixUrl: String? = null
+    private var youtubeMixNextPage: Page? = null
 
     init {
         _randomGradientColors.value = generateHarmoniousVibrantColors()
@@ -354,6 +362,14 @@ class MainViewModel @Inject constructor(
 
     fun skipToQueueItem(index: Int) = musicServiceConnection.skipToQueueItem(index)
 
+    fun loadMoreQueueItems() {
+        musicServiceConnection.loadMoreQueueItems()
+    }
+
+    fun hasMoreQueueItems(): Boolean {
+        return musicServiceConnection.hasMoreQueueItems()
+    }
+
     fun playSingleSong(item: Any) {
         viewModelScope.launch {
             musicServiceConnection.playSingleSong(item)
@@ -378,6 +394,11 @@ class MainViewModel @Inject constructor(
                     if (mixSongUrl != selectedSongUrl) {
                         songsToPlay.add(mixResult)
                     }
+                }
+
+                // Set YouTube Mix playlist context for pagination
+                if (youtubeMixUrl != null) {
+                    playbackListManager.setCurrentListContext(youtubeMixUrl, youtubeMixNextPage)
                 }
 
                 // Play the queue starting with the selected song
@@ -861,6 +882,8 @@ class MainViewModel @Inject constructor(
     private suspend fun loadYoutubeMixResults(mediaId: String) {
         // Clear only this section when starting to load
         _youtubeMixResults.value = emptyList()
+        youtubeMixUrl = null
+        youtubeMixNextPage = null
 
         try {
             withContext(Dispatchers.IO) {
@@ -868,8 +891,15 @@ class MainViewModel @Inject constructor(
                 val videoId = extractVideoIdFromUrl(mediaId)
                 if (videoId != null) {
                     // Try to get YouTube Mix playlist based on the current video
-                    val mixResults = youtubeRepository.getYoutubeMixPlaylist(videoId)
-                    _youtubeMixResults.value = mixResults.take(20)
+                    val mixPlaylistPage = youtubeRepository.getYoutubeMixPlaylist(videoId)
+                    if (mixPlaylistPage != null) {
+                        val mixPlaylistId = "RD$videoId"
+                        youtubeMixUrl = "https://www.youtube.com/watch?v=$videoId&list=$mixPlaylistId"
+                        youtubeMixNextPage = mixPlaylistPage.nextPage
+                        _youtubeMixResults.value = mixPlaylistPage.playlistInfo.relatedItems.filterIsInstance<StreamInfoItem>()
+                    } else {
+                        _youtubeMixResults.value = emptyList()
+                    }
                 } else {
                     _youtubeMixResults.value = emptyList()
                 }
@@ -940,7 +970,15 @@ class MainViewModel @Inject constructor(
             if (song != null && song.youtubeUrl.startsWith("http") && song.isInLibrary) {
                 try {
                     withContext(Dispatchers.IO) {
-                        // Set status to QUEUED immediately for instant UI feedback
+                        // Check current download status - prevent re-queueing if already downloaded or in progress
+                        val currentSong = songDao.getSongById(song.songId)
+                        if (currentSong?.downloadStatus == DownloadStatus.DOWNLOADED ||
+                            currentSong?.downloadStatus == DownloadStatus.QUEUED ||
+                            currentSong?.downloadStatus == DownloadStatus.DOWNLOADING) {
+                            return@withContext
+                        }
+
+                        // Set status to QUEUED immediately for instant UI feedback (allows retry of FAILED downloads)
                         songDao.updateDownloadStatus(song.songId, DownloadStatus.QUEUED)
 
                         // Add to download queue
