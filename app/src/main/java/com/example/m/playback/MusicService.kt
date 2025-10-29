@@ -72,6 +72,9 @@ class MusicService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        android.util.Log.d("MusicService", "onCreate() called - Service starting")
+        timber.log.Timber.d("MusicService onCreate() - Service starting")
+
         val audioAttributes = AudioAttributes.Builder()
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .setUsage(C.USAGE_MEDIA)
@@ -80,7 +83,16 @@ class MusicService : MediaSessionService() {
         player.addListener(playerListener)
 
         serviceScope.launch {
-            restoreQueueFromDatabase()
+            try {
+                android.util.Log.d("MusicService", "Starting queue restoration")
+                timber.log.Timber.d("Starting queue restoration from database")
+                restoreQueueFromDatabase()
+                android.util.Log.d("MusicService", "Queue restoration completed")
+                timber.log.Timber.d("Queue restoration completed")
+            } catch (e: Exception) {
+                android.util.Log.e("MusicService", "Error during queue restoration", e)
+                timber.log.Timber.e(e, "Error during queue restoration")
+            }
         }
     }
 
@@ -92,9 +104,11 @@ class MusicService : MediaSessionService() {
 
     private suspend fun restoreQueueFromDatabase() {
         isRestoring.value = true
+        timber.log.Timber.d("restoreQueueFromDatabase: Starting restoration")
 
         withContext(Dispatchers.Main) {
             if (player.mediaItemCount > 0) {
+                timber.log.Timber.d("restoreQueueFromDatabase: Player already has items, skipping restoration")
                 isRestoring.value = false
                 return@withContext
             }
@@ -102,25 +116,34 @@ class MusicService : MediaSessionService() {
 
         val savedState = playbackStateDao.getState()
         if (savedState == null || savedState.queue.isEmpty()) {
+            timber.log.Timber.d("restoreQueueFromDatabase: No saved state or empty queue, clearing state")
             playbackStateDao.clearState()
             isRestoring.value = false
             return
         }
 
+        timber.log.Timber.d("restoreQueueFromDatabase: Found saved state with ${savedState.queue.size} items, current index: ${savedState.currentItemIndex}")
+
         val startIndex = savedState.currentItemIndex.coerceIn(0, savedState.queue.size - 1)
         val currentItemIdentifier = savedState.queue[startIndex]
+        timber.log.Timber.d("restoreQueueFromDatabase: Restoring current item at index $startIndex: $currentItemIdentifier")
+
         val currentMediaItem = buildMediaItem(currentItemIdentifier, withArtworkData = true)
 
         if (currentMediaItem != null) {
+            timber.log.Timber.d("restoreQueueFromDatabase: Successfully built current media item")
             withContext(Dispatchers.Main) {
                 if (player.mediaItemCount > 0) {
+                    timber.log.Timber.w("restoreQueueFromDatabase: Player already has items during restoration, aborting")
                     isRestoring.value = false
                     return@withContext
                 }
                 player.setMediaItem(currentMediaItem, savedState.currentPosition)
                 player.prepare()
+                timber.log.Timber.d("restoreQueueFromDatabase: Current item set and player prepared at position ${savedState.currentPosition}")
             }
         } else {
+            timber.log.Timber.e("restoreQueueFromDatabase: Failed to build current media item, clearing state")
             playbackStateDao.clearState()
             isRestoring.value = false
             return

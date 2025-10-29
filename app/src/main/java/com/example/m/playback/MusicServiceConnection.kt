@@ -100,11 +100,15 @@ class MusicServiceConnection @Inject constructor(
     private var lastPlayState: Boolean = false
 
     init {
+        Timber.tag(TAG).d("MusicServiceConnection init: Creating MediaBrowser")
         mediaBrowserFuture = MediaBrowser.Builder(context, SessionToken(context, serviceComponent)).buildAsync()
         mediaBrowserFuture.addListener({
             try {
+                Timber.tag(TAG).d("MusicServiceConnection: MediaBrowser connection listener triggered")
                 val browser = mediaBrowserFuture.get()
                 this.mediaBrowser = browser
+                Timber.tag(TAG).d("MusicServiceConnection: MediaBrowser connected successfully")
+
                 browser.addListener(playerListener)
                 _nowPlaying.value = browser.mediaMetadata
                 _isPlaying.value = browser.isPlaying
@@ -112,12 +116,16 @@ class MusicServiceConnection @Inject constructor(
                 _playerState.value = browser.playbackState
                 _currentMediaItemIndex.value = browser.currentMediaItemIndex
                 _currentMediaId.value = browser.currentMediaItem?.mediaId
+
+                Timber.tag(TAG).d("MusicServiceConnection: Initial state - MediaID: ${browser.currentMediaItem?.mediaId}, Playing: ${browser.isPlaying}, State: ${browser.playbackState}")
+
                 updateQueue()
 
                 // Restore listening time state if session was restored
                 restoreListeningTimeState()
 
                 if (browser.playbackState == Player.STATE_READY || browser.isPlaying) {
+                    Timber.tag(TAG).d("MusicServiceConnection: Player is ready or playing, starting progress updates")
                     startProgressUpdates()
                 }
             } catch (e: Exception) {
@@ -131,10 +139,16 @@ class MusicServiceConnection @Inject constructor(
         if (browser != null && browser.isConnected) {
             command(browser)
         } else {
+            Timber.tag(TAG).w("runPlayerCommand: MediaBrowser not connected yet, queuing command")
             mediaBrowserFuture.addListener({
                 try {
                     val connectedBrowser = mediaBrowserFuture.get()
-                    command(connectedBrowser)
+                    if (connectedBrowser.isConnected) {
+                        Timber.tag(TAG).d("runPlayerCommand: MediaBrowser now connected, executing queued command")
+                        command(connectedBrowser)
+                    } else {
+                        Timber.tag(TAG).e("runPlayerCommand: MediaBrowser connected but isConnected=false")
+                    }
                 } catch (e: Exception) {
                     Timber.tag(TAG)
                         .e(e, "Failed to execute command; MediaBrowser connection failed")
@@ -969,6 +983,10 @@ class MusicServiceConnection @Inject constructor(
     private fun stopProgressUpdates() {
         progressUpdateJob?.cancel()
         progressUpdateJob = null
+    }
+
+    fun isConnected(): Boolean {
+        return mediaBrowser?.isConnected ?: false
     }
 
 }

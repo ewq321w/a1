@@ -672,6 +672,34 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    fun ensureMusicServiceConnected() {
+        viewModelScope.launch {
+            // Give the service a moment to initialize
+            delay(500)
+
+            // Check if the service is properly connected
+            val isConnected = musicServiceConnection.isConnected()
+            timber.log.Timber.d("MusicService connection status: $isConnected")
+
+            if (!isConnected) {
+                timber.log.Timber.w("MusicService not connected, waiting for connection...")
+                // Wait a bit more and check again
+                delay(1000)
+                val isConnectedNow = musicServiceConnection.isConnected()
+                timber.log.Timber.d("MusicService connection status after retry: $isConnectedNow")
+
+                if (!isConnectedNow) {
+                    timber.log.Timber.e("MusicService failed to connect after retries")
+                }
+            }
+
+            // Log current playback state
+            timber.log.Timber.d("Current media ID: ${currentMediaId.value}")
+            timber.log.Timber.d("Is playing: ${isPlaying.value}")
+            timber.log.Timber.d("Player state: ${playerState.value}")
+        }
+    }
+
     fun runLibraryMaintenance() {
         viewModelScope.launch {
             _isDoingMaintenance.value = true

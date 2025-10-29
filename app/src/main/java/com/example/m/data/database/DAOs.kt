@@ -189,7 +189,32 @@ interface SongDao {
         AND songId NOT IN (SELECT DISTINCT songId FROM listening_history)
     """)
     suspend fun deleteOrphanSongs(): Int
+
+    @Query("SELECT * FROM songs WHERE isInLibrary = 1")
+    fun getSongsInLibrary(): Flow<List<Song>>
+
+    @Query("SELECT * FROM songs WHERE isInLibrary = 1 ORDER BY dateAddedTimestamp DESC LIMIT :limit")
+    fun getRecentlyAddedSongs(limit: Int): Flow<List<Song>>
+
+    @Query("SELECT COALESCE(SUM(playCount), 0) FROM songs WHERE isInLibrary = 1")
+    fun getTotalPlayCount(): Flow<Int>
+
+    @Query("""
+        SELECT s.songId, COUNT(h.logId) as playCount
+        FROM songs s
+        INNER JOIN listening_history h ON s.songId = h.songId
+        WHERE h.timestamp >= :fromTimestamp
+        GROUP BY s.songId
+        ORDER BY playCount DESC
+        LIMIT :limit
+    """)
+    suspend fun getTopSongsInTimeRange(fromTimestamp: Long, limit: Int): List<SongPlayCount>
 }
+
+data class SongPlayCount(
+    val songId: Long,
+    val playCount: Int
+)
 
 data class PlaylistWithSongs(
     @Embedded val playlist: Playlist,
@@ -247,6 +272,18 @@ interface PlaylistDao {
 
     @Query("SELECT * FROM playlists ORDER BY name ASC")
     fun getAllPlaylists(): Flow<List<Playlist>>
+
+    fun getAllPlaylistsWithDetails(): Flow<List<PlaylistWithSongs>> {
+        return getPlaylistsWithSongsAndOrderedSongsInternal()
+            .map { playlistSongsMap ->
+                playlistSongsMap.map { entry ->
+                    PlaylistWithSongs(
+                        playlist = entry.key,
+                        songs = entry.value.filter { it.songId != 0L }
+                    )
+                }
+            }
+    }
 
     @Query("SELECT * FROM playlists WHERE libraryGroupId = :groupId ORDER BY name ASC")
     fun getPlaylistsByGroupId(groupId: Long): Flow<List<Playlist>>
