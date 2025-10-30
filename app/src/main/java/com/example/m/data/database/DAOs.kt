@@ -209,11 +209,25 @@ interface SongDao {
         LIMIT :limit
     """)
     suspend fun getTopSongsInTimeRange(fromTimestamp: Long, limit: Int): List<SongPlayCount>
+
+    @Query("""
+        SELECT s.songId, h.timestamp
+        FROM songs s
+        INNER JOIN listening_history h ON s.songId = h.songId
+        WHERE h.timestamp >= :fromTimestamp
+        ORDER BY h.timestamp DESC
+    """)
+    suspend fun getSongPlaysInTimeRange(fromTimestamp: Long): List<SongPlayTimestamp>
 }
 
 data class SongPlayCount(
     val songId: Long,
     val playCount: Int
+)
+
+data class SongPlayTimestamp(
+    val songId: Long,
+    val timestamp: Long
 )
 
 data class PlaylistWithSongs(

@@ -44,7 +44,8 @@ data class HomeUiState(
     internal val recentMixSongs: List<Song> = emptyList(),
     val nowPlayingMediaId: String? = null,
     val isPlaying: Boolean = false,
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    val isRefreshing: Boolean = false
 )
 
 sealed interface HomeEvent {
@@ -55,6 +56,7 @@ sealed interface HomeEvent {
     data class PlayRecentlyAdded(val index: Int) : HomeEvent
     data object ShuffleAll : HomeEvent
     data class NavigateToPlaylist(val playlistId: Long) : HomeEvent
+    data object Refresh : HomeEvent
 }
 
 @HiltViewModel
@@ -98,12 +100,67 @@ class HomeViewModel @Inject constructor(
             }
         }
 
-        // Load top songs this week (last 7 days)
+        // Load "On Repeat" - sophisticated mix based on frequency, recency, and randomness
         viewModelScope.launch {
             val weekAgo = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000)
-            val topSongIds = songDao.getTopSongsInTimeRange(weekAgo, limit = 10)
-            val topSongs = libraryRepository.getSongsByIds(topSongIds.map { it.songId })
-            _uiState.update { it.copy(topSongsThisWeek = topSongs) }
+            val songPlays = songDao.getSongPlaysInTimeRange(weekAgo)
+
+            if (songPlays.isNotEmpty()) {
+                val currentTime = System.currentTimeMillis()
+                val weekDuration = 7 * 24 * 60 * 60 * 1000.0
+
+                // Group plays by songId and calculate weighted scores
+                val songScores = songPlays.groupBy { it.songId }
+                    .mapValues { (_, plays) ->
+                        val playCount = plays.size
+
+                        // Calculate recency score (more recent plays get higher weight)
+                        val recencyScore = plays.sumOf { play ->
+                            val age = currentTime - play.timestamp
+                            val recencyFactor = 1.0 - (age / weekDuration) // 1.0 for now, 0.0 for week ago
+                            // Exponential curve: recent plays matter more
+                            Math.pow(recencyFactor, 0.5) // Square root for moderate curve
+                        }
+
+                        // Play frequency score (normalized)
+                        val frequencyScore = playCount.toDouble()
+
+                        // Most recent play bonus (songs played in last 24h get extra boost)
+                        val mostRecentPlay = plays.maxOf { it.timestamp }
+                        val hoursAgo = (currentTime - mostRecentPlay) / (60 * 60 * 1000.0)
+                        val recencyBonus = if (hoursAgo < 24) {
+                            (24 - hoursAgo) / 24.0 // 0 to 1 boost
+                        } else 0.0
+
+                        // Weighted combination:
+                        // - 40% frequency (consistent listening)
+                        // - 35% recency (time-decayed recent plays)
+                        // - 25% recency bonus (very recent plays)
+                        val baseScore = (frequencyScore * 0.40) +
+                                       (recencyScore * 0.35) +
+                                       (recencyBonus * playCount * 0.25)
+
+                        // Add slight randomness (±10%) for variety on each load
+                        val randomFactor = 0.9 + (Math.random() * 0.2)
+                        baseScore * randomFactor
+                    }
+
+                // Get top 36 songs by score
+                val topSongIds = songScores.entries
+                    .sortedByDescending { it.value }
+                    .take(36)
+                    .map { it.key }
+
+                val songs = libraryRepository.getSongsByIds(topSongIds)
+                // Maintain the order from scoring
+                val topSongs = topSongIds.mapNotNull { songId ->
+                    songs.find { it.songId == songId }
+                }
+
+                _uiState.update { it.copy(topSongsThisWeek = topSongs) }
+            } else {
+                _uiState.update { it.copy(topSongsThisWeek = emptyList()) }
+            }
         }
 
         // Load recently added songs to library
@@ -172,6 +229,7 @@ class HomeViewModel @Inject constructor(
             is HomeEvent.PlayRecentlyAdded -> playRecentlyAdded(event.index)
             is HomeEvent.ShuffleAll -> shuffleAll()
             is HomeEvent.NavigateToPlaylist -> {} // Handle navigation in UI
+            is HomeEvent.Refresh -> refreshHomeData()
         }
     }
 
@@ -255,6 +313,85 @@ class HomeViewModel @Inject constructor(
                 val shuffled = allLibrarySongs.shuffled()
                 musicServiceConnection.playSongList(shuffled, 0)
             }
+        }
+    }
+
+    private fun refreshHomeData() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isRefreshing = true) }
+
+            // Refresh On Repeat with new randomization
+            refreshInRotation()
+
+            // Refresh Discovery Mix
+            val topRecentPlays = listeningHistoryDao.getTopRecentSongs(limit = 10).first()
+            if (topRecentPlays.isNotEmpty()) {
+                generateRecommendations(topRecentPlays)
+            }
+
+            // Future: Add more algorithmic refreshes here as you add them
+            // refreshTrendingSongs()
+            // refreshMoodMix()
+            // refreshGenreDiscovery()
+            // etc.
+
+            _uiState.update { it.copy(isRefreshing = false) }
+        }
+    }
+
+    private suspend fun refreshInRotation() {
+        val weekAgo = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000)
+        val songPlays = songDao.getSongPlaysInTimeRange(weekAgo)
+
+        if (songPlays.isNotEmpty()) {
+            val currentTime = System.currentTimeMillis()
+            val weekDuration = 7 * 24 * 60 * 60 * 1000.0
+
+            // Group plays by songId and calculate weighted scores
+            val songScores = songPlays.groupBy { it.songId }
+                .mapValues { (_, plays) ->
+                    val playCount = plays.size
+
+                    // Calculate recency score (more recent plays get higher weight)
+                    val recencyScore = plays.sumOf { play ->
+                        val age = currentTime - play.timestamp
+                        val recencyFactor = 1.0 - (age / weekDuration)
+                        Math.pow(recencyFactor, 0.5)
+                    }
+
+                    // Play frequency score (normalized)
+                    val frequencyScore = playCount.toDouble()
+
+                    // Most recent play bonus
+                    val mostRecentPlay = plays.maxOf { it.timestamp }
+                    val hoursAgo = (currentTime - mostRecentPlay) / (60 * 60 * 1000.0)
+                    val recencyBonus = if (hoursAgo < 24) {
+                        (24 - hoursAgo) / 24.0
+                    } else 0.0
+
+                    val baseScore = (frequencyScore * 0.40) +
+                                   (recencyScore * 0.35) +
+                                   (recencyBonus * playCount * 0.25)
+
+                    // Add randomness for variety
+                    val randomFactor = 0.9 + (Math.random() * 0.2)
+                    baseScore * randomFactor
+                }
+
+            // Get top 36 songs by score
+            val topSongIds = songScores.entries
+                .sortedByDescending { it.value }
+                .take(36)
+                .map { it.key }
+
+            val songs = libraryRepository.getSongsByIds(topSongIds)
+            val topSongs = topSongIds.mapNotNull { songId ->
+                songs.find { it.songId == songId }
+            }
+
+            _uiState.update { it.copy(topSongsThisWeek = topSongs) }
+        } else {
+            _uiState.update { it.copy(topSongsThisWeek = emptyList()) }
         }
     }
 }

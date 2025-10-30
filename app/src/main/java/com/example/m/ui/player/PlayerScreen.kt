@@ -18,7 +18,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -39,35 +38,24 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Comment
-import androidx.compose.material.icons.automirrored.outlined.Comment
+import androidx.compose.material.icons.automirrored.outlined.PlaylistAdd
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.HourglassTop
-import androidx.compose.material.icons.filled.LibraryAdd
-import androidx.compose.material.icons.filled.LibraryAddCheck
-import androidx.compose.material.icons.filled.PlaylistAddCheck
-import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.PauseCircleFilled
 import androidx.compose.material.icons.filled.PlayCircleFilled
-import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOn
-import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.RepeatOneOn
-import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.ShuffleOn
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.outlined.LibraryAdd
 import androidx.compose.material.icons.outlined.LibraryAddCheck
-import androidx.compose.material.icons.outlined.PlaylistAdd
 import androidx.compose.material.icons.outlined.Repeat
-import androidx.compose.material.icons.outlined.RepeatOne
 import androidx.compose.material.icons.outlined.Shuffle
-import androidx.compose.material.ripple.LocalRippleTheme
-import androidx.compose.material.ripple.RippleTheme
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -75,14 +63,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -120,19 +103,6 @@ import com.example.m.ui.main.LoopMode
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
-private object WhiteRippleTheme : RippleTheme {
-    @Composable
-    override fun defaultColor() = RippleTheme.defaultRippleColor(
-        contentColor = Color.White,
-        lightTheme = !isSystemInDarkTheme()
-    )
-
-    @Composable
-    override fun rippleAlpha() = RippleTheme.defaultRippleAlpha(
-        contentColor = Color.White,
-        lightTheme = !isSystemInDarkTheme()
-    )
-}
 
 /**
  * Formats a number in compact form (e.g., 5300 -> "5.3k", 1200000 -> "1.2M")
@@ -602,12 +572,12 @@ private fun PlayerControls(
     val playbackState by viewModel.playbackState.collectAsState()
     val commentCount by viewModel.commentCount.collectAsState()
     val loopMode by viewModel.loopMode.collectAsState()
-    val isShuffled by viewModel.isShuffled.collectAsState()
+    val isShuffling by viewModel.isShuffling.collectAsState()
     val isCurrentSongInLibrary by viewModel.isCurrentSongInLibrary.collectAsState()
     val currentSongDownloadStatus by viewModel.currentSongDownloadStatus.collectAsState()
     val currentSongDownloadProgress by viewModel.currentSongDownloadProgress.collectAsState()
     val playerState by viewModel.playerState.collectAsState()
-    val isShuffling by viewModel.isShuffling.collectAsState()
+    val nowPlaying by viewModel.nowPlaying.collectAsState()
     var localSliderProgress by remember { mutableFloatStateOf(0f) }
     var isUserInteracting by remember { mutableStateOf(false) }
     var showDeleteDownloadDialog by remember { mutableStateOf(false) }
@@ -618,7 +588,7 @@ private fun PlayerControls(
             onDismissRequest = { showDeleteDownloadDialog = false },
             title = { Text("Delete Download") },
             text = {
-                Text("Delete the downloaded file for \"${viewModel.nowPlaying.value?.title}\"? The song will still be available for streaming.")
+                Text("Delete the downloaded file for \"${nowPlaying?.title}\"? The song will still be available for streaming.")
             },
             confirmButton = {
                 TextButton(
@@ -676,9 +646,8 @@ private fun PlayerControls(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Start
             ) {
-                CompositionLocalProvider(LocalRippleTheme provides WhiteRippleTheme) {
-                    // Comments Button (moved to first position)
-                    TextButton(
+                // Comments Button (moved to first position)
+                TextButton(
                         onClick = onShowComments,
                         modifier = Modifier
                             .clip(RoundedCornerShape(18.dp))
@@ -769,7 +738,7 @@ private fun PlayerControls(
                             horizontalArrangement = Arrangement.spacedBy(3.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.PlaylistAdd,
+                                imageVector = Icons.AutoMirrored.Outlined.PlaylistAdd,
                                 contentDescription = "Add to Playlist",
                                 tint = if (isCurrentSongInLibrary)
                                     MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f)
@@ -874,7 +843,6 @@ private fun PlayerControls(
                     }
                 }
             }
-        }
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -992,20 +960,18 @@ private fun PlayerControls(
             }
         }
         Spacer(modifier = Modifier.height(40.dp))
-        CompositionLocalProvider(LocalRippleTheme provides WhiteRippleTheme) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                TextButton(onClick = onShowQueue) {
-                    Text("UP NEXT", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f))
-                }
-                TextButton(onClick = onShowLyrics) {
-                    Text("LYRICS", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f))
-                }
-                TextButton(onClick = onShowRelated) {
-                    Text("RELATED", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f))
-                }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            TextButton(onClick = onShowQueue) {
+                Text("UP NEXT", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f))
+            }
+            TextButton(onClick = onShowLyrics) {
+                Text("LYRICS", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f))
+            }
+            TextButton(onClick = onShowRelated) {
+                Text("RELATED", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f))
             }
         }
     }

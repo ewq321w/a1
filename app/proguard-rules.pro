@@ -20,4 +20,29 @@
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
 
+# Baseline Profile Generation - Keep profile installer classes
+-keep class androidx.profileinstaller.** { *; }
+-dontwarn androidx.profileinstaller.**
+
+# Keep baseline profile classes
+-keep class androidx.startup.** { *; }
+-dontwarn androidx.startup.**
+
 # Rules for Mozilla Rhino, a dependency of NewPipeExtractor
+# Rhino has references to java.beans and javax.script which don't exist on Android
+-dontwarn java.beans.**
+-dontwarn javax.script.**
+-dontwarn org.mozilla.javascript.engine.**
+
+# JDK 9+ dynamic linker classes - don't exist on Android
+-dontwarn jdk.dynalink.**
+
+# Keep Rhino classes needed by NewPipeExtractor
+-keep class org.mozilla.javascript.** { *; }
+
+# Ignore missing service classes
+-dontwarn META-INF.services.javax.script.ScriptEngineFactory
+
+# Keep NewPipeExtractor classes
+-keep class org.schabi.newpipe.** { *; }
+-dontwarn org.schabi.newpipe.**

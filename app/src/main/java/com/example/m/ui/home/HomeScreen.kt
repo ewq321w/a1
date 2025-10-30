@@ -8,10 +8,13 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -21,7 +24,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -38,6 +40,8 @@ import com.example.m.ui.common.GradientBackground
 import com.example.m.ui.common.getHighQualityThumbnailUrl
 import com.example.m.ui.main.MainViewModel
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
+import kotlin.math.ceil
+import kotlin.math.min
 
 @SuppressLint("RestrictedApi", "ContextCastToActivity")
 @OptIn(ExperimentalMaterial3Api::class)
@@ -46,7 +50,6 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
     val activity = LocalContext.current as ComponentActivity
     val mainViewModel: MainViewModel = hiltViewModel(activity)
     val (gradientColor1, gradientColor2) = mainViewModel.randomGradientColors.value
@@ -55,34 +58,19 @@ fun HomeScreen(
         gradientColor1 = gradientColor1,
         gradientColor2 = gradientColor2
     ) {
-        Scaffold(
-            modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-            topBar = {
-                TopAppBar(
-                    title = { Text("Home") },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent,
-                        scrolledContainerColor = Color.Transparent,
-                        titleContentColor = MaterialTheme.colorScheme.onSurface
-                    ),
-                    scrollBehavior = scrollBehavior
-                )
-            },
-            containerColor = Color.Transparent
-        ) { paddingValues ->
-            if (uiState.listeningStats?.totalSongs == 0 && !uiState.isLoading) {
-                // Empty state
-                EmptyHomeState(
-                    modifier = Modifier
-                        .padding(paddingValues)
-                        .fillMaxSize()
-                )
-            } else {
+        if (uiState.listeningStats?.totalSongs == 0 && !uiState.isLoading) {
+            // Empty state
+            EmptyHomeState(
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            PullToRefreshBox(
+                isRefreshing = uiState.isRefreshing,
+                onRefresh = { viewModel.onEvent(HomeEvent.Refresh) }
+            ) {
                 LazyColumn(
-                    modifier = Modifier
-                        .padding(paddingValues)
-                        .fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 16.dp)
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = 36.dp, bottom = 16.dp)
                 ) {
                     // Welcome header with stats
                     item {
@@ -102,43 +90,10 @@ fun HomeScreen(
                         Spacer(modifier = Modifier.height(16.dp))
                     }
 
-                    // Recently played
-                    if (uiState.recentlyPlayed.isNotEmpty()) {
-                        item {
-                            SongListSection(
-                                title = "Recently Played",
-                                songs = uiState.recentlyPlayed,
-                                onSongClick = { index ->
-                                    viewModel.onEvent(HomeEvent.PlayRecentlyPlayed(index))
-                                },
-                                nowPlayingMediaId = uiState.nowPlayingMediaId,
-                                isPlaying = uiState.isPlaying
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                        }
-                    }
-
-                    // Your Recent Mix
-                    if (uiState.recentMix.isNotEmpty()) {
-                        item {
-                            RecommendationSection(
-                                title = "Your Recent Mix",
-                                items = uiState.recentMix,
-                                onItemClick = { index ->
-                                    viewModel.onEvent(HomeEvent.PlayRecentMix(index))
-                                },
-                                nowPlayingMediaId = uiState.nowPlayingMediaId,
-                                isPlaying = uiState.isPlaying
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                        }
-                    }
-
-                    // Top Songs This Week
+                    // Top Songs This Week - HorizontalPager with 3x3 grid
                     if (uiState.topSongsThisWeek.isNotEmpty()) {
                         item {
-                            SongListSection(
-                                title = "Top Songs This Week",
+                            TopSongsThisWeekPager(
                                 songs = uiState.topSongsThisWeek,
                                 onSongClick = { index ->
                                     viewModel.onEvent(HomeEvent.PlayTopSong(index))
@@ -227,6 +182,192 @@ fun EmptyHomeState(modifier: Modifier = Modifier) {
 }
 
 @Composable
+fun TopSongsThisWeekPager(
+    songs: List<Song>,
+    onSongClick: (Int) -> Unit,
+    nowPlayingMediaId: String?,
+    isPlaying: Boolean
+) {
+    val pagerState = rememberPagerState(
+        pageCount = { ceil(songs.size / 9f).toInt() },
+        initialPage = 0
+    )
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            text = "On Repeat",
+            color = MaterialTheme.colorScheme.onBackground,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 24.dp),
+            pageSpacing = 24.dp
+        ) { pageIndex ->
+            val startIndex = pageIndex * 9
+            val endIndex = min(startIndex + 9, songs.size)
+            val pageSongs = songs.subList(startIndex, endIndex)
+
+            // 3x3 Grid for each page
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                for (row in 0 until 3) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        for (col in 0 until 3) {
+                            val index = row * 3 + col
+                            if (index < pageSongs.size) {
+                                val song = pageSongs[index]
+                                val globalIndex = startIndex + index
+                                val isCurrentlyPlaying = song.youtubeUrl.replace("music.youtube.com", "www.youtube.com") == nowPlayingMediaId
+
+                                TopSongGridItem(
+                                    song = song,
+                                    onClick = { onSongClick(globalIndex) },
+                                    isCurrentlyPlaying = isCurrentlyPlaying,
+                                    isPlaying = isPlaying,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            } else {
+                                // Empty space for incomplete rows
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Page indicator
+        if (pagerState.pageCount > 1) {
+            DotsIndicator(
+                totalDots = pagerState.pageCount,
+                selectedIndex = pagerState.currentPage,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
+        }
+    }
+}
+
+@Composable
+fun TopSongGridItem(
+    song: Song,
+    onClick: () -> Unit,
+    isCurrentlyPlaying: Boolean,
+    isPlaying: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier.clickable(onClick = onClick)
+    ) {
+        Box {
+            AsyncImage(
+                model = song.thumbnailUrl,
+                contentDescription = song.title,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .clip(RoundedCornerShape(8.dp)),
+                contentScale = ContentScale.Crop,
+                error = painterResource(id = R.drawable.placeholder_gray),
+                placeholder = painterResource(id = R.drawable.placeholder_gray)
+            )
+
+            // Dark gradient at bottom with song name
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.3f)
+                    .align(Alignment.BottomCenter)
+                    .clip(RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp))
+                    .background(
+                        androidx.compose.ui.graphics.Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color.DarkGray.copy(alpha = 0.7f),
+                                Color.DarkGray.copy(alpha = 0.9f),
+                            )
+                        )
+                    ),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                Text(
+                    text = song.title,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp)
+                )
+            }
+
+            if (isCurrentlyPlaying) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(
+                            Color.Black.copy(alpha = 0.3f),
+                            shape = RoundedCornerShape(8.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = if (isPlaying) "Pause" else "Play",
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DotsIndicator(
+    totalDots: Int,
+    selectedIndex: Int,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        repeat(totalDots) { index ->
+            val dotColor = if (index == selectedIndex) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+            }
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(dotColor)
+            )
+            if (index < totalDots - 1) {
+                Spacer(modifier = Modifier.width(4.dp))
+            }
+        }
+    }
+}
+
+@Composable
 fun WelcomeHeader(
     stats: ListeningStats?,
     modifier: Modifier = Modifier
@@ -245,6 +386,7 @@ fun WelcomeHeader(
             color = MaterialTheme.colorScheme.onBackground,
             fontWeight = FontWeight.Bold
         )
+
 
         if (stats != null && stats.totalSongs > 0) {
             Spacer(modifier = Modifier.height(12.dp))

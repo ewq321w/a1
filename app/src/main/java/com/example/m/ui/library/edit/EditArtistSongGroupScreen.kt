@@ -20,9 +20,8 @@ import com.example.m.ui.common.GradientBackground
 import com.example.m.ui.library.components.CompositeThumbnailImage
 import com.example.m.ui.library.components.ConfirmRemoveDialog
 import com.example.m.ui.main.MainViewModel
-import org.burnoutcrew.reorderable.ReorderableItem
-import org.burnoutcrew.reorderable.rememberReorderableLazyListState
-import org.burnoutcrew.reorderable.reorderable
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,14 +40,18 @@ fun EditArtistSongGroupScreen(
     val mainViewModel: MainViewModel = hiltViewModel(activity)
     val (gradientColor1, gradientColor2) = mainViewModel.randomGradientColors.value
 
-    val state = rememberReorderableLazyListState(onMove = { from, to ->
-        val adjustedFrom = from.index - 1
-        val adjustedTo = to.index - 1
+    val lazyListState = rememberLazyListState()
+    val state = rememberReorderableLazyListState(
+        lazyListState = lazyListState,
+        onMove = { from, to ->
+            val adjustedFrom = from.index - 1
+            val adjustedTo = to.index - 1
 
-        if (adjustedFrom >= 0 && adjustedTo >= 0) {
-            viewModel.onEvent(EditArtistSongGroupEvent.SongMoved(adjustedFrom, adjustedTo))
+            if (adjustedFrom >= 0 && adjustedTo >= 0) {
+                viewModel.onEvent(EditArtistSongGroupEvent.SongMoved(adjustedFrom, adjustedTo))
+            }
         }
-    })
+    )
 
     uiState.songPendingRemoval?.let { songToRemove ->
         ConfirmRemoveDialog(
@@ -95,11 +98,10 @@ fun EditArtistSongGroupScreen(
                 }
             } else {
                 LazyColumn(
-                    state = state.listState,
+                    state = lazyListState,
                     modifier = Modifier
                         .padding(paddingValues)
                         .fillMaxSize()
-                        .reorderable(state)
                 ) {
                     item {
                         Column(
@@ -124,12 +126,13 @@ fun EditArtistSongGroupScreen(
                     }
 
                     items(items = songs, key = { song: Song -> song.songId }) { song ->
-                        ReorderableItem(state, key = song.songId) { isDragging ->
+                        ReorderableItem(state = state, key = song.songId) {
+                            val isDragging = it
                             EditSongItem(
                                 song = song,
                                 onRemoveClick = { viewModel.onEvent(EditArtistSongGroupEvent.RemoveSongClicked(song)) },
-                                state = state,
-                                modifier = Modifier.shadow(if (isDragging) 4.dp else 0.dp)
+                                modifier = Modifier.shadow(if (isDragging) 4.dp else 0.dp),
+                                dragHandleModifier = Modifier.draggableHandle()
                             )
                         }
                     }

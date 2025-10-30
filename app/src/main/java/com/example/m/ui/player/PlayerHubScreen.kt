@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -38,11 +39,8 @@ import com.example.m.ui.search.SearchResultForList
 import com.example.m.ui.library.components.TranslucentDropdownMenu
 import com.example.m.ui.main.MainEvent
 import com.example.m.ui.main.MainViewModel
-import org.burnoutcrew.reorderable.ItemPosition
-import org.burnoutcrew.reorderable.ReorderableItem
-import org.burnoutcrew.reorderable.detectReorder
-import org.burnoutcrew.reorderable.rememberReorderableLazyListState
-import org.burnoutcrew.reorderable.reorderable
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlin.math.ceil
 import kotlin.math.min
 
@@ -204,15 +202,16 @@ private fun TabContent(
     val isReorderEnabled = animationProgress >= 0.75f && selectedTabIndex == 0  // Only for Queue tab
 
     // onMove lambda for reordering
-    val onMoveLambda = { from: ItemPosition, to: ItemPosition ->
+    val onMoveLambda = { from: Int, to: Int ->
         if (isReorderEnabled) {
-            isReordering = true // Set reordering flag
-            mainViewModel.moveQueueItem(from.index, to.index)
-            // Update local queue immediately to reflect the move
+            isReordering = true
+            // Update local queue immediately for smooth visual feedback
             val list = localQueue.toMutableList()
-            val item = list.removeAt(from.index)
-            list.add(to.index, item)
+            val item = list.removeAt(from)
+            list.add(to, item)
             localQueue = list
+            // Also update the ViewModel
+            mainViewModel.moveQueueItem(from, to)
         }
     }
     val updatedOnMove = rememberUpdatedState(onMoveLambda)
@@ -226,8 +225,10 @@ private fun TabContent(
 
     // Create reorderable state with the pre-initialized list state
     val reorderableState = rememberReorderableLazyListState(
-        listState = lazyListState,
-        onMove = { from, to -> updatedOnMove.value(from, to) }
+        lazyListState = lazyListState,
+        onMove = { from, to ->
+            updatedOnMove.value(from.index, to.index)
+        }
     )
 
     // Scroll to new currentIndex only when:
@@ -239,7 +240,7 @@ private fun TabContent(
             val shouldScrollForNewSong = hasScrolledInitially && currentIndex != lastScrolledIndex
 
             if (shouldScrollInitially || shouldScrollForNewSong) {
-                reorderableState.listState.animateScrollToItem(currentIndex, 0)
+                lazyListState.animateScrollToItem(currentIndex, 0)
                 hasScrolledInitially = true
                 lastScrolledIndex = currentIndex
             }
@@ -363,29 +364,28 @@ private fun TabContent(
 
                                     LazyColumn(
                                         state = lazyListState,
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .then(
-                                                if (isReorderEnabled) {
-                                                    Modifier.reorderable(reorderableState)
-                                                } else {
-                                                    Modifier
-                                                }
-                                            ),
+                                        modifier = Modifier.fillMaxSize(),
                                         contentPadding = PaddingValues(bottom = 36.dp, top = 12.dp)
                                     ) {
                                         itemsIndexed(
                                             items = localQueue,
-                                            key = { index, item -> "${item.first}_$index" }
+                                            key = { _, item -> item.first }
                                         ) { index, item ->
                                             if (isReorderEnabled) {
-                                                ReorderableItem(reorderableState, key = "${item.first}_$index") { isDragging ->
+                                                ReorderableItem(
+                                                    state = reorderableState,
+                                                    key = item.first
+                                                ) {
+                                                    val isDragging = it
                                                     QueueItem(
                                                         song = item.second,
                                                         isPlaying = index == currentIndex,
                                                         onPlay = { mainViewModel.skipToQueueItem(index) },
-                                                        modifier = Modifier.shadow(if (isDragging) 4.dp else 0.dp),
-                                                        dragHandleModifier = Modifier.detectReorder(reorderableState),
+                                                        modifier = Modifier.graphicsLayer {
+                                                            shadowElevation = if (isDragging) 8f else 0f
+                                                            alpha = if (isDragging) 0.9f else 1f
+                                                        },
+                                                        dragHandleModifier = Modifier.draggableHandle(),
                                                         showDragHandle = true
                                                     )
                                                 }

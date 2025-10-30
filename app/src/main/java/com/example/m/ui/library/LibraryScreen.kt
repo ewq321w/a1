@@ -33,7 +33,8 @@ fun LibraryScreen(
     onEditArtistSongs: (Long) -> Unit,
     onGoToHiddenArtists: () -> Unit,
     onGoToArtistGroup: (Long) -> Unit,
-    onGoToHistory: () -> Unit
+    onGoToHistory: () -> Unit,
+    onBackupRestore: () -> Unit = {}
 ) {
     val activity = LocalContext.current as ComponentActivity
     val mainViewModel: MainViewModel = hiltViewModel(activity)
@@ -179,7 +180,12 @@ fun LibraryScreen(
                             onGroupSelected = { libraryViewModel.onEvent(LibraryEvent.SetActiveLibraryGroup(it)) },
                             onManageGroups = { libraryViewModel.onEvent(LibraryEvent.ManageGroupsClicked) }
                         )
-                        IconButton(onClick = onGoToHistory) { Icon(Icons.Default.History, contentDescription = "History") }
+                        IconButton(onClick = onBackupRestore) {
+                            Icon(Icons.Default.Backup, contentDescription = "Backup & Restore")
+                        }
+                        IconButton(onClick = onGoToHistory) {
+                            Icon(Icons.Default.History, contentDescription = "History")
+                        }
                         if (uiState.selectedView == "Songs") {
                             val songsUiState by songsViewModel.uiState.collectAsState()
                             SongSortMenu(

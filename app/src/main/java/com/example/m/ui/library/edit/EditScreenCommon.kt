@@ -24,19 +24,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.example.m.data.database.Song
-import org.burnoutcrew.reorderable.ReorderableLazyListState
-import org.burnoutcrew.reorderable.detectReorder
 import androidx.compose.ui.text.font.FontWeight
 
 @Composable
 fun EditSongItem(
     song: Song,
     onRemoveClick: () -> Unit,
-    state: ReorderableLazyListState,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    dragHandleModifier: Modifier = Modifier
 ) {
     ListItem(
-        modifier = modifier.heightIn(min = 68.dp), // Use heightIn instead of defaultMinSize
+        modifier = modifier.heightIn(min = 68.dp),
         headlineContent = {
             Text(
                 song.title,
@@ -72,7 +70,7 @@ fun EditSongItem(
                 Icon(
                     Icons.Default.DragHandle,
                     contentDescription = "Drag Handle Icon",
-                    modifier = Modifier.detectReorder(state)
+                    modifier = dragHandleModifier
                 )
             }
         },

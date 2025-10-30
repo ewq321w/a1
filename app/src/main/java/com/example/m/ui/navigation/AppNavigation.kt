@@ -29,6 +29,7 @@ import com.example.m.ui.search.details.AlbumDetailScreen
 import com.example.m.ui.search.details.ArtistAlbumsScreen
 import com.example.m.ui.search.details.ArtistSongsScreen
 import com.example.m.ui.search.details.SearchedArtistDetailScreen
+import com.example.m.ui.settings.BackupRestoreScreen
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
@@ -49,6 +50,7 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
     object ArtistSongsDetail : Screen("artist_songs/{searchType}/{channelUrl}", "Artist Songs", Icons.Default.MusicNote)
     object ArtistAlbumsDetail : Screen("artist_albums/{searchType}/{channelUrl}", "Artist Albums", Icons.Default.Album)
     object History : Screen("history", "History", Icons.Default.History)
+    object BackupRestore : Screen("backup_restore", "Backup & Restore", Icons.Default.Backup)
 }
 
 val bottomNavItems = listOf(
@@ -97,6 +99,9 @@ fun AppNavHost(
                 },
                 onGoToHistory = {
                     navController.navigate(Screen.History.route)
+                },
+                onBackupRestore = {
+                    navController.navigate(Screen.BackupRestore.route)
                 }
             )
         }
@@ -169,6 +174,10 @@ fun AppNavHost(
                     navController.navigate("artist_detail/$artistId")
                 }
             )
+        }
+
+        composable(Screen.BackupRestore.route) {
+            BackupRestoreScreen(onBack = { navController.popBackStack() })
         }
 
         composable(
