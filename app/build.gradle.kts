@@ -35,6 +35,12 @@ android {
                 "proguard-rules.pro"
             )
         }
+        create("benchmark") {
+            initWith(buildTypes.getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+            isDebuggable = false
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -52,8 +58,14 @@ android {
             useLegacyPackaging = false
         }
     }
+}
 
-
+// Configure baseline profile
+baselineProfile {
+    // Where to save the baseline profile files
+    saveInSrc = true
+    // Automatically copy to src/main
+    automaticGenerationDuringBuild = false
 }
 
 dependencies {

@@ -20,7 +20,6 @@ class BaselineProfileGenerator {
     fun generate() {
         rule.collect(
             packageName = "com.example.m",
-            maxIterations = 10,
             includeInStartupProfile = true
         ) {
             // Start the app

@@ -25,7 +25,11 @@ android {
     }
 
     targetProjectPath = ":app"
+
+    // Enable experimental baseline profile generation
+    experimentalProperties["android.experimental.self-instrumenting"] = true
 }
+
 
 dependencies {
     implementation(libs.androidx.junit)
