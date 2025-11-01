@@ -122,7 +122,7 @@ class MainViewModel @Inject constructor(
     private val _isShuffling = MutableStateFlow(false)
     val isShuffling: StateFlow<Boolean> = _isShuffling
 
-    private val allLocalSongs: StateFlow<List<Song>> = songDao.getAllSongs()
+    val allLocalSongs: StateFlow<List<Song>> = songDao.getAllSongs()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Use the normal queue - no complex shuffle display logic needed
@@ -426,6 +426,15 @@ class MainViewModel @Inject constructor(
 
     fun addToQueue(streamInfoItem: StreamInfoItem) {
         musicServiceConnection.addToQueue(streamInfoItem)
+    }
+
+    // Song-specific queue methods
+    fun addSongToQueueNext(song: Song) {
+        musicServiceConnection.playNext(song)
+    }
+
+    fun addSongToQueue(song: Song) {
+        musicServiceConnection.addToQueue(song)
     }
 
     private fun addCurrentSongToLibrary() {

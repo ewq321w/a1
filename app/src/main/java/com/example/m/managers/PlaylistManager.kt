@@ -63,10 +63,24 @@ class PlaylistManager @Inject constructor(
     }
 
     suspend fun cacheAndGetSong(item: StreamInfoItem): Song {
-        val normalizedUrl = item.url?.replace("music.youtube.com", "www.youtube.com")
-            ?: item.url ?: ""
+        val rawUrl = item.url
+
+        // Validate that we have a URL
+        if (rawUrl.isNullOrBlank()) {
+            timber.log.Timber.e("StreamInfoItem has no URL: ${item.name}")
+            throw IllegalArgumentException("StreamInfoItem must have a valid URL")
+        }
+
+        val normalizedUrl = rawUrl.replace("music.youtube.com", "www.youtube.com")
+
         return songDao.getSongByUrl(normalizedUrl) ?: run {
-            val videoId = item.url?.substringAfter("v=")?.substringBefore('&')
+            // Robust video ID extraction from various YouTube URL formats
+            val videoId = extractVideoIdFromUrl(rawUrl)
+
+            if (videoId == null) {
+                timber.log.Timber.e("Failed to extract video ID from URL: $rawUrl")
+            }
+
             val newSong = Song(
                 videoId = videoId,
                 youtubeUrl = normalizedUrl,
@@ -77,9 +91,34 @@ class PlaylistManager @Inject constructor(
                 localFilePath = null,
                 isInLibrary = false
             )
+
+            timber.log.Timber.d("Creating new song from StreamInfoItem: ${newSong.title}, URL: $normalizedUrl, VideoID: $videoId")
+
             val finalSong = songDao.upsertSong(newSong)
             libraryRepository.linkSongToArtist(finalSong)
             finalSong
+        }
+    }
+
+    private fun extractVideoIdFromUrl(url: String): String? {
+        return try {
+            // Extract video ID from various YouTube URL formats
+            when {
+                url.contains("youtube.com/watch?v=") || url.contains("music.youtube.com/watch?v=") -> {
+                    val regex = Regex("v=([a-zA-Z0-9_-]{11})")
+                    regex.find(url)?.groupValues?.get(1)
+                }
+                url.contains("youtu.be/") -> {
+                    val regex = Regex("youtu.be/([a-zA-Z0-9_-]{11})")
+                    regex.find(url)?.groupValues?.get(1)
+                }
+                // If the URL itself is just the video ID (11 characters)
+                url.matches(Regex("[a-zA-Z0-9_-]{11}")) -> url
+                else -> null
+            }
+        } catch (e: Exception) {
+            timber.log.Timber.e(e, "Failed to extract video ID from URL: $url")
+            null
         }
     }
 }

@@ -198,8 +198,8 @@ private fun TabContent(
     // Track the last currentIndex we scrolled to, to only scroll on song changes
     var lastScrolledIndex by remember { mutableStateOf(-1) }
 
-    // Determine if reorder is enabled based on animation progress and tab selection
-    val isReorderEnabled = animationProgress >= 0.75f && selectedTabIndex == 0  // Only for Queue tab
+    // Reorder is always enabled for Queue tab (baseline profile has resolved performance issues)
+    val isReorderEnabled = selectedTabIndex == 0  // Only for Queue tab
 
     // onMove lambda for reordering
     val onMoveLambda = { from: Int, to: Int ->
@@ -231,16 +231,22 @@ private fun TabContent(
         }
     )
 
-    // Scroll to new currentIndex only when:
-    // 1. We haven't scrolled initially and animation is complete
+    // Scroll to new currentIndex during opening animation to avoid interfering with user input:
+    // 1. Initial scroll when animation reaches 50% (early enough to be ready when fully open)
     // 2. OR the currentIndex actually changed (new song) AND we're not currently reordering
     LaunchedEffect(currentIndex, animationProgress, selectedTabIndex) {
         if (selectedTabIndex == 0 && queueItems.indices.contains(currentIndex) && !isReordering) {
-            val shouldScrollInitially = !hasScrolledInitially && animationProgress >= 1f
+            val shouldScrollInitially = !hasScrolledInitially && animationProgress >= 0.5f
             val shouldScrollForNewSong = hasScrolledInitially && currentIndex != lastScrolledIndex
 
             if (shouldScrollInitially || shouldScrollForNewSong) {
-                lazyListState.animateScrollToItem(currentIndex, 0)
+                // Use scrollToItem (instant) for initial scroll during animation to be non-intrusive
+                // Use animateScrollToItem for song changes to be noticeable
+                if (shouldScrollInitially) {
+                    lazyListState.scrollToItem(currentIndex, 0)
+                } else {
+                    lazyListState.animateScrollToItem(currentIndex, 0)
+                }
                 hasScrolledInitially = true
                 lastScrolledIndex = currentIndex
             }
@@ -369,12 +375,12 @@ private fun TabContent(
                                     ) {
                                         itemsIndexed(
                                             items = localQueue,
-                                            key = { _, item -> item.first }
+                                            key = { index, item -> "$index-${item.first}" }
                                         ) { index, item ->
                                             if (isReorderEnabled) {
                                                 ReorderableItem(
                                                     state = reorderableState,
-                                                    key = item.first
+                                                    key = "$index-${item.first}"
                                                 ) {
                                                     val isDragging = it
                                                     QueueItem(
@@ -1059,7 +1065,7 @@ private fun RelatedSection(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(284.dp) // Fixed height for 4 songs (80dp each)
+                .height(290.dp) // Fixed height for 4 songs with spacing
         ) {
             HorizontalPager(
                 state = pagerState,

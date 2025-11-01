@@ -45,7 +45,8 @@ data class HomeUiState(
     val nowPlayingMediaId: String? = null,
     val isPlaying: Boolean = false,
     val isLoading: Boolean = true,
-    val isRefreshing: Boolean = false
+    val isRefreshing: Boolean = false,
+    val refreshTrigger: Long = 0L // Timestamp to trigger pager reset
 )
 
 sealed interface HomeEvent {
@@ -78,29 +79,7 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun loadHomeData() {
-        // Load recommendations based on listening history
-        viewModelScope.launch {
-            listeningHistoryDao.getTopRecentSongs(limit = 10).collect { topRecentPlays ->
-                if (topRecentPlays.isNotEmpty()) {
-                    generateRecommendations(topRecentPlays)
-                } else {
-                    _uiState.update { it.copy(recentMix = emptyList(), discoveryMix = emptyList(), recentMixSongs = emptyList()) }
-                }
-            }
-        }
-
-        // Load recently played songs (unique, last 10)
-        viewModelScope.launch {
-            listeningHistoryDao.getListeningHistory().collect { historyEntries ->
-                val uniqueRecentSongs = historyEntries
-                    .distinctBy { it.song.songId }
-                    .take(10)
-                    .map { it.song }
-                _uiState.update { it.copy(recentlyPlayed = uniqueRecentSongs) }
-            }
-        }
-
-        // Load "On Repeat" - sophisticated mix based on frequency, recency, and randomness
+        // Load "On Repeat" first - this will be used as seed for Discovery Mix
         viewModelScope.launch {
             val weekAgo = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000)
             val songPlays = songDao.getSongPlaysInTimeRange(weekAgo)
@@ -158,8 +137,34 @@ class HomeViewModel @Inject constructor(
                 }
 
                 _uiState.update { it.copy(topSongsThisWeek = topSongs) }
+
+                // After On Repeat is loaded, generate Discovery Mix using those songs
+                // Use .first() instead of .collect to get data once, not continuously
+                val topRecentPlays = listeningHistoryDao.getTopRecentSongs(limit = 10).first()
+                if (topRecentPlays.isNotEmpty()) {
+                    generateRecommendations(topRecentPlays)
+                }
             } else {
                 _uiState.update { it.copy(topSongsThisWeek = emptyList()) }
+
+                // Still try to load recommendations even without On Repeat
+                val topRecentPlays = listeningHistoryDao.getTopRecentSongs(limit = 10).first()
+                if (topRecentPlays.isNotEmpty()) {
+                    generateRecommendations(topRecentPlays)
+                } else {
+                    _uiState.update { it.copy(recentMix = emptyList(), discoveryMix = emptyList(), recentMixSongs = emptyList()) }
+                }
+            }
+        }
+
+        // Load recently played songs (unique, last 10)
+        viewModelScope.launch {
+            listeningHistoryDao.getListeningHistory().collect { historyEntries ->
+                val uniqueRecentSongs = historyEntries
+                    .distinctBy { it.song.songId }
+                    .take(10)
+                    .map { it.song }
+                _uiState.update { it.copy(recentlyPlayed = uniqueRecentSongs) }
             }
         }
 
@@ -241,22 +246,122 @@ class HomeViewModel @Inject constructor(
 
         _uiState.update { it.copy(recentMixSongs = orderedRecentSongs, recentMix = orderedRecentSongs.map { song -> song.toStreamInfoItem() }) }
 
-        val seedSong = orderedRecentSongs.firstOrNull()
-        if (seedSong != null) {
-            val discoveryQuery = "${seedSong.artist} songs"
-            Timber.tag(TAG).d("Discovery Mix seed artist: ${seedSong.artist}")
+        // Get "On Repeat" songs to use as seeds for Discovery Mix
+        val onRepeatSongs = _uiState.value.topSongsThisWeek
+        val seedSongs = if (onRepeatSongs.isNotEmpty()) {
+            // Use top 5-8 songs from On Repeat for diverse recommendations
+            onRepeatSongs.take(8)
+        } else {
+            // Fallback to recent songs if On Repeat not loaded yet
+            orderedRecentSongs.take(8)
+        }
 
-            val searchResults = youtubeRepository.search(discoveryQuery, "music_songs")
-            val downloadedVideoIds = orderedRecentSongs.map { it.videoId }.toSet()
+        if (seedSongs.isNotEmpty()) {
+            Timber.tag(TAG).d("Discovery Mix using ${seedSongs.size} seed songs from On Repeat")
 
-            val discoveryItems = searchResults?.items
-                ?.filterIsInstance<StreamInfoItem>()
-                ?.filter { it.url != null && !downloadedVideoIds.contains(it.url.substringAfter("v=")) }
-                ?: emptyList()
-            _uiState.update { it.copy(discoveryMix = discoveryItems) }
+            val allDiscoveryItems = mutableListOf<StreamInfoItem>()
+            val downloadedVideoIds = (orderedRecentSongs + onRepeatSongs).map { it.videoId }.toSet()
+            val processedArtists = mutableSetOf<String>()
+
+            // Strategy 1: Get YouTube Mix playlists from seed songs (official music discovery)
+            Timber.tag(TAG).d("Phase 1: Getting YouTube Mix playlists from seed songs")
+            val mixSeedsLimit = minOf(4, seedSongs.size) // Use 4 seeds for YouTube Mix
+            for (song in seedSongs.take(mixSeedsLimit)) {
+                try {
+                    if (song.videoId != null && song.videoId.length == 11) {
+                        val youtubeMix = youtubeRepository.getYoutubeMixPlaylist(song.videoId)
+                        if (youtubeMix != null) {
+                            val mixSongs = youtubeMix.playlistInfo.relatedItems.filterIsInstance<StreamInfoItem>()
+                            Timber.tag(TAG).d("Found ${mixSongs.size} songs in YouTube Mix for: ${song.title}")
+                            // Take top 12 songs from each mix
+                            val filtered = mixSongs
+                                .take(12)
+                                .filter { it.url != null && !downloadedVideoIds.contains(it.url?.substringAfter("v=")) }
+                            allDiscoveryItems.addAll(filtered)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Timber.tag(TAG).e(e, "Failed to get YouTube Mix for: ${song.title}")
+                }
+            }
+
+            // Strategy 2: Search for songs from user's artists (using music_songs filter)
+            Timber.tag(TAG).d("Phase 2: Searching songs from user's top artists")
+            val userArtists = seedSongs.map { it.artist }.distinct().take(3)
+            for (artist in userArtists) {
+                try {
+                    processedArtists.add(artist.lowercase())
+                    val discoveryQuery = "$artist songs"
+                    Timber.tag(TAG).d("Searching for: $artist")
+
+                    val searchResults = youtubeRepository.search(discoveryQuery, "music_songs")
+                    val items = searchResults?.items
+                        ?.filterIsInstance<StreamInfoItem>()
+                        ?.take(8) // Limit per artist
+                        ?.filter { it.url != null && !downloadedVideoIds.contains(it.url?.substringAfter("v=")) }
+                        ?: emptyList()
+
+                    allDiscoveryItems.addAll(items)
+                } catch (e: Exception) {
+                    Timber.tag(TAG).e(e, "Failed to get songs for: $artist")
+                }
+            }
+
+            // Strategy 3: Discover SIMILAR artists from YouTube Mix results
+            Timber.tag(TAG).d("Phase 3: Discovering similar artists from YouTube Mix")
+            val similarArtistsFound = mutableSetOf<String>()
+
+            // Extract unique artists from the YouTube Mix results we found
+            val relatedArtists = allDiscoveryItems
+                .mapNotNull { it.uploaderName }
+                .filter { it.isNotBlank() }
+                .map { it.lowercase() }
+                .distinct()
+                .filter { !processedArtists.contains(it) } // Don't repeat user's artists
+                .take(5) // Take top 5 similar artists
+
+            Timber.tag(TAG).d("Found ${relatedArtists.size} similar artists to explore")
+
+            // Search for popular songs from these similar artists (using music_songs filter)
+            for (artist in relatedArtists) {
+                try {
+                    val searchResults = youtubeRepository.search("$artist popular songs", "music_songs")
+                    val items = searchResults?.items
+                        ?.filterIsInstance<StreamInfoItem>()
+                        ?.filter { stream ->
+                            // Make sure it's actually from this artist
+                            stream.uploaderName?.lowercase()?.contains(artist) == true &&
+                            stream.url != null &&
+                            !downloadedVideoIds.contains(stream.url?.substringAfter("v="))
+                        }
+                        ?.take(5) // Take 5 songs from each similar artist
+                        ?: emptyList()
+
+                    if (items.isNotEmpty()) {
+                        Timber.tag(TAG).d("Added ${items.size} songs from similar artist: $artist")
+                        allDiscoveryItems.addAll(items)
+                        similarArtistsFound.add(artist)
+                    }
+                } catch (e: Exception) {
+                    Timber.tag(TAG).e(e, "Failed to get songs from similar artist: $artist")
+                }
+            }
+
+            // Remove duplicates, shuffle for variety, and limit
+            val uniqueItems = allDiscoveryItems
+                .distinctBy { it.url }
+                .shuffled()
+                .take(60) // 60 songs for good variety
+
+            _uiState.update { it.copy(discoveryMix = uniqueItems) }
+            Timber.tag(TAG).d(
+                "Discovery Mix generated: ${uniqueItems.size} unique songs " +
+                "(${userArtists.size} user artists + ${similarArtistsFound.size} similar artists + YouTube Mix)"
+            )
         } else {
             _uiState.update { it.copy(discoveryMix = emptyList()) }
         }
+
         Timber.tag(TAG)
             .d("Recommendations generated. RecentMix: ${uiState.value.recentMix.size}, DiscoveryMix: ${uiState.value.discoveryMix.size}")
     }
@@ -335,7 +440,7 @@ class HomeViewModel @Inject constructor(
             // refreshGenreDiscovery()
             // etc.
 
-            _uiState.update { it.copy(isRefreshing = false) }
+            _uiState.update { it.copy(isRefreshing = false, refreshTrigger = System.currentTimeMillis()) }
         }
     }
 

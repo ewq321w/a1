@@ -34,6 +34,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Use debug signing for testing (replace with proper signing for production)
+            signingConfig = signingConfigs.getByName("debug")
         }
         create("benchmark") {
             initWith(buildTypes.getByName("release"))
@@ -66,6 +68,8 @@ baselineProfile {
     saveInSrc = true
     // Automatically copy to src/main
     automaticGenerationDuringBuild = false
+    // Use the profiles from the baselineprofile module
+    baselineProfileOutputDir = "src/main"
 }
 
 dependencies {

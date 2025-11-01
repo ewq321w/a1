@@ -795,18 +795,32 @@ class MusicServiceConnection @Inject constructor(
 
     suspend fun createMediaItemForItem(item: Any): MediaItem? {
         return withContext(Dispatchers.IO) {
+            Timber.tag(TAG).d("createMediaItemForItem called with item type: ${item::class.simpleName}")
+
             val song = when (item) {
-                is Song -> item
-                is StreamInfoItem -> playlistManager.cacheAndGetSong(item)
-                else -> null
+                is Song -> {
+                    Timber.tag(TAG).d("Item is Song: ${item.title}")
+                    item
+                }
+                is StreamInfoItem -> {
+                    Timber.tag(TAG).d("Item is StreamInfoItem: ${item.name}, converting to Song")
+                    playlistManager.cacheAndGetSong(item)
+                }
+                else -> {
+                    Timber.tag(TAG).w("Unknown item type: ${item::class.simpleName}")
+                    null
+                }
             } ?: return@withContext null
 
             if (song.localFilePath != null) {
                 val uri = song.localFilePath!!.toUri()
                 if (isUriValid(uri)) {
+                    Timber.tag(TAG).d("Creating local media item for: ${song.title}")
                     return@withContext createLocalMediaItem(song)
                 }
             }
+
+            Timber.tag(TAG).d("Creating streaming media item for: ${song.title}")
             return@withContext createStreamingMediaItem(song)
         }
     }
@@ -840,10 +854,20 @@ class MusicServiceConnection @Inject constructor(
 
     private suspend fun createStreamingMediaItem(song: Song): MediaItem? {
         val normalizedUrl = song.youtubeUrl.replace("music.youtube.com", "www.youtube.com")
+
+        Timber.tag(TAG).d("Creating streaming media item for: ${song.title} - URL: $normalizedUrl")
+
         val streamInfo = youtubeRepository.getStreamInfo(normalizedUrl)
-        val audioStream = streamInfo?.audioStreams?.maxByOrNull { it.bitrate }
+
+        if (streamInfo == null) {
+            Timber.tag(TAG).e("Failed to get stream info for: ${song.title} - URL: $normalizedUrl")
+            return null
+        }
+
+        val audioStream = streamInfo.audioStreams?.maxByOrNull { it.bitrate }
 
         return if (audioStream?.url != null) {
+            Timber.tag(TAG).d("Successfully created streaming media item for: ${song.title}")
             val mediaMetadata = createMediaMetadata(song)
             MediaItem.Builder()
                 .setUri(audioStream.url.toString())
@@ -851,6 +875,7 @@ class MusicServiceConnection @Inject constructor(
                 .setMediaMetadata(mediaMetadata)
                 .build()
         } else {
+            Timber.tag(TAG).e("No audio stream found for: ${song.title} - URL: $normalizedUrl")
             null
         }
     }

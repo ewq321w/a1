@@ -18,7 +18,10 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -99,7 +102,8 @@ fun HomeScreen(
                                     viewModel.onEvent(HomeEvent.PlayTopSong(index))
                                 },
                                 nowPlayingMediaId = uiState.nowPlayingMediaId,
-                                isPlaying = uiState.isPlaying
+                                isPlaying = uiState.isPlaying,
+                                isRefreshing = uiState.isRefreshing
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                         }
@@ -115,7 +119,9 @@ fun HomeScreen(
                                     viewModel.onEvent(HomeEvent.PlayDiscoveryMix(index))
                                 },
                                 nowPlayingMediaId = uiState.nowPlayingMediaId,
-                                isPlaying = uiState.isPlaying
+                                isPlaying = uiState.isPlaying,
+                                mainViewModel = mainViewModel,
+                                isRefreshing = uiState.isRefreshing
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                         }
@@ -131,7 +137,9 @@ fun HomeScreen(
                                     viewModel.onEvent(HomeEvent.PlayRecentlyAdded(index))
                                 },
                                 nowPlayingMediaId = uiState.nowPlayingMediaId,
-                                isPlaying = uiState.isPlaying
+                                isPlaying = uiState.isPlaying,
+                                mainViewModel = mainViewModel,
+                                isRefreshing = uiState.isRefreshing
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                         }
@@ -186,12 +194,20 @@ fun TopSongsThisWeekPager(
     songs: List<Song>,
     onSongClick: (Int) -> Unit,
     nowPlayingMediaId: String?,
-    isPlaying: Boolean
+    isPlaying: Boolean,
+    isRefreshing: Boolean
 ) {
     val pagerState = rememberPagerState(
         pageCount = { ceil(songs.size / 9f).toInt() },
         initialPage = 0
     )
+
+    // Reset to first page immediately when refresh starts
+    LaunchedEffect(isRefreshing) {
+        if (isRefreshing && pagerState.currentPage != 0) {
+            pagerState.scrollToPage(0)
+        }
+    }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -472,97 +488,254 @@ fun RecommendationSection(
     items: List<StreamInfoItem>,
     onItemClick: (Int) -> Unit,
     nowPlayingMediaId: String?,
-    isPlaying: Boolean
+    isPlaying: Boolean,
+    mainViewModel: MainViewModel,
+    isRefreshing: Boolean
 ) {
-    if (items.isNotEmpty()) {
-        Column {
-            Text(
-                text = title,
-                color = MaterialTheme.colorScheme.onBackground,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-            )
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                itemsIndexed(items) { index, item ->
-                    val rememberedOnClick = remember { { onItemClick(index) } }
-                    val normalizedUrl = item.url?.replace("music.youtube.com", "www.youtube.com")
-                    val isCurrentlyPlayingItem = normalizedUrl == nowPlayingMediaId
-                    RecommendationItem(
-                        item = item,
-                        onClick = rememberedOnClick,
-                        isCurrentlyPlaying = isCurrentlyPlayingItem,
-                        isPlaying = isPlaying
-                    )
+    if (items.isEmpty()) return
+
+    val pagerState = rememberPagerState(
+        pageCount = { ceil(items.size / 4f).toInt() },
+        initialPage = 0
+    )
+
+    // Reset to first page immediately when refresh starts
+    LaunchedEffect(isRefreshing) {
+        if (isRefreshing && pagerState.currentPage != 0) {
+            pagerState.scrollToPage(0)
+        }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = title,
+            color = MaterialTheme.colorScheme.onBackground,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+
+        // Fixed height container to prevent dots indicator from moving
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(290.dp) // Fixed height for 4 songs with spacing
+        ) {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(end = 24.dp),
+                pageSpacing = 0.dp
+            ) { pageIndex ->
+                val startIndex = pageIndex * 4
+                val endIndex = min(startIndex + 4, items.size)
+
+                // Page content with consistent spacing
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(0.dp)
+                ) {
+                    for (index in startIndex until endIndex) {
+                        val item = items[index]
+                        val normalizedUrl = item.url?.replace("music.youtube.com", "www.youtube.com")
+                        val isCurrentlyPlaying = normalizedUrl == nowPlayingMediaId
+
+                        DiscoveryMixItem(
+                            item = item,
+                            isPlaying = isCurrentlyPlaying && isPlaying,
+                            onPlay = { onItemClick(index) },
+                            mainViewModel = mainViewModel,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    // Add empty space to maintain consistent height for incomplete pages
+                    if (endIndex - startIndex < 4) {
+                        repeat(4 - (endIndex - startIndex)) {
+                            Spacer(modifier = Modifier.height(72.5.dp))
+                        }
+                    }
                 }
             }
+        }
+
+        // Add page indicator if there are multiple pages
+        if (pagerState.pageCount > 1) {
+            DotsIndicator(
+                totalDots = pagerState.pageCount,
+                selectedIndex = pagerState.currentPage,
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(top = 4.dp)
+            )
         }
     }
 }
 
 @Composable
-fun RecommendationItem(
+fun DiscoveryMixItem(
     item: StreamInfoItem,
-    onClick: () -> Unit,
-    isCurrentlyPlaying: Boolean,
-    isPlaying: Boolean
+    isPlaying: Boolean,
+    onPlay: () -> Unit,
+    mainViewModel: MainViewModel,
+    modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = Modifier
-            .width(120.dp)
-            .clickable(onClick = onClick)
+    var showMenu by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(if (isPlaying) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f) else Color.Transparent)
+            .clickable(onClick = onPlay)
+            .heightIn(min = 71.dp)
+            .padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         val highQualityThumbnailUrl = item.getHighQualityThumbnailUrl()
 
-        Box {
-            AsyncImage(
-                model = highQualityThumbnailUrl,
-                contentDescription = item.name,
-                modifier = Modifier
-                    .size(120.dp)
-                    .clip(RoundedCornerShape(3.dp)),
-                contentScale = ContentScale.Crop,
-                error = painterResource(id = R.drawable.placeholder_gray),
-                placeholder = painterResource(id = R.drawable.placeholder_gray)
+        AsyncImage(
+            model = highQualityThumbnailUrl,
+            contentDescription = null,
+            modifier = Modifier
+                .size(55.dp)
+                .aspectRatio(1f, matchHeightConstraintsFirst = false)
+                .clip(RoundedCornerShape(4.dp)),
+            contentScale = ContentScale.Crop,
+            error = painterResource(id = R.drawable.placeholder_gray),
+            placeholder = painterResource(id = R.drawable.placeholder_gray)
+        )
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = item.name ?: "Unknown",
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
             )
 
-            if (isCurrentlyPlaying) {
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .background(
-                            Color.Black.copy(alpha = 0.5f),
-                            shape = RoundedCornerShape(3.dp)
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = if (isPlaying) "Pause" else "Play",
-                        tint = Color.White,
-                        modifier = Modifier.size(48.dp)
-                    )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Get library/download status from local songs
+                val allLocalSongs by mainViewModel.allLocalSongs.collectAsState()
+                val normalizedUrl = item.url?.replace("music.youtube.com", "www.youtube.com")
+                val correspondingSong = allLocalSongs.find { it.youtubeUrl == normalizedUrl }
+
+                // Show download/library status icon
+                if (correspondingSong != null && (correspondingSong.downloadStatus != com.example.m.data.database.DownloadStatus.NOT_DOWNLOADED || correspondingSong.isInLibrary)) {
+                    Box(
+                        modifier = Modifier.width(18.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        val iconSize = 14.dp
+                        when {
+                            correspondingSong.downloadStatus == com.example.m.data.database.DownloadStatus.DOWNLOADING -> {
+                                CircularProgressIndicator(
+                                    progress = { correspondingSong.downloadProgress / 100f },
+                                    modifier = Modifier.size(iconSize),
+                                    strokeWidth = 1.5.dp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            correspondingSong.downloadStatus == com.example.m.data.database.DownloadStatus.QUEUED -> {
+                                Icon(
+                                    imageVector = Icons.Default.HourglassTop,
+                                    contentDescription = "Queued",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(iconSize)
+                                )
+                            }
+                            correspondingSong.downloadStatus == com.example.m.data.database.DownloadStatus.FAILED -> {
+                                Icon(
+                                    imageVector = Icons.Default.ErrorOutline,
+                                    contentDescription = "Failed",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(iconSize)
+                                )
+                            }
+                            correspondingSong.downloadStatus == com.example.m.data.database.DownloadStatus.DOWNLOADED -> {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Downloaded",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(iconSize)
+                                )
+                            }
+                            correspondingSong.isInLibrary -> {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "In Library",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(iconSize)
+                                )
+                            }
+                        }
+                    }
                 }
+
+                Text(
+                    text = item.uploaderName ?: "Unknown Artist",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
         }
-        Text(
-            text = item.name ?: "Unknown",
-            color = MaterialTheme.colorScheme.onBackground,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 4.dp),
-            fontSize = 13.sp
-        )
-        Text(
-            text = item.uploaderName ?: "Unknown",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            fontSize = 13.sp
-        )
+
+        Box {
+            IconButton(
+                onClick = { showMenu = true },
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "More options",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false }
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Play next") },
+                    onClick = {
+                        mainViewModel.addToQueueNext(item)
+                        showMenu = false
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Add to queue") },
+                    onClick = {
+                        mainViewModel.addToQueue(item)
+                        showMenu = false
+                    }
+                )
+                // Get library/download status from local songs
+                val allLocalSongs by mainViewModel.allLocalSongs.collectAsState()
+                val normalizedUrl = item.url?.replace("music.youtube.com", "www.youtube.com")
+                val correspondingSong = allLocalSongs.find { it.youtubeUrl == normalizedUrl }
+                val isInLibrary = correspondingSong?.isInLibrary == true
+
+                DropdownMenuItem(
+                    text = { Text(if (isInLibrary) "In Library" else "Add to Library") },
+                    enabled = !isInLibrary,
+                    onClick = {
+                        mainViewModel.libraryActionsManager.addToLibrary(item)
+                        showMenu = false
+                    }
+                )
+            }
+        }
     }
 }
 
@@ -572,9 +745,28 @@ fun SongListSection(
     songs: List<Song>,
     onSongClick: (Int) -> Unit,
     nowPlayingMediaId: String?,
-    isPlaying: Boolean
+    isPlaying: Boolean,
+    mainViewModel: MainViewModel,
+    isRefreshing: Boolean
 ) {
-    Column {
+    if (songs.isEmpty()) return
+
+    val pagerState = rememberPagerState(
+        pageCount = { ceil(songs.size / 4f).toInt() },
+        initialPage = 0
+    )
+
+    // Reset to first page immediately when refresh starts
+    LaunchedEffect(isRefreshing) {
+        if (isRefreshing && pagerState.currentPage != 0) {
+            pagerState.scrollToPage(0)
+        }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
         Text(
             text = title,
             color = MaterialTheme.colorScheme.onBackground,
@@ -582,83 +774,212 @@ fun SongListSection(
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
         )
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+
+        // Fixed height container to prevent dots indicator from moving
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(290.dp) // Fixed height for 4 songs with spacing
         ) {
-            itemsIndexed(songs) { index, song ->
-                val rememberedOnClick = remember { { onSongClick(index) } }
-                val isCurrentlyPlayingItem = song.youtubeUrl.replace("music.youtube.com", "www.youtube.com") == nowPlayingMediaId
-                SongCard(
-                    song = song,
-                    onClick = rememberedOnClick,
-                    isCurrentlyPlaying = isCurrentlyPlayingItem,
-                    isPlaying = isPlaying
-                )
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(end = 24.dp),
+                pageSpacing = 0.dp
+            ) { pageIndex ->
+                val startIndex = pageIndex * 4
+                val endIndex = min(startIndex + 4, songs.size)
+
+                // Page content with consistent spacing
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(0.dp)
+                ) {
+                    for (index in startIndex until endIndex) {
+                        val song = songs[index]
+                        val isCurrentlyPlaying = song.youtubeUrl.replace("music.youtube.com", "www.youtube.com") == nowPlayingMediaId
+
+                        RecentlyAddedItem(
+                            song = song,
+                            isPlaying = isCurrentlyPlaying && isPlaying,
+                            onPlay = { onSongClick(index) },
+                            mainViewModel = mainViewModel,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    // Add empty space to maintain consistent height for incomplete pages
+                    if (endIndex - startIndex < 4) {
+                        repeat(4 - (endIndex - startIndex)) {
+                            Spacer(modifier = Modifier.height(72.5.dp))
+                        }
+                    }
+                }
             }
+        }
+
+        // Add page indicator if there are multiple pages
+        if (pagerState.pageCount > 1) {
+            DotsIndicator(
+                totalDots = pagerState.pageCount,
+                selectedIndex = pagerState.currentPage,
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(top = 4.dp)
+            )
         }
     }
 }
 
 @Composable
-fun SongCard(
+fun RecentlyAddedItem(
     song: Song,
-    onClick: () -> Unit,
-    isCurrentlyPlaying: Boolean,
-    isPlaying: Boolean
+    isPlaying: Boolean,
+    onPlay: () -> Unit,
+    mainViewModel: MainViewModel,
+    modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = Modifier
-            .width(140.dp)
-            .clickable(onClick = onClick)
+    var showMenu by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(if (isPlaying) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f) else Color.Transparent)
+            .clickable(onClick = onPlay)
+            .heightIn(min = 71.dp)
+            .padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Box {
-            AsyncImage(
-                model = song.thumbnailUrl,
-                contentDescription = song.title,
-                modifier = Modifier
-                    .size(140.dp)
-                    .clip(RoundedCornerShape(8.dp)),
-                contentScale = ContentScale.Crop,
-                error = painterResource(id = R.drawable.placeholder_gray),
-                placeholder = painterResource(id = R.drawable.placeholder_gray)
+        AsyncImage(
+            model = song.thumbnailUrl,
+            contentDescription = null,
+            modifier = Modifier
+                .size(55.dp)
+                .aspectRatio(1f, matchHeightConstraintsFirst = false)
+                .clip(RoundedCornerShape(4.dp)),
+            contentScale = ContentScale.Crop,
+            error = painterResource(id = R.drawable.placeholder_gray),
+            placeholder = painterResource(id = R.drawable.placeholder_gray)
+        )
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = song.title,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
             )
 
-            if (isCurrentlyPlaying) {
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .background(
-                            Color.Black.copy(alpha = 0.5f),
-                            shape = RoundedCornerShape(8.dp)
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = if (isPlaying) "Pause" else "Play",
-                        tint = Color.White,
-                        modifier = Modifier.size(48.dp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Show download/library status icon
+                if (song.downloadStatus != com.example.m.data.database.DownloadStatus.NOT_DOWNLOADED || song.isInLibrary) {
+                    Box(
+                        modifier = Modifier.width(18.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        val iconSize = 14.dp
+                        when {
+                            song.downloadStatus == com.example.m.data.database.DownloadStatus.DOWNLOADING -> {
+                                CircularProgressIndicator(
+                                    progress = { song.downloadProgress / 100f },
+                                    modifier = Modifier.size(iconSize),
+                                    strokeWidth = 1.5.dp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            song.downloadStatus == com.example.m.data.database.DownloadStatus.QUEUED -> {
+                                Icon(
+                                    imageVector = Icons.Default.HourglassTop,
+                                    contentDescription = "Queued",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(iconSize)
+                                )
+                            }
+                            song.downloadStatus == com.example.m.data.database.DownloadStatus.FAILED -> {
+                                Icon(
+                                    imageVector = Icons.Default.ErrorOutline,
+                                    contentDescription = "Failed",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(iconSize)
+                                )
+                            }
+                            song.downloadStatus == com.example.m.data.database.DownloadStatus.DOWNLOADED -> {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Downloaded",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(iconSize)
+                                )
+                            }
+                            song.isInLibrary -> {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "In Library",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(iconSize)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Text(
+                    text = song.artist,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+
+        Box {
+            IconButton(
+                onClick = { showMenu = true },
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "More options",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false }
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Play next") },
+                    onClick = {
+                        mainViewModel.addSongToQueueNext(song)
+                        showMenu = false
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Add to queue") },
+                    onClick = {
+                        mainViewModel.addSongToQueue(song)
+                        showMenu = false
+                    }
+                )
+                if (!song.isInLibrary) {
+                    DropdownMenuItem(
+                        text = { Text("Add to Library") },
+                        onClick = {
+                            mainViewModel.libraryActionsManager.addToLibrary(song)
+                            showMenu = false
+                        }
                     )
                 }
             }
         }
-        Text(
-            text = song.title,
-            color = MaterialTheme.colorScheme.onBackground,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 8.dp),
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium
-        )
-        Text(
-            text = song.artist,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            fontSize = 13.sp
-        )
     }
 }
 
