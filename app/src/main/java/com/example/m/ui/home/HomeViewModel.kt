@@ -36,6 +36,7 @@ data class ListeningStats(
 data class HomeUiState(
     val recentMix: List<StreamInfoItem> = emptyList(),
     val discoveryMix: List<StreamInfoItem> = emptyList(),
+    val relatedBasedMix: List<StreamInfoItem> = emptyList(),
     val recentlyPlayed: List<Song> = emptyList(),
     val topSongsThisWeek: List<Song> = emptyList(),
     val recentlyAdded: List<Song> = emptyList(),
@@ -46,12 +47,13 @@ data class HomeUiState(
     val isPlaying: Boolean = false,
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
-    val refreshTrigger: Long = 0L // Timestamp to trigger pager reset
+    val refreshTrigger: Long = 0L
 )
 
 sealed interface HomeEvent {
     data class PlayRecentMix(val index: Int) : HomeEvent
     data class PlayDiscoveryMix(val index: Int) : HomeEvent
+    data class PlayRelatedBasedMix(val index: Int) : HomeEvent
     data class PlayRecentlyPlayed(val index: Int) : HomeEvent
     data class PlayTopSong(val index: Int) : HomeEvent
     data class PlayRecentlyAdded(val index: Int) : HomeEvent
@@ -79,7 +81,7 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun loadHomeData() {
-        // Load "On Repeat" first - this will be used as seed for Discovery Mix
+        // Load "On Repeat" first
         viewModelScope.launch {
             val weekAgo = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000)
             val songPlays = songDao.getSongPlaysInTimeRange(weekAgo)
@@ -88,76 +90,54 @@ class HomeViewModel @Inject constructor(
                 val currentTime = System.currentTimeMillis()
                 val weekDuration = 7 * 24 * 60 * 60 * 1000.0
 
-                // Group plays by songId and calculate weighted scores
                 val songScores = songPlays.groupBy { it.songId }
                     .mapValues { (_, plays) ->
                         val playCount = plays.size
-
-                        // Calculate recency score (more recent plays get higher weight)
                         val recencyScore = plays.sumOf { play ->
                             val age = currentTime - play.timestamp
-                            val recencyFactor = 1.0 - (age / weekDuration) // 1.0 for now, 0.0 for week ago
-                            // Exponential curve: recent plays matter more
-                            Math.pow(recencyFactor, 0.5) // Square root for moderate curve
+                            val recencyFactor = 1.0 - (age / weekDuration)
+                            Math.pow(recencyFactor, 0.5)
                         }
-
-                        // Play frequency score (normalized)
                         val frequencyScore = playCount.toDouble()
-
-                        // Most recent play bonus (songs played in last 24h get extra boost)
                         val mostRecentPlay = plays.maxOf { it.timestamp }
                         val hoursAgo = (currentTime - mostRecentPlay) / (60 * 60 * 1000.0)
                         val recencyBonus = if (hoursAgo < 24) {
-                            (24 - hoursAgo) / 24.0 // 0 to 1 boost
+                            (24 - hoursAgo) / 24.0
                         } else 0.0
-
-                        // Weighted combination:
-                        // - 40% frequency (consistent listening)
-                        // - 35% recency (time-decayed recent plays)
-                        // - 25% recency bonus (very recent plays)
                         val baseScore = (frequencyScore * 0.40) +
                                        (recencyScore * 0.35) +
                                        (recencyBonus * playCount * 0.25)
-
-                        // Add slight randomness (±10%) for variety on each load
                         val randomFactor = 0.9 + (Math.random() * 0.2)
                         baseScore * randomFactor
                     }
 
-                // Get top 36 songs by score
                 val topSongIds = songScores.entries
                     .sortedByDescending { it.value }
                     .take(36)
                     .map { it.key }
 
                 val songs = libraryRepository.getSongsByIds(topSongIds)
-                // Maintain the order from scoring
                 val topSongs = topSongIds.mapNotNull { songId ->
                     songs.find { it.songId == songId }
                 }
 
                 _uiState.update { it.copy(topSongsThisWeek = topSongs) }
 
-                // After On Repeat is loaded, generate Discovery Mix using those songs
-                // Use .first() instead of .collect to get data once, not continuously
                 val topRecentPlays = listeningHistoryDao.getTopRecentSongs(limit = 10).first()
                 if (topRecentPlays.isNotEmpty()) {
                     generateRecommendations(topRecentPlays)
                 }
             } else {
                 _uiState.update { it.copy(topSongsThisWeek = emptyList()) }
-
-                // Still try to load recommendations even without On Repeat
                 val topRecentPlays = listeningHistoryDao.getTopRecentSongs(limit = 10).first()
                 if (topRecentPlays.isNotEmpty()) {
                     generateRecommendations(topRecentPlays)
                 } else {
-                    _uiState.update { it.copy(recentMix = emptyList(), discoveryMix = emptyList(), recentMixSongs = emptyList()) }
+                    _uiState.update { it.copy(recentMix = emptyList(), discoveryMix = emptyList(), relatedBasedMix = emptyList(), recentMixSongs = emptyList()) }
                 }
             }
         }
 
-        // Load recently played songs (unique, last 10)
         viewModelScope.launch {
             listeningHistoryDao.getListeningHistory().collect { historyEntries ->
                 val uniqueRecentSongs = historyEntries
@@ -168,14 +148,12 @@ class HomeViewModel @Inject constructor(
             }
         }
 
-        // Load recently added songs to library
         viewModelScope.launch {
             songDao.getRecentlyAddedSongs(limit = 10).collect { songs ->
                 _uiState.update { it.copy(recentlyAdded = songs) }
             }
         }
 
-        // Load quick access playlists (first 6 by custom order)
         viewModelScope.launch {
             playlistDao.getAllPlaylistsWithDetails().collect { playlistDetails ->
                 val quickPlaylists = playlistDetails
@@ -192,7 +170,6 @@ class HomeViewModel @Inject constructor(
             }
         }
 
-        // Load listening stats
         viewModelScope.launch {
             combine(
                 songDao.getSongsInLibrary(),
@@ -229,11 +206,12 @@ class HomeViewModel @Inject constructor(
         when(event) {
             is HomeEvent.PlayRecentMix -> playRecentMix(event.index)
             is HomeEvent.PlayDiscoveryMix -> playDiscoveryMix(event.index)
+            is HomeEvent.PlayRelatedBasedMix -> playRelatedBasedMix(event.index)
             is HomeEvent.PlayRecentlyPlayed -> playRecentlyPlayed(event.index)
             is HomeEvent.PlayTopSong -> playTopSong(event.index)
             is HomeEvent.PlayRecentlyAdded -> playRecentlyAdded(event.index)
             is HomeEvent.ShuffleAll -> shuffleAll()
-            is HomeEvent.NavigateToPlaylist -> {} // Handle navigation in UI
+            is HomeEvent.NavigateToPlaylist -> {}
             is HomeEvent.Refresh -> refreshHomeData()
         }
     }
@@ -246,38 +224,47 @@ class HomeViewModel @Inject constructor(
 
         _uiState.update { it.copy(recentMixSongs = orderedRecentSongs, recentMix = orderedRecentSongs.map { song -> song.toStreamInfoItem() }) }
 
-        // Get "On Repeat" songs to use as seeds for Discovery Mix
         val onRepeatSongs = _uiState.value.topSongsThisWeek
         val seedSongs = if (onRepeatSongs.isNotEmpty()) {
-            // Use top 5-8 songs from On Repeat for diverse recommendations
-            onRepeatSongs.take(8)
+            onRepeatSongs
         } else {
-            // Fallback to recent songs if On Repeat not loaded yet
-            orderedRecentSongs.take(8)
+            orderedRecentSongs
         }
 
         if (seedSongs.isNotEmpty()) {
-            Timber.tag(TAG).d("Discovery Mix using ${seedSongs.size} seed songs from On Repeat")
+            Timber.tag(TAG).d("Discovery Mix: Finding unique artists from On Repeat")
 
-            val allDiscoveryItems = mutableListOf<StreamInfoItem>()
-            val downloadedVideoIds = (orderedRecentSongs + onRepeatSongs).map { it.videoId }.toSet()
-            val processedArtists = mutableSetOf<String>()
+            // Get unique artists from On Repeat and their top song
+            val artistTopSongs = mutableMapOf<String, Song>()
+            for (song in seedSongs) {
+                val artist = song.artist.lowercase()
+                if (!artistTopSongs.containsKey(artist)) {
+                    artistTopSongs[artist] = song
+                }
+            }
 
-            // Strategy 1: Get YouTube Mix playlists from seed songs (official music discovery)
-            Timber.tag(TAG).d("Phase 1: Getting YouTube Mix playlists from seed songs")
-            val mixSeedsLimit = minOf(4, seedSongs.size) // Use 4 seeds for YouTube Mix
-            for (song in seedSongs.take(mixSeedsLimit)) {
+            Timber.tag(TAG).d("Found ${artistTopSongs.size} unique artists in On Repeat")
+
+            val youtubeMixItems = mutableListOf<StreamInfoItem>()
+            val relatedBasedItems = mutableListOf<StreamInfoItem>()
+            val downloadedVideoIds = seedSongs.map { it.videoId }.toSet()
+
+            // Strategy 1: Get YouTube Mix for top song from each artist
+            Timber.tag(TAG).d("Getting YouTube Mix from each artist's top song")
+            for ((artist, song) in artistTopSongs) {
                 try {
                     if (song.videoId != null && song.videoId.length == 11) {
                         val youtubeMix = youtubeRepository.getYoutubeMixPlaylist(song.videoId)
                         if (youtubeMix != null) {
                             val mixSongs = youtubeMix.playlistInfo.relatedItems.filterIsInstance<StreamInfoItem>()
-                            Timber.tag(TAG).d("Found ${mixSongs.size} songs in YouTube Mix for: ${song.title}")
-                            // Take top 12 songs from each mix
+                            Timber.tag(TAG).d("Found ${mixSongs.size} songs in YouTube Mix for artist: $artist (${song.title})")
+
+                            // Take top 15 songs from each artist's mix
                             val filtered = mixSongs
-                                .take(12)
+                                .take(15)
                                 .filter { it.url != null && !downloadedVideoIds.contains(it.url?.substringAfter("v=")) }
-                            allDiscoveryItems.addAll(filtered)
+
+                            youtubeMixItems.addAll(filtered)
                         }
                     }
                 } catch (e: Exception) {
@@ -285,85 +272,100 @@ class HomeViewModel @Inject constructor(
                 }
             }
 
-            // Strategy 2: Search for songs from user's artists (using music_songs filter)
-            Timber.tag(TAG).d("Phase 2: Searching songs from user's top artists")
-            val userArtists = seedSongs.map { it.artist }.distinct().take(3)
-            for (artist in userArtists) {
+            // Strategy 2: Get Related Songs for top song from each artist
+            Timber.tag(TAG).d("Getting Related Songs from each artist's top song")
+            for ((artist, song) in artistTopSongs) {
                 try {
-                    processedArtists.add(artist.lowercase())
-                    val discoveryQuery = "$artist songs"
-                    Timber.tag(TAG).d("Searching for: $artist")
+                    if (song.videoId != null && song.videoId.length == 11) {
+                        val videoUrl = "https://www.youtube.com/watch?v=${song.videoId}"
+                        val relatedSongs = youtubeRepository.getRelatedStreams(videoUrl)
+                        if (relatedSongs != null && relatedSongs.isNotEmpty()) {
+                            Timber.tag(TAG).d("Found ${relatedSongs.size} related songs for artist: $artist (${song.title})")
 
-                    val searchResults = youtubeRepository.search(discoveryQuery, "music_songs")
-                    val items = searchResults?.items
-                        ?.filterIsInstance<StreamInfoItem>()
-                        ?.take(8) // Limit per artist
-                        ?.filter { it.url != null && !downloadedVideoIds.contains(it.url?.substringAfter("v=")) }
-                        ?: emptyList()
+                            // Take top 15 songs from each artist's related songs
+                            val filtered = relatedSongs
+                                .take(15)
+                                .filter { it.url != null && !downloadedVideoIds.contains(it.url?.substringAfter("v=")) }
 
-                    allDiscoveryItems.addAll(items)
-                } catch (e: Exception) {
-                    Timber.tag(TAG).e(e, "Failed to get songs for: $artist")
-                }
-            }
-
-            // Strategy 3: Discover SIMILAR artists from YouTube Mix results
-            Timber.tag(TAG).d("Phase 3: Discovering similar artists from YouTube Mix")
-            val similarArtistsFound = mutableSetOf<String>()
-
-            // Extract unique artists from the YouTube Mix results we found
-            val relatedArtists = allDiscoveryItems
-                .mapNotNull { it.uploaderName }
-                .filter { it.isNotBlank() }
-                .map { it.lowercase() }
-                .distinct()
-                .filter { !processedArtists.contains(it) } // Don't repeat user's artists
-                .take(5) // Take top 5 similar artists
-
-            Timber.tag(TAG).d("Found ${relatedArtists.size} similar artists to explore")
-
-            // Search for popular songs from these similar artists (using music_songs filter)
-            for (artist in relatedArtists) {
-                try {
-                    val searchResults = youtubeRepository.search("$artist popular songs", "music_songs")
-                    val items = searchResults?.items
-                        ?.filterIsInstance<StreamInfoItem>()
-                        ?.filter { stream ->
-                            // Make sure it's actually from this artist
-                            stream.uploaderName?.lowercase()?.contains(artist) == true &&
-                            stream.url != null &&
-                            !downloadedVideoIds.contains(stream.url?.substringAfter("v="))
+                            relatedBasedItems.addAll(filtered)
                         }
-                        ?.take(5) // Take 5 songs from each similar artist
-                        ?: emptyList()
-
-                    if (items.isNotEmpty()) {
-                        Timber.tag(TAG).d("Added ${items.size} songs from similar artist: $artist")
-                        allDiscoveryItems.addAll(items)
-                        similarArtistsFound.add(artist)
                     }
                 } catch (e: Exception) {
-                    Timber.tag(TAG).e(e, "Failed to get songs from similar artist: $artist")
+                    Timber.tag(TAG).e(e, "Failed to get related songs for: ${song.title}")
                 }
             }
 
-            // Remove duplicates, shuffle for variety, and limit
-            val uniqueItems = allDiscoveryItems
+            // Filter, remove duplicates, shuffle, and limit for YouTube Mix
+            val discoveryMix = youtubeMixItems
                 .distinctBy { it.url }
+                .filter { item ->
+                    isLikelyMusicSong(item) && !songNameContainsArtistName(item)
+                }
                 .shuffled()
-                .take(60) // 60 songs for good variety
+                .take(60)
 
-            _uiState.update { it.copy(discoveryMix = uniqueItems) }
+            // Filter, remove duplicates, shuffle, and limit for Related-Based Mix
+            val relatedBasedMix = relatedBasedItems
+                .distinctBy { it.url }
+                .filter { item ->
+                    isLikelyMusicSong(item) && !songNameContainsArtistName(item)
+                }
+                .shuffled()
+                .take(60)
+
+            _uiState.update {
+                it.copy(
+                    discoveryMix = discoveryMix,
+                    relatedBasedMix = relatedBasedMix
+                )
+            }
+
             Timber.tag(TAG).d(
-                "Discovery Mix generated: ${uniqueItems.size} unique songs " +
-                "(${userArtists.size} user artists + ${similarArtistsFound.size} similar artists + YouTube Mix)"
+                "Discovery Mixes generated: YouTube Mix: ${discoveryMix.size} songs, Related-Based Mix: ${relatedBasedMix.size} songs from ${artistTopSongs.size} artists"
             )
         } else {
-            _uiState.update { it.copy(discoveryMix = emptyList()) }
+            _uiState.update { it.copy(discoveryMix = emptyList(), relatedBasedMix = emptyList()) }
         }
 
         Timber.tag(TAG)
-            .d("Recommendations generated. RecentMix: ${uiState.value.recentMix.size}, DiscoveryMix: ${uiState.value.discoveryMix.size}")
+            .d("Recommendations generated. RecentMix: ${uiState.value.recentMix.size}, DiscoveryMix: ${uiState.value.discoveryMix.size}, RelatedBasedMix: ${uiState.value.relatedBasedMix.size}")
+    }
+
+    private fun songNameContainsArtistName(item: StreamInfoItem): Boolean {
+        val title = item.name?.lowercase() ?: return false
+        val artistName = item.uploaderName?.lowercase() ?: return false
+
+        if (artistName.isBlank()) return false
+
+        // Check if title contains the artist name
+        return title.contains(artistName)
+    }
+
+    private fun isLikelyMusicSong(item: StreamInfoItem): Boolean {
+        val title = item.name?.lowercase() ?: return false
+
+        val excludeKeywords = listOf(
+            "lyrics", "lyric video", "official lyric",
+            "live", "live performance", "live at",
+            "concert", "tour",
+            "cover", "acoustic version", "piano version",
+            "remix", "extended", "instrumental",
+            "karaoke", "sing along",
+            "reaction", "react",
+            "interview", "behind the scenes",
+            "making of", "official video", "music video",
+            "visualizer", "official visualizer",
+            "trailer", "teaser",
+            "full album", "full ep"
+        )
+
+        val containsExcludeKeyword = excludeKeywords.any { keyword ->
+            title.contains(keyword)
+        }
+
+        val isSuspiciouslyLong = item.duration > 600
+
+        return !containsExcludeKeyword && !isSuspiciouslyLong
     }
 
     private fun playRecentMix(selectedIndex: Int) {
@@ -377,6 +379,15 @@ class HomeViewModel @Inject constructor(
 
     private fun playDiscoveryMix(selectedIndex: Int) {
         val items = _uiState.value.discoveryMix
+        if (items.isNotEmpty()) {
+            viewModelScope.launch {
+                musicServiceConnection.playSongList(items, selectedIndex)
+            }
+        }
+    }
+
+    private fun playRelatedBasedMix(selectedIndex: Int) {
+        val items = _uiState.value.relatedBasedMix
         if (items.isNotEmpty()) {
             viewModelScope.launch {
                 musicServiceConnection.playSongList(items, selectedIndex)
@@ -424,22 +435,11 @@ class HomeViewModel @Inject constructor(
     private fun refreshHomeData() {
         viewModelScope.launch {
             _uiState.update { it.copy(isRefreshing = true) }
-
-            // Refresh On Repeat with new randomization
             refreshInRotation()
-
-            // Refresh Discovery Mix
             val topRecentPlays = listeningHistoryDao.getTopRecentSongs(limit = 10).first()
             if (topRecentPlays.isNotEmpty()) {
                 generateRecommendations(topRecentPlays)
             }
-
-            // Future: Add more algorithmic refreshes here as you add them
-            // refreshTrendingSongs()
-            // refreshMoodMix()
-            // refreshGenreDiscovery()
-            // etc.
-
             _uiState.update { it.copy(isRefreshing = false, refreshTrigger = System.currentTimeMillis()) }
         }
     }
@@ -452,38 +452,27 @@ class HomeViewModel @Inject constructor(
             val currentTime = System.currentTimeMillis()
             val weekDuration = 7 * 24 * 60 * 60 * 1000.0
 
-            // Group plays by songId and calculate weighted scores
             val songScores = songPlays.groupBy { it.songId }
                 .mapValues { (_, plays) ->
                     val playCount = plays.size
-
-                    // Calculate recency score (more recent plays get higher weight)
                     val recencyScore = plays.sumOf { play ->
                         val age = currentTime - play.timestamp
                         val recencyFactor = 1.0 - (age / weekDuration)
                         Math.pow(recencyFactor, 0.5)
                     }
-
-                    // Play frequency score (normalized)
                     val frequencyScore = playCount.toDouble()
-
-                    // Most recent play bonus
                     val mostRecentPlay = plays.maxOf { it.timestamp }
                     val hoursAgo = (currentTime - mostRecentPlay) / (60 * 60 * 1000.0)
                     val recencyBonus = if (hoursAgo < 24) {
                         (24 - hoursAgo) / 24.0
                     } else 0.0
-
                     val baseScore = (frequencyScore * 0.40) +
                                    (recencyScore * 0.35) +
                                    (recencyBonus * playCount * 0.25)
-
-                    // Add randomness for variety
                     val randomFactor = 0.9 + (Math.random() * 0.2)
                     baseScore * randomFactor
                 }
 
-            // Get top 36 songs by score
             val topSongIds = songScores.entries
                 .sortedByDescending { it.value }
                 .take(36)
@@ -500,3 +489,4 @@ class HomeViewModel @Inject constructor(
         }
     }
 }
+

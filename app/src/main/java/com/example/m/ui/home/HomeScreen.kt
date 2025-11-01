@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -109,14 +110,17 @@ fun HomeScreen(
                         }
                     }
 
-                    // Discovery Mix
-                    if (uiState.discoveryMix.isNotEmpty()) {
+                    // Discovery Mix with Tabs
+                    if (uiState.discoveryMix.isNotEmpty() || uiState.relatedBasedMix.isNotEmpty()) {
                         item {
-                            RecommendationSection(
-                                title = "Discovery Mix",
-                                items = uiState.discoveryMix,
-                                onItemClick = { index ->
+                            DiscoveryMixTabbedSection(
+                                youtubeMix = uiState.discoveryMix,
+                                relatedBasedMix = uiState.relatedBasedMix,
+                                onYoutubeMixItemClick = { index ->
                                     viewModel.onEvent(HomeEvent.PlayDiscoveryMix(index))
+                                },
+                                onRelatedBasedMixItemClick = { index ->
+                                    viewModel.onEvent(HomeEvent.PlayRelatedBasedMix(index))
                                 },
                                 nowPlayingMediaId = uiState.nowPlayingMediaId,
                                 isPlaying = uiState.isPlaying,
@@ -518,6 +522,197 @@ fun RecommendationSection(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
         )
 
+        // Fixed height container to prevent dots indicator from moving
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(290.dp) // Fixed height for 4 songs with spacing
+        ) {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(end = 24.dp),
+                pageSpacing = 0.dp
+            ) { pageIndex ->
+                val startIndex = pageIndex * 4
+                val endIndex = min(startIndex + 4, items.size)
+
+                // Page content with consistent spacing
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(0.dp)
+                ) {
+                    for (index in startIndex until endIndex) {
+                        val item = items[index]
+                        val normalizedUrl = item.url?.replace("music.youtube.com", "www.youtube.com")
+                        val isCurrentlyPlaying = normalizedUrl == nowPlayingMediaId
+
+                        DiscoveryMixItem(
+                            item = item,
+                            isPlaying = isCurrentlyPlaying && isPlaying,
+                            onPlay = { onItemClick(index) },
+                            mainViewModel = mainViewModel,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    // Add empty space to maintain consistent height for incomplete pages
+                    if (endIndex - startIndex < 4) {
+                        repeat(4 - (endIndex - startIndex)) {
+                            Spacer(modifier = Modifier.height(72.5.dp))
+                        }
+                    }
+                }
+            }
+        }
+
+        // Add page indicator if there are multiple pages
+        if (pagerState.pageCount > 1) {
+            DotsIndicator(
+                totalDots = pagerState.pageCount,
+                selectedIndex = pagerState.currentPage,
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(top = 4.dp)
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DiscoveryMixTabbedSection(
+    youtubeMix: List<StreamInfoItem>,
+    relatedBasedMix: List<StreamInfoItem>,
+    onYoutubeMixItemClick: (Int) -> Unit,
+    onRelatedBasedMixItemClick: (Int) -> Unit,
+    nowPlayingMediaId: String?,
+    isPlaying: Boolean,
+    mainViewModel: MainViewModel,
+    isRefreshing: Boolean
+) {
+    var selectedTabIndex by remember { mutableStateOf(0) }
+
+    Column(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = "Discovery Mix",
+            color = MaterialTheme.colorScheme.onBackground,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+
+        // Tabs
+        TabRow(
+            selectedTabIndex = selectedTabIndex,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.primary,
+            indicator = { tabPositions ->
+                if (selectedTabIndex < tabPositions.size) {
+                    TabRowDefaults.SecondaryIndicator(
+                        Modifier.tabIndicatorOffset(tabPositions[selectedTabIndex]),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        ) {
+            Tab(
+                selected = selectedTabIndex == 0,
+                onClick = { selectedTabIndex = 0 },
+                text = {
+                    Text(
+                        "YouTube Mix",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
+            )
+            Tab(
+                selected = selectedTabIndex == 1,
+                onClick = { selectedTabIndex = 1 },
+                text = {
+                    Text(
+                        "Related-Based",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Content based on selected tab
+        when (selectedTabIndex) {
+            0 -> {
+                if (youtubeMix.isNotEmpty()) {
+                    RecommendationPager(
+                        items = youtubeMix,
+                        onItemClick = onYoutubeMixItemClick,
+                        nowPlayingMediaId = nowPlayingMediaId,
+                        isPlaying = isPlaying,
+                        mainViewModel = mainViewModel,
+                        isRefreshing = isRefreshing
+                    )
+                } else {
+                    Text(
+                        text = "No YouTube Mix available",
+                        modifier = Modifier.padding(16.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            1 -> {
+                if (relatedBasedMix.isNotEmpty()) {
+                    RecommendationPager(
+                        items = relatedBasedMix,
+                        onItemClick = onRelatedBasedMixItemClick,
+                        nowPlayingMediaId = nowPlayingMediaId,
+                        isPlaying = isPlaying,
+                        mainViewModel = mainViewModel,
+                        isRefreshing = isRefreshing
+                    )
+                } else {
+                    Text(
+                        text = "No Related-Based Mix available",
+                        modifier = Modifier.padding(16.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RecommendationPager(
+    items: List<StreamInfoItem>,
+    onItemClick: (Int) -> Unit,
+    nowPlayingMediaId: String?,
+    isPlaying: Boolean,
+    mainViewModel: MainViewModel,
+    isRefreshing: Boolean
+) {
+    if (items.isEmpty()) return
+
+    val pagerState = rememberPagerState(
+        pageCount = { ceil(items.size / 4f).toInt() },
+        initialPage = 0
+    )
+
+    // Reset to first page immediately when refresh starts
+    LaunchedEffect(isRefreshing) {
+        if (isRefreshing && pagerState.currentPage != 0) {
+            pagerState.scrollToPage(0)
+        }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
         // Fixed height container to prevent dots indicator from moving
         Box(
             modifier = Modifier
